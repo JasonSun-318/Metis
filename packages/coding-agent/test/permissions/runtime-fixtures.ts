@@ -76,6 +76,7 @@ interface RequestOverrides {
 	readonly signal?: AbortSignal;
 	readonly execute?: PermissionExecutionRequest<string>["execute"];
 	readonly autoCommandRules?: PermissionExecutionRequest<string>["autoCommandRules"];
+	readonly permissionRules?: PermissionExecutionRequest<string>["permissionRules"];
 }
 
 function executionRequest(
@@ -94,6 +95,7 @@ function executionRequest(
 		signal: overrides.signal ?? new AbortController().signal,
 		execute: overrides.execute ?? (async () => "executed"),
 		autoCommandRules: overrides.autoCommandRules ?? [],
+		...(overrides.permissionRules === undefined ? {} : { permissionRules: overrides.permissionRules }),
 	};
 }
 

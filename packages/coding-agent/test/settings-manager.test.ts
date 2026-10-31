@@ -668,11 +668,12 @@ describe("SettingsManager", () => {
 			await manager.flush();
 		});
 
-		it("fails closed when persisted Auto command rules are invalid", () => {
+		it("reports invalid persisted Auto command rules instead of pretending there are none", () => {
 			const manager = SettingsManager.inMemory({
 				autoCommandRules: [{ command: "ls && rm -rf /", allowNetwork: false }],
 			});
-			expect(manager.getAutoCommandRules()).toEqual([]);
+			expect(() => manager.getAutoCommandRules()).toThrow("invalid Auto command rule");
+			expect(() => manager.getPermissionRules()).toThrow("invalid Auto command rule");
 		});
 	});
 });

@@ -1,8 +1,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { PermissionPolicy } from "../src/core/permissions/policy.ts";
 import { settingsForPreset } from "../src/core/permissions/settings.ts";
+import { initializeShellAnalysis } from "../src/core/permissions/shell-parser.ts";
 import {
 	assertToolPermissionDescriptor,
 	createToolIdentity,
@@ -23,6 +24,10 @@ import {
 
 const bashDefinition = createBashToolDefinition(permissionProject);
 
+beforeAll(async () => {
+	await initializeShellAnalysis();
+});
+
 function describeBash(command: string) {
 	return describeToolAction(
 		bashDefinition,
@@ -38,6 +43,13 @@ function describeBash(command: string) {
 }
 
 describe("tool permission adapter", () => {
+	it("keeps empty literal arguments valid through the normalized AST claim", () => {
+		const action = describeBash(`printf '%s' ''`);
+		expect(action.shellAnalysis?.complete).toBe(true);
+		expect(action.shellAnalysis?.commands[0]?.argv).toEqual(["printf", "%s", ""]);
+		expect(new PermissionPolicy().evaluate({ action, settings: settingsForPreset("auto") }).kind).toBe("allow");
+	});
+
 	it("rejects an executable tool without a permission descriptor", () => {
 		expect(() => assertToolPermissionDescriptor(definitionWithoutPermission())).toThrow("permission descriptor");
 	});
@@ -120,12 +132,13 @@ describe("tool permission adapter", () => {
 		"git push origin main",
 		"npm publish",
 	])("keeps known network mutations high risk: %s", (command) => {
-		expect(
-			bashDefinition.permission.describe(
-				{ command },
-				{ actionId: `bash-${command}`, cwd: permissionProject, workspaceRoots: [permissionProject] },
-			).effects,
-		).toContain("external-side-effect");
+		const action = describeBash(command);
+		expect(action.effects).toContain("external-side-effect");
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "review",
+			riskLevel: "high",
+			minimumReviewer: "model",
+		});
 	});
 
 	it.each([
@@ -148,6 +161,7 @@ describe("tool permission adapter", () => {
 		const command = "env curl -dvalue https://example.com/item";
 		const action = describeBash(command);
 		expect(action.effects).toContain("external-side-effect");
+		expect(action.effects).toContain("unknown");
 		expect(
 			new PermissionPolicy().evaluate({
 				settings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
@@ -165,7 +179,7 @@ describe("tool permission adapter", () => {
 		expect(action.effects).toContain("unknown");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "user",
+			minimumReviewer: "model",
 		});
 	});
 
@@ -174,7 +188,7 @@ describe("tool permission adapter", () => {
 		expect(action.effects).toContain("unknown");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "user",
+			minimumReviewer: "model",
 		});
 	});
 
@@ -183,7 +197,7 @@ describe("tool permission adapter", () => {
 		const rm = describeBash(`rm -f "${file}"`);
 		expect(rm.effects).toContain("destructive");
 		expect(rm.effects).not.toContain("unknown");
-		expect(rm.writePaths).toEqual(expect.arrayContaining([permissionProject, file]));
+		expect(rm.writePaths).toEqual([file]);
 
 		const listed = describeBash("ls ~/Desktop");
 		expect(listed.effects).not.toContain("unknown");
@@ -192,7 +206,7 @@ describe("tool permission adapter", () => {
 		expect(globList.effects).not.toContain("unknown");
 		expect(globList.readPaths).toContain(join(homedir(), "Desktop"));
 		const rmGlob = describeBash(`rm -f ${join(homedir(), "Desktop")}/*.md`);
-		expect(rmGlob.effects).toContain("unknown");
+		expect(rmGlob.effects).toContain("destructive");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: rmGlob })).toMatchObject({
 			kind: "review",
 			minimumReviewer: "user",
@@ -218,23 +232,55 @@ describe("tool permission adapter", () => {
 		expect(glob.readPaths).toContain(join(homedir(), ".metis"));
 		expect(glob.writePaths).toEqual([]);
 		expect(() => describeBash("rm ~/.metis/mcp*.json")).not.toThrow();
-		expect(describeBash("rm ~/.metis/mcp*.json").effects).toContain("unknown");
+		const rmGlobMetis = describeBash("rm ~/.metis/mcp*.json");
+		expect(rmGlobMetis.effects).toContain("destructive");
+		expect(
+			new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: rmGlobMetis }),
+		).toMatchObject({ kind: "review", minimumReviewer: "user" });
 	});
 
-	it("reviews workspace rm and allows python scripts instead of hard-denying both", () => {
+	it("rejects oversized Ask and Auto commands outright instead of routing them to review", () => {
+		const policy = new PermissionPolicy();
+		const action = describeToolAction(
+			bashDefinition,
+			{ command: `echo ${"a".repeat(33 * 1024)}` },
+			{
+				actionId: "bash-oversize",
+				cwd: permissionProject,
+				workspaceRoots: [permissionProject],
+				provenance: "builtin",
+				toolIdentity: createToolIdentity(identityInput({ toolName: "bash" })),
+			},
+		);
+		for (const preset of ["ask", "auto"] as const) {
+			expect(policy.evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
+				kind: "deny",
+				reason: "命令超过32KiB，请拆分后重试",
+			});
+		}
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({ kind: "allow" });
+	});
+
+	it("reviews workspace rm and interpreter execution instead of hard-denying both", () => {
 		const policy = new PermissionPolicy();
 		const rm = describeBash("rm file.txt");
 		expect(rm.effects).toContain("destructive");
-		expect(rm.writePaths).toContain(join(permissionProject, "file.txt"));
+		expect(rm.effects).not.toContain("unknown");
+		expect(rm.writePaths).toEqual([join(permissionProject, "file.txt")]);
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: rm })).toMatchObject({
 			kind: "review",
 			minimumReviewer: "user",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: rm })).toMatchObject({ kind: "allow" });
 
+		// Interpreted scripts cannot be proven read-only, so they never ride the
+		// Auto fast path even when their effects look empty.
 		const python = describeBash("python ./script.py");
-		expect(python.effects).not.toContain("unknown");
-		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: python })).toMatchObject({ kind: "allow" });
+		expect(python.effects).toContain("unknown");
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: python })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: python })).toMatchObject({ kind: "allow" });
 
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: describeBash("rm -rf .") })).toMatchObject({
@@ -247,7 +293,7 @@ describe("tool permission adapter", () => {
 		expect(dynamic.effects).toContain("unknown");
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: dynamic })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "user",
+			minimumReviewer: "model",
 		});
 		expect(
 			new PermissionPolicy().evaluate({

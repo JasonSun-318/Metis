@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
+import { canonicalizeActionPath } from "../utils/paths.ts";
 import { assertConsumedExecutionGrant, claimConsumedExecutionGrant } from "./permissions/grant-store.ts";
 import { digestCanonical } from "./permissions/normalize.ts";
 import type { ExecutionGrant, NetworkEndpoint } from "./permissions/types.ts";
@@ -85,14 +85,6 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 						: value.shellPath,
 				}),
 	};
-}
-
-function writesInsideWorkspace(grant: ExecutionGrant): boolean {
-	return grant.writeRoots.some((path) => grant.workspaceRoots.some((root) => isPathInside(root, path)));
-}
-
-function extraWriteRoots(grant: ExecutionGrant): string[] {
-	return grant.writeRoots.filter((path) => !grant.workspaceRoots.some((root) => isPathInside(root, path)));
 }
 
 export function workspaceSandboxProfileKey(value: InteractiveBashContext): string {
@@ -184,11 +176,13 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 				cwd: grant.cwd,
 				workspaceRoots: grant.workspaceRoots,
 				readOnlyRoots: grant.readRoots,
-				writeRoots: extraWriteRoots(grant),
+				writeRoots: grant.writeRoots,
 				protectedRoots: [],
 				writeProtectedRoots: grant.protectedRoots,
 				networkEndpoints: grant.networkEndpoints,
-				workspaceReadOnly: baseContext.workspaceReadOnly === true || !writesInsideWorkspace(grant),
+				// Workspace membership grants reads; writes come only from the
+				// consumed grant, including an explicit whole-workspace write root.
+				workspaceReadOnly: true,
 			});
 			const sandbox = await this.getSandbox(context, generation);
 			if (this.closed || generation !== this.generation) throw new Error("Interactive Bash execution was reset");

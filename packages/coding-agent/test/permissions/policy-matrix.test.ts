@@ -71,6 +71,11 @@ describe("permission policy matrix", () => {
 				args: { command: "pwd" },
 				command: "pwd",
 				readPaths: [],
+				shellAnalysis: {
+					disposition: "safe",
+					complete: true,
+					commands: [{ argv: ["pwd"], complete: true, disposition: "safe", effects: [], networkEndpoints: [] }],
+				},
 			}),
 		);
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
@@ -82,7 +87,7 @@ describe("permission policy matrix", () => {
 
 	it.each([
 		["ask", "review", "user", "sandbox"],
-		["auto", "review", "user", "sandbox"],
+		["auto", "review", "model", "sandbox"],
 		["full", "allow", undefined, "host"],
 	] as const)("routes exact non-mutating network access in %s", (preset, kind, minimumReviewer, executionTarget) => {
 		const action = normalizePermissionAction(
@@ -114,11 +119,11 @@ describe("permission policy matrix", () => {
 	it.each([
 		["outside write", { writePaths: ["/outside/output.txt"] }],
 		["external side effect", { effects: ["external-side-effect"] as const }],
-	])("sends review-required %s directly to the user in Auto", (_name, scope) => {
+	])("sends review-required %s to the model in Auto", (_name, scope) => {
 		const action = normalizePermissionAction(actionInput(scope));
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "user",
+			minimumReviewer: "model",
 		});
 	});
 

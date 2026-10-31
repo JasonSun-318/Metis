@@ -10,13 +10,15 @@ import {
 	ProjectPermissionRuleStore,
 	UserPermissionReviewer,
 } from "../../src/core/permissions/index.ts";
+import { buildModelReviewInput } from "../../src/core/permissions/reviewer-input.ts";
+import { SessionPermissionRuleStore } from "../../src/core/permissions/session-rules.ts";
 import { actionInput } from "./fixtures.ts";
 import { reviewInput } from "./reviewer-fixtures.ts";
 
 type ApprovalResponse = Awaited<ReturnType<RequestPermissionApproval>>;
 
 function reviewerRequest(projectPath: string, overrides: Parameters<typeof reviewInput>[0] = {}) {
-	const action = normalizePermissionAction(
+	const defaultAction = normalizePermissionAction(
 		actionInput({
 			cwd: projectPath,
 			workspaceRoots: [projectPath],
@@ -27,6 +29,7 @@ function reviewerRequest(projectPath: string, overrides: Parameters<typeof revie
 			writePaths: [join(projectPath, "out.txt")],
 		}),
 	);
+	const action = overrides.action ?? defaultAction;
 	return reviewInput({
 		action,
 		decision: {
@@ -94,6 +97,55 @@ describe("UserPermissionReviewer", () => {
 		});
 		expect(store.list(projectPath)).toEqual([]);
 	});
+
+	it.each(["allow", "deny"] as const)(
+		"opens human fallback for oversized model analysis and respects the user's %s",
+		async (decision) => {
+			const command = 'for name in a b c; do ls -ld "$name"; done';
+			const action = normalizePermissionAction(
+				actionInput({
+					cwd: projectPath,
+					workspaceRoots: [projectPath],
+					toolName: "bash",
+					toolIdentity: "builtin:bash:v1",
+					args: { command },
+					command,
+					readPaths: [projectPath],
+					writePaths: [],
+					shellAnalysis: {
+						disposition: "review",
+						complete: true,
+						commands: Array.from({ length: 116 }, () => ({
+							argv: ["ls", "-ld"],
+							disposition: "review" as const,
+							complete: true,
+							effects: [],
+							networkEndpoints: [],
+						})),
+					},
+				}),
+			);
+			const request = reviewerRequest(projectPath, {
+				action,
+				redactedArguments: { command, token: "secret-value" },
+				priorModelOutcome: "unavailable",
+			});
+			expect(() => buildModelReviewInput(request)).toThrow("8 KiB");
+			const ui = interaction({ decision });
+			const reviewer = new UserPermissionReviewer({ requestApproval: ui.requestApproval, projectPath });
+
+			expect(await reviewer.review(request)).toMatchObject({
+				kind: decision,
+				reviewer: "user",
+				manualReason: "model-unavailable",
+			});
+			expect(ui.calls).toHaveLength(1);
+			expect(ui.calls[0]?.action.command).toBe(command);
+			expect(ui.calls[0]?.action.paths).toEqual(action.readPaths);
+			expect(ui.calls[0]?.args).toMatchObject({ automaticReview: "unavailable", readPaths: action.readPaths });
+			expect(JSON.stringify(ui.calls[0])).not.toContain("secret-value");
+		},
+	);
 
 	it("persists only the exact rule after an explicit remember choice", async () => {
 		const ui = interaction({ decision: "allow", remember: "project" });
@@ -207,6 +259,64 @@ describe("UserPermissionReviewer", () => {
 		expect(JSON.stringify(ui.calls[0])).not.toContain("rationale");
 	});
 
+	async function manualReasonFor(overrides: Parameters<typeof reviewerRequest>[1] = {}) {
+		const ui = interaction({ decision: "allow" });
+		const reviewer = new UserPermissionReviewer({ requestApproval: ui.requestApproval, projectPath });
+		const result = await reviewer.review(reviewerRequest(projectPath, overrides));
+		expect(result).toMatchObject({ kind: "allow", reviewer: "user" });
+		return result.kind === "allow" ? result.manualReason : undefined;
+	}
+
+	it("reports writes, sensitive reads, and incomplete analysis from the reviewed action", async () => {
+		expect(await manualReasonFor()).toBe("write");
+		expect(
+			await manualReasonFor({
+				action: normalizePermissionAction(
+					actionInput({
+						cwd: projectPath,
+						workspaceRoots: [projectPath],
+						readPaths: [join(projectPath, ".env")],
+						effects: ["sensitive-read"],
+					}),
+				),
+			}),
+		).toBe("sensitive");
+		expect(
+			await manualReasonFor({
+				action: normalizePermissionAction(
+					actionInput({
+						cwd: projectPath,
+						workspaceRoots: [projectPath],
+						toolName: "bash",
+						toolIdentity: "builtin:bash:v1",
+						args: { command: "python script.py" },
+						command: "python script.py",
+						readPaths: [],
+						writePaths: [],
+						effects: [],
+					}),
+				),
+				redactedArguments: { command: "python script.py" },
+			}),
+		).toBe("analysis-incomplete");
+	});
+
+	it("reports the prior model routing outcome and timeout fact", async () => {
+		expect(await manualReasonFor({ priorModelOutcome: "deny" })).toBe("model-denied");
+		expect(
+			await manualReasonFor({
+				priorModelOutcome: "unavailable",
+				priorModelReason: "Permission review was cancelled or timed out",
+			}),
+		).toBe("model-timeout");
+		expect(
+			await manualReasonFor({
+				priorModelOutcome: "unavailable",
+				priorModelReason: "The configured permission reviewer model is unavailable",
+			}),
+		).toBe("model-unavailable");
+	});
+
 	it.each([
 		["closed", () => Promise.reject(new Error("closed"))],
 		["disconnected", () => Promise.reject(new Error("disconnected"))],
@@ -303,4 +413,133 @@ describe("UserPermissionReviewer", () => {
 		expect(await reviewer.review(request)).toMatchObject({ kind: "unavailable", reviewer: "user" });
 		expect(store.list(projectPath)).toEqual([]);
 	});
+
+	it("remembers an exact session allow when explicitly chosen", async () => {
+		const ui = interaction({ decision: "allow", remember: "session" });
+		const projectStore = new ProjectPermissionRuleStore(agentDir);
+		const sessionStore = new SessionPermissionRuleStore("session-1");
+		const request = reviewerRequest(projectPath);
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: ui.requestApproval,
+			projectRules: projectStore,
+			sessionRules: sessionStore,
+			projectPath,
+		});
+
+		expect(await reviewer.review(request)).toMatchObject({ kind: "allow", reviewer: "user" });
+		expect(ui.calls[0]).toMatchObject({ rememberProjectEligible: true, rememberSessionEligible: true });
+		const exactInput = {
+			projectPath,
+			actionDigest: digestPermissionAction(request.action),
+			grantDigest: digestCanonical(request.decision.grant),
+			toolName: request.action.toolName,
+			toolIdentity: request.action.toolIdentity,
+			riskLevel: request.decision.riskLevel,
+			summary: sessionStore.list(projectPath)[0]?.summary ?? [],
+		};
+		expect(sessionStore.match(exactInput)).toMatchObject({ decision: "allow", sessionId: "session-1" });
+		expect(sessionStore.match({ ...exactInput, grantDigest: digestCanonical("different") })).toBeUndefined();
+		expect(projectStore.list(projectPath)).toEqual([]);
+	});
+
+	it("does not offer a session remember without a session store", async () => {
+		const ui = interaction({ decision: "allow", remember: "session" });
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: ui.requestApproval,
+			projectRules: new ProjectPermissionRuleStore(agentDir),
+			projectPath,
+		});
+
+		expect(await reviewer.review(reviewerRequest(projectPath))).toMatchObject({
+			kind: "unavailable",
+			reviewer: "user",
+		});
+		expect(ui.calls[0]).toMatchObject({ rememberProjectEligible: true, rememberSessionEligible: false });
+	});
+
+	it("refuses to remember a session allow for ineligible scope", async () => {
+		const base = reviewerRequest(projectPath);
+		const action = normalizePermissionAction(
+			actionInput({
+				cwd: projectPath,
+				workspaceRoots: [projectPath],
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "danger" },
+				command: "danger",
+				readPaths: [],
+				writePaths: [join(projectPath, "out.txt")],
+				effects: ["unknown"],
+			}),
+		);
+		const request = reviewerRequest(projectPath, {
+			action,
+			decision: {
+				...base.decision,
+				riskLevel: "high",
+				grant: { ...base.decision.grant, writeRoots: action.writePaths },
+			},
+		});
+		const sessionStore = new SessionPermissionRuleStore("session-1");
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: interaction({ decision: "allow", remember: "session" }).requestApproval,
+			sessionRules: sessionStore,
+			projectPath,
+		});
+
+		expect(await reviewer.review(request)).toMatchObject({ kind: "unavailable", reviewer: "user" });
+		expect(uiCalls(sessionStore, projectPath)).toEqual([]);
+	});
+
+	it("rejects a session remember on a deny decision", async () => {
+		const sessionStore = new SessionPermissionRuleStore("session-1");
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: interaction({ decision: "deny", remember: "session" }).requestApproval,
+			sessionRules: sessionStore,
+			projectPath,
+		});
+
+		expect(await reviewer.review(reviewerRequest(projectPath))).toMatchObject({
+			kind: "unavailable",
+			reviewer: "user",
+		});
+		expect(uiCalls(sessionStore, projectPath)).toEqual([]);
+	});
+
+	it("refuses an oversized command without opening the approval interaction", async () => {
+		const oversized = `echo ${"a".repeat(32 * 1024)}`;
+		const base = reviewerRequest(projectPath);
+		const action = normalizePermissionAction(
+			actionInput({
+				cwd: projectPath,
+				workspaceRoots: [projectPath],
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: oversized },
+				command: oversized,
+				readPaths: [],
+				writePaths: [],
+			}),
+		);
+		const requestApproval = vi.fn<RequestPermissionApproval>();
+		const reviewer = new UserPermissionReviewer({
+			requestApproval,
+			sessionRules: new SessionPermissionRuleStore("session-1"),
+			projectPath,
+		});
+
+		const outcome = await reviewer.review(
+			reviewerRequest(projectPath, {
+				action,
+				decision: { ...base.decision, grant: { ...base.decision.grant, writeRoots: action.writePaths } },
+			}),
+		);
+		expect(outcome).toMatchObject({ kind: "unavailable", reviewer: "user" });
+		expect(outcome.kind === "unavailable" && outcome.reason).toContain("split it into smaller commands and retry");
+		expect(requestApproval).not.toHaveBeenCalled();
+	});
+
+	function uiCalls(store: SessionPermissionRuleStore, project: string) {
+		return store.list(project);
+	}
 });

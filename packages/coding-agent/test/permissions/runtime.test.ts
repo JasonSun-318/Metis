@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+	digestCanonical,
+	digestPermissionAction,
 	ExecutionGrantStore,
 	normalizePermissionAction,
 	type PermissionAuditEvent,
@@ -7,9 +12,13 @@ import {
 	type PermissionReviewer,
 	type PermissionReviewResult,
 	PermissionReviewRouter,
+	ProjectPermissionRuleStore,
 	ToolAuthorizationRuntime,
 } from "../../src/core/permissions/index.ts";
-import { actionInput, outsideRead, rootRecursiveDelete, sensitiveRead } from "./fixtures.ts";
+import { SessionPermissionRuleStore } from "../../src/core/permissions/session-rules.ts";
+import { analyzeShellCommand } from "../../src/core/permissions/shell-analysis.ts";
+import { initializeShellAnalysis } from "../../src/core/permissions/shell-parser.ts";
+import { actionInput, outsideRead, projectDir, rootRecursiveDelete, sensitiveRead } from "./fixtures.ts";
 import { highRiskRequest, reviewRequest, safeRequest } from "./runtime-fixtures.ts";
 
 function allow(reviewer: "model" | "user" = "model"): PermissionReviewResult {
@@ -23,7 +32,70 @@ function reviewer(result: PermissionReviewResult): PermissionReviewer & { review
 	return { review: vi.fn(async () => result) };
 }
 
+beforeAll(async () => initializeShellAnalysis());
+
 describe("ToolAuthorizationRuntime", () => {
+	it.each(["model", "user"] as const)("reports the final %s source after exact authorization", async (source) => {
+		const onDecision = vi.fn();
+		const runtime = new ToolAuthorizationRuntime({
+			sessionId: "session-source",
+			onDecision,
+			reviewerFactory: () => reviewer(allow(source)),
+		});
+		const request = safeRequest({ action: outsideRead() });
+		await runtime.authorizeAndExecute(request);
+		expect(onDecision).toHaveBeenCalledExactlyOnceWith({
+			actionId: request.action.actionId,
+			toolName: request.action.toolName,
+			source,
+		});
+	});
+
+	it("reports rule/full sources and never reports denied or cancelled actions", async () => {
+		const onDecision = vi.fn();
+		const runtime = new ToolAuthorizationRuntime({ sessionId: "session-source", onDecision });
+		await runtime.authorizeAndExecute(safeRequest());
+		expect(onDecision).toHaveBeenLastCalledWith(expect.objectContaining({ source: "rule" }));
+		await runtime.authorizeAndExecute(
+			safeRequest({ settings: { sandboxPolicy: "danger-full-access", approvalPolicy: "never" } }),
+		);
+		expect(onDecision).toHaveBeenLastCalledWith(expect.objectContaining({ source: "full" }));
+		onDecision.mockClear();
+		await expect(runtime.authorizeAndExecute(safeRequest({ sandboxHealth: "unavailable" }))).rejects.toThrow();
+		const controller = new AbortController();
+		controller.abort();
+		await expect(runtime.authorizeAndExecute(safeRequest({ signal: controller.signal }))).rejects.toThrow();
+		expect(onDecision).not.toHaveBeenCalled();
+	});
+
+	it("does not read either rule configuration on the Full access path", async () => {
+		const runtime = new ToolAuthorizationRuntime({ sessionId: "full-rules" });
+		const request = safeRequest({ settings: { sandboxPolicy: "danger-full-access", approvalPolicy: "never" } });
+		Object.defineProperties(request, {
+			permissionRules: {
+				get: () => {
+					throw new Error("Invalid rules");
+				},
+			},
+			autoCommandRules: {
+				get: () => {
+					throw new Error("Invalid legacy rules");
+				},
+			},
+		});
+		await expect(runtime.authorizeAndExecute(request)).resolves.toBe("executed");
+	});
+
+	it("cannot execute after an observer invalidates authorization", async () => {
+		const execute = vi.fn(async () => "executed");
+		const runtime = new ToolAuthorizationRuntime({
+			sessionId: "session-source",
+			onDecision: () => runtime.invalidate("settings"),
+		});
+		await expect(runtime.authorizeAndExecute(safeRequest({ execute }))).rejects.toThrow();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
 	it("executes a deterministic allow without constructing a reviewer", async () => {
 		const reviewerFactory = vi.fn(() => reviewer(allow()));
 		const runtime = new ToolAuthorizationRuntime({ sessionId: "session-1", reviewerFactory });
@@ -74,7 +146,7 @@ describe("ToolAuthorizationRuntime", () => {
 		const user = reviewer(allow("user"));
 		const interactive = new ToolAuthorizationRuntime({
 			sessionId: "session-1",
-			reviewerFactory: () => new PermissionReviewRouter({ model, user }),
+			reviewerFactory: () => new PermissionReviewRouter({ model, user, isModelEnabled: () => true }),
 		});
 
 		await expect(interactive.authorizeAndExecute(safeRequest({ action: outsideRead() }))).resolves.toBe("executed");
@@ -83,7 +155,7 @@ describe("ToolAuthorizationRuntime", () => {
 
 		const headless = new ToolAuthorizationRuntime({
 			sessionId: "session-2",
-			reviewerFactory: () => new PermissionReviewRouter({ model, user }),
+			reviewerFactory: () => new PermissionReviewRouter({ model, user, isModelEnabled: () => true }),
 		});
 		await expect(
 			headless.authorizeAndExecute(safeRequest({ action: outsideRead(), interactive: false })),
@@ -248,7 +320,7 @@ describe("ToolAuthorizationRuntime", () => {
 			sessionId: "session-1",
 			projectPath: action.workspaceRoots[0],
 			projectRules: { match: () => ({ decision: "allow" }) },
-			reviewerFactory: () => new PermissionReviewRouter({ model, user }),
+			reviewerFactory: () => new PermissionReviewRouter({ model, user, isModelEnabled: () => true }),
 		});
 
 		await expect(runtime.authorizeAndExecute(safeRequest({ action }))).resolves.toBe("executed");
@@ -308,6 +380,12 @@ describe("ToolAuthorizationRuntime", () => {
 	});
 
 	function bashOutside(command: string) {
+		const analysis = analyzeShellCommand({
+			command,
+			cwd: projectDir,
+			workspaceRoots: [projectDir],
+			shellPath: "/bin/bash",
+		});
 		return normalizePermissionAction(
 			actionInput({
 				toolName: "bash",
@@ -316,6 +394,11 @@ describe("ToolAuthorizationRuntime", () => {
 				command,
 				readPaths: ["/tmp"],
 				writePaths: [],
+				shellAnalysis: {
+					disposition: analysis.disposition,
+					complete: analysis.complete,
+					commands: analysis.commands,
+				},
 			}),
 		);
 	}
@@ -390,5 +473,332 @@ describe("ToolAuthorizationRuntime", () => {
 			),
 		).resolves.toBe("executed");
 		expect(model.review).toHaveBeenCalledOnce();
+	});
+
+	describe("session permission rules", () => {
+		async function captureReviewRule(
+			store: SessionPermissionRuleStore,
+			projectPath: string,
+			summary: readonly { readonly label: string; readonly value: string }[] = [],
+		): Promise<void> {
+			// Session rules bind to the real project directory; make sure it exists.
+			mkdirSync(projectPath, { recursive: true });
+			let captured: Parameters<PermissionReviewer["review"]>[0] | undefined;
+			const reviewed = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules: store,
+				reviewerFactory: () => ({
+					review: async (request) => {
+						captured = request;
+						return allow("user");
+					},
+				}),
+			});
+			await expect(reviewed.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			if (!captured) throw new Error("review did not run");
+			store.rememberAllow({
+				projectPath,
+				actionDigest: digestPermissionAction(captured.action),
+				grantDigest: digestCanonical(captured.decision.grant),
+				toolName: captured.action.toolName,
+				toolIdentity: captured.action.toolIdentity,
+				riskLevel: captured.decision.riskLevel,
+				summary,
+			});
+		}
+
+		it("reuses an exact session allow without another reviewer round-trip", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+
+			const reused = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				reviewerFactory: () => {
+					throw new Error("a remembered session allow must not open a review");
+				},
+			});
+			await expect(reused.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+		});
+
+		it("reports the real exact session rule identity and scope", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath, [{ label: "Tool", value: "publish" }]);
+			const [rule] = sessionRules.list(projectPath);
+			const onDecision = vi.fn();
+
+			const reused = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				onDecision,
+				reviewerFactory: () => {
+					throw new Error("a remembered session allow must not open a review");
+				},
+			});
+			await expect(reused.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(onDecision).toHaveBeenCalledWith({
+				actionId: action.actionId,
+				toolName: "publish",
+				source: "rule",
+				ruleIds: [rule.id],
+				matchedRule: { id: rule.id, name: "publish", scope: "session" },
+			});
+		});
+
+		it("reports the real exact project rule identity and scope", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			mkdirSync(projectPath, { recursive: true });
+			const agentDir = mkdtempSync(join(tmpdir(), "metis-project-rule-"));
+			try {
+				const projectRules = new ProjectPermissionRuleStore(agentDir);
+				let captured: Parameters<PermissionReviewer["review"]>[0] | undefined;
+				const reviewed = new ToolAuthorizationRuntime({
+					sessionId: "session-1",
+					projectPath,
+					projectRules,
+					reviewerFactory: () => ({
+						review: async (request) => {
+							captured = request;
+							return allow("user");
+						},
+					}),
+				});
+				await reviewed.authorizeAndExecute(highRiskRequest());
+				if (!captured) throw new Error("review did not run");
+				projectRules.rememberAllow({
+					projectPath,
+					actionDigest: digestPermissionAction(captured.action),
+					grantDigest: digestCanonical(captured.decision.grant),
+					toolName: captured.action.toolName,
+					toolIdentity: captured.action.toolIdentity,
+					riskLevel: captured.decision.riskLevel,
+					summary: [{ label: "Tool", value: "publish" }],
+				});
+				const [rule] = projectRules.list(projectPath);
+				const onDecision = vi.fn();
+				const reused = new ToolAuthorizationRuntime({
+					sessionId: "session-1",
+					projectPath,
+					projectRules,
+					onDecision,
+					reviewerFactory: () => {
+						throw new Error("a remembered project allow must not open a review");
+					},
+				});
+
+				await expect(reused.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+				expect(onDecision).toHaveBeenCalledWith({
+					actionId: action.actionId,
+					toolName: "publish",
+					source: "rule",
+					ruleIds: [rule.id],
+					matchedRule: { id: rule.id, name: "publish", scope: "project" },
+				});
+			} finally {
+				rmSync(agentDir, { recursive: true, force: true });
+			}
+		});
+
+		it("does not fabricate rule details for a matcher that only returns a decision", async () => {
+			const action = highRiskRequest().action;
+			const onDecision = vi.fn();
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath: action.workspaceRoots[0],
+				projectRules: { match: () => ({ decision: "allow" }) },
+				onDecision,
+				reviewerFactory: () => {
+					throw new Error("a remembered allow must not open a review");
+				},
+			});
+
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(onDecision).toHaveBeenCalledWith({
+				actionId: action.actionId,
+				toolName: "publish",
+				source: "rule",
+			});
+		});
+
+		it("does not reuse a session allow from another session", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+
+			const review = vi.fn(async () => allow("user"));
+			const other = new ToolAuthorizationRuntime({
+				sessionId: "session-2",
+				projectPath,
+				sessionRules: new SessionPermissionRuleStore("session-2"),
+				reviewerFactory: () => ({ review }),
+			});
+			await expect(other.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(review).toHaveBeenCalledOnce();
+		});
+
+		it("keeps an exact project deny above a session allow", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				projectRules: { match: () => ({ decision: "deny" }) },
+				sessionRules,
+				reviewerFactory: () => {
+					throw new Error("a project deny must short-circuit before review");
+				},
+			});
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).rejects.toThrow("rule.deny");
+		});
+
+		it("keeps a one-shot allow out of the session rule store", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				reviewerFactory: () => reviewer(allow("user")),
+			});
+
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(sessionRules.list(projectPath)).toEqual([]);
+		});
+
+		it("requires review again after a remembered session allow is revoked", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+
+			const review = vi.fn(async () => allow("user"));
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				reviewerFactory: () => ({ review }),
+			});
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(review).not.toHaveBeenCalled();
+
+			const [rule] = sessionRules.list(projectPath);
+			expect(sessionRules.delete(projectPath, rule.id)).toBe(true);
+			runtime.invalidate("project-rules");
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+			expect(review).toHaveBeenCalledOnce();
+		});
+
+		it("fails an outstanding exact grant when its session allow is deleted", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+			const [rule] = sessionRules.list(projectPath);
+			const execute = vi.fn(async () => "executed");
+			let runtime!: ToolAuthorizationRuntime;
+			const audit = new PermissionAuditWriter({
+				append: (event) => {
+					if (event.stage === "grant-issued") {
+						expect(sessionRules.delete(projectPath, rule.id)).toBe(true);
+						runtime.invalidate("project-rules");
+					}
+				},
+			});
+			runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				audit,
+				reviewerFactory: () => {
+					throw new Error("a remembered session allow must not open a review");
+				},
+			});
+
+			await expect(runtime.authorizeAndExecute(highRiskRequest({ execute }))).rejects.toThrow("Permission denied");
+			expect(execute).not.toHaveBeenCalled();
+		});
+
+		it("keeps session allows across reviewer and mode changes but not tool identity changes", async () => {
+			const action = highRiskRequest().action;
+			const projectPath = action.workspaceRoots[0];
+			const sessionRules = new SessionPermissionRuleStore("session-1");
+			await captureReviewRule(sessionRules, projectPath);
+
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath,
+				sessionRules,
+				reviewerFactory: () => {
+					throw new Error("reviewer changes must keep remembered session allows");
+				},
+			});
+			runtime.invalidate("model");
+			runtime.invalidate("settings");
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+
+			runtime.invalidate("tool-registry");
+			await expect(runtime.authorizeAndExecute(highRiskRequest())).rejects.toThrow("review.unavailable");
+			expect(sessionRules.list(projectPath)).toEqual([]);
+		});
+
+		it("does not reuse a remembered allow when the action scope is incomplete", async () => {
+			const action = normalizePermissionAction(
+				actionInput({
+					toolName: "custom_tool",
+					toolIdentity: "mcp:custom:v1",
+					provenance: "mcp",
+					effects: ["unknown"],
+					networkEndpoints: [{ hostname: "api.example.com", port: 443 }],
+				}),
+			);
+			const review = vi.fn(async () => allow("user"));
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath: action.workspaceRoots[0],
+				projectRules: { match: () => ({ decision: "allow" }) },
+				sessionRules: { match: () => ({ decision: "allow" }) },
+				reviewerFactory: () => ({ review }),
+			});
+
+			await expect(
+				runtime.authorizeAndExecute(
+					safeRequest({ action, settings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" } }),
+				),
+			).resolves.toBe("executed");
+			expect(review).toHaveBeenCalledOnce();
+		});
+
+		it("does not read session rules on the Full access path", async () => {
+			const match = vi.fn(() => ({ decision: "allow" as const }));
+			const runtime = new ToolAuthorizationRuntime({
+				sessionId: "session-1",
+				projectPath: highRiskRequest().action.workspaceRoots[0],
+				projectRules: { match },
+				sessionRules: { match },
+				reviewerFactory: () => {
+					throw new Error("Full access must not open a review");
+				},
+			});
+
+			await expect(
+				runtime.authorizeAndExecute(
+					highRiskRequest({ settings: { sandboxPolicy: "danger-full-access", approvalPolicy: "never" } }),
+				),
+			).resolves.toBe("executed");
+			expect(match).not.toHaveBeenCalled();
+		});
 	});
 });

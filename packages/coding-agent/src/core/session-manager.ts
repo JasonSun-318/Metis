@@ -55,6 +55,7 @@ import {
 	type TrashModeProjectDataResult,
 	trashModeProjectData as trashProjectData,
 } from "./mode-project-delete.ts";
+import type { PermissionManualReason } from "./permissions/reviewer.ts";
 import {
 	DEFAULT_PERMISSION_PRESET,
 	isPermissionPreset,
@@ -1035,6 +1036,10 @@ export interface PermissionDecisionPayload {
 	readonly source: PermissionDecisionSource;
 	readonly decision: "allow" | "deny";
 	readonly reason?: string;
+	readonly ruleIds?: readonly string[];
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
+	readonly manualReason?: PermissionManualReason;
+	readonly remember?: "session" | "project";
 }
 
 export interface WorkspaceDirectoryChange {

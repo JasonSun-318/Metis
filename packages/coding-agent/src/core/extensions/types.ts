@@ -450,6 +450,8 @@ export interface ToolPermissionContext {
 	readonly workspaceRoots: readonly string[];
 	/** Exact engine-owned temporary directory prepared for this invocation, when present. */
 	readonly managedWorkDir?: string;
+	/** Actual shell used to execute builtin shell commands, when it differs from the default. */
+	readonly shellPath?: string;
 }
 
 export interface ToolPermissionClaim {
@@ -458,6 +460,8 @@ export interface ToolPermissionClaim {
 	readonly networkEndpoints: readonly NetworkEndpoint[];
 	readonly command?: string;
 	readonly effects: NormalizedPermissionAction["effects"];
+	/** Trusted analyzer facts; only engine-owned bash claims may provide them. */
+	readonly shellAnalysis?: NormalizedPermissionAction["shellAnalysis"];
 }
 
 export interface ToolPermissionDescriptor<TParams> {

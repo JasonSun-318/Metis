@@ -139,7 +139,7 @@ describe("interactive Bash boundary", () => {
 		expect(first.dispose).toHaveBeenCalledOnce();
 	});
 
-	it("does not pass the workspace as a write root when it would overlap .git", async () => {
+	it("preserves explicit workspace write scope and protected metadata exclusions", async () => {
 		const outside = join(cwd, "..", "desktop-note.md");
 		const git = join(cwd, ".git");
 		const createSandbox = vi.fn(async (_context: unknown) => sandbox());
@@ -150,8 +150,8 @@ describe("interactive Bash boundary", () => {
 		});
 		await value.operations.exec("rm file", cwd, options("rm-outside"));
 		const context = createSandbox.mock.lastCall![0] as InteractiveBashContext;
-		expect(context.workspaceReadOnly).toBe(false);
-		expect(context.writeRoots).not.toContain(cwd);
+		expect(context.workspaceReadOnly).toBe(true);
+		expect(context.writeRoots).toContain(cwd);
 		expect(context.writeRoots.some((path) => path.endsWith("desktop-note.md"))).toBe(true);
 		expect(context.writeProtectedRoots?.some((path) => path.endsWith(".git"))).toBe(true);
 	});

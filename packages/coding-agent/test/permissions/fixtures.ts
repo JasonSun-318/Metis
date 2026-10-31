@@ -8,9 +8,9 @@ export const outsideFile = resolve(tmpdir(), "metis-permission-fixture", "outsid
 export function actionInput(overrides: Partial<NormalizePermissionActionInput> = {}): NormalizePermissionActionInput {
 	return {
 		actionId: "action-1",
-		toolName: "read_file",
+		toolName: "read",
 		provenance: "builtin",
-		toolIdentity: "builtin:read_file:v1",
+		toolIdentity: "builtin:read:v1",
 		args: { path: join(projectDir, "README.md") },
 		cwd: projectDir,
 		workspaceRoots: [projectDir],
@@ -26,8 +26,8 @@ export const ordinaryRead = () => normalizePermissionAction(actionInput());
 export const workspaceWrite = () =>
 	normalizePermissionAction(
 		actionInput({
-			toolName: "write_file",
-			toolIdentity: "builtin:write_file:v1",
+			toolName: "write",
+			toolIdentity: "builtin:write:v1",
 			args: { path: join(projectDir, "out.txt"), content: "hello" },
 			writePaths: [join(projectDir, "out.txt")],
 		}),
@@ -59,8 +59,8 @@ export const rootRecursiveDelete = () =>
 export const protectedWrite = () =>
 	normalizePermissionAction(
 		actionInput({
-			toolName: "write_file",
-			toolIdentity: "builtin:write_file:v1",
+			toolName: "write",
+			toolIdentity: "builtin:write:v1",
 			args: { path: join(projectDir, ".git", "HEAD"), content: "tamper" },
 			readPaths: [],
 			writePaths: [join(projectDir, ".git", "HEAD")],

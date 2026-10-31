@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { normalizePermissionAction, PermissionPolicy, settingsForPreset } from "../../src/core/permissions/index.ts";
+import { initializeShellAnalysis } from "../../src/core/permissions/shell-parser.ts";
 import { bashPermissionClaim } from "../../src/core/tool-permission-adapter.ts";
 import { actionInput } from "./fixtures.ts";
+
+beforeAll(async () => {
+	await initializeShellAnalysis();
+});
 
 function actionFor(command: string) {
 	const input = actionInput({ toolName: "bash", toolIdentity: "builtin:bash:v1", args: { command } });

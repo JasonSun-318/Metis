@@ -24,6 +24,30 @@ describe("SessionManager permission settings", () => {
 		rmSync(directory, { recursive: true, force: true });
 	});
 
+	it("preserves remembered manual approval scope across reopening without granting new authority", () => {
+		const session = SessionManager.create(directory, directory, { mode: "code", permissionPreset: "ask" });
+		const file = session.getSessionFile()!;
+		session.appendPermissionAuditRecord({
+			actionId: "manual-call",
+			toolName: "bash",
+			source: "user",
+			decision: "allow",
+			reason: "authorization.allowed",
+			remember: "session",
+		});
+		session.close();
+		const reopened = SessionManager.open(file, directory);
+		try {
+			expect(reopened.getDurableJournalSnapshot().at(-1)).toMatchObject({
+				type: "session_permission_audit",
+				remember: "session",
+			});
+			expect(reopened.getPermissionPreset()).toBe("ask");
+		} finally {
+			reopened.close();
+		}
+	});
+
 	it("defaults both Chat and Code to Auto", () => {
 		const chat = SessionManager.inMemory(directory, { mode: "chat" });
 		const code = SessionManager.inMemory(directory, { mode: "code" });
@@ -82,6 +106,86 @@ describe("SessionManager permission settings", () => {
 			{ type: "session_permission_audit", id: decisionId, parentId: leafId },
 		]);
 		session.close();
+	});
+
+	it.each(["rule", "model", "user", "full"] as const)(
+		"persists the final %s source without transcript content",
+		(source) => {
+			const session = SessionManager.create(directory, directory, { mode: "code" });
+			session.appendMessage({ role: "user", content: "source fixture", timestamp: 1 });
+			const file = session.getSessionFile()!;
+			session.appendPermissionAuditRecord({
+				actionId: "source-action",
+				toolName: "bash",
+				source,
+				decision: "allow",
+				reason: "authorization.allowed",
+			});
+			session.close();
+			const reopened = SessionManager.open(file, directory);
+			try {
+				expect(reopened.getDurableJournalSnapshot().at(-1)).toMatchObject({
+					type: "session_permission_audit",
+					actionId: "source-action",
+					source,
+				});
+				expect(reopened.getEntries()).toHaveLength(1);
+			} finally {
+				reopened.close();
+			}
+		},
+	);
+
+	it("persists exact rule scope and manual reason across restart without guessing old records", () => {
+		const session = SessionManager.create(directory, directory, { mode: "code" });
+		session.appendMessage({ role: "user", content: "decision fixture", timestamp: 1 });
+		const file = session.getSessionFile()!;
+		session.appendPermissionAuditRecord({
+			actionId: "session-rule-action",
+			toolName: "publish",
+			source: "rule",
+			decision: "allow",
+			reason: "authorization.allowed",
+			ruleIds: ["a".repeat(64)],
+			matchedRule: { id: "a".repeat(64), name: "publish", scope: "session" },
+		});
+		session.appendPermissionAuditRecord({
+			actionId: "manual-action",
+			toolName: "write_file",
+			source: "user",
+			decision: "allow",
+			reason: "authorization.allowed",
+			manualReason: "write",
+		});
+		session.appendPermissionAuditRecord({
+			actionId: "legacy-action",
+			toolName: "bash",
+			source: "rule",
+			decision: "allow",
+			reason: "authorization.allowed",
+		});
+		session.close();
+
+		const reopened = SessionManager.open(file, directory);
+		try {
+			expect(
+				reopened
+					.getDurableJournalSnapshot()
+					.filter((entry) => entry.type === "session_permission_audit")
+					.slice(-3),
+			).toMatchObject([
+				{ actionId: "session-rule-action", matchedRule: { id: "a".repeat(64), name: "publish", scope: "session" } },
+				{ actionId: "manual-action", manualReason: "write" },
+				{ actionId: "legacy-action" },
+			]);
+			const legacy = reopened
+				.getDurableJournalSnapshot()
+				.find((entry) => entry.type === "session_permission_audit" && entry.actionId === "legacy-action");
+			expect(legacy).not.toHaveProperty("matchedRule");
+			expect(legacy).not.toHaveProperty("manualReason");
+		} finally {
+			reopened.close();
+		}
 	});
 
 	it("notifies permission listeners after persistence and supports unsubscribe", () => {

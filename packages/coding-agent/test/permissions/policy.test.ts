@@ -123,10 +123,20 @@ describe("PermissionPolicy", () => {
 				readPaths: [],
 				writePaths: [projectDir],
 				effects: [],
+				shellAnalysis: {
+					disposition: "safe",
+					complete: true,
+					commands: [
+						{ argv: ["npm", "install"], complete: true, disposition: "safe", effects: [], networkEndpoints: [] },
+					],
+				},
 			}),
 		);
+		// Package managers are not a rule fast-path; Auto asks the reviewer to
+		// assess the command and its declared scope.
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
-			kind: "allow",
+			kind: "review",
+			minimumReviewer: "model",
 			riskLevel: "low",
 		});
 	});
@@ -262,7 +272,7 @@ describe("PermissionPolicy", () => {
 		const grant = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: network });
 		if (grant.kind === "deny") throw new Error("Expected a grant request");
 		expect(riskLevelFor(network, grant.grant)).toBe("medium");
-		expect(grant).toMatchObject({ kind: "review", minimumReviewer: "user" });
+		expect(grant).toMatchObject({ kind: "review", minimumReviewer: "model" });
 	});
 
 	it("has no reviewer callback and stays below the domain latency budget", () => {
@@ -320,6 +330,17 @@ describe("PermissionPolicy", () => {
 	const ask = { sandboxPolicy: "workspace-write", approvalPolicy: "user" } as const;
 	const lsRule = [{ command: "ls", allowNetwork: false }] as const;
 	const policy = new PermissionPolicy();
+	// A trusted analysis trace as the builtin bash claim would produce it.
+	const traceEntry = (
+		argv: readonly string[],
+		networkEndpoints: readonly { hostname: string; port: number }[] = [],
+	) => ({
+		argv,
+		complete: true,
+		disposition: "safe" as const,
+		effects: [] as const,
+		networkEndpoints,
+	});
 	const bashAction = (overrides: Partial<NormalizePermissionActionInput>) =>
 		normalizePermissionAction(
 			actionInput({
@@ -333,7 +354,11 @@ describe("PermissionPolicy", () => {
 	it("allows an allowlisted simple command outside the workspace in Auto", () => {
 		const decision = policy.evaluate({
 			settings: auto,
-			action: bashAction({ command: "ls /tmp", readPaths: ["/tmp"] }),
+			action: bashAction({
+				command: "ls /tmp",
+				readPaths: ["/tmp"],
+				shellAnalysis: { disposition: "review", complete: true, commands: [traceEntry(["ls", "/tmp"])] },
+			}),
 			autoCommandRules: lsRule,
 		});
 		expect(decision.kind).toBe("allow");
@@ -373,10 +398,16 @@ describe("PermissionPolicy", () => {
 		expect(decision.kind).not.toBe("allow");
 	});
 
-	it("requires the per-rule network flag", () => {
+	it("requires the per-rule network flag and explicit targets", () => {
+		const endpoint = [{ hostname: "example.com", port: 443 }] as const;
 		const networkAction = bashAction({
 			command: "curl https://example.com",
-			networkEndpoints: [{ hostname: "example.com", port: 443 }],
+			networkEndpoints: [...endpoint],
+			shellAnalysis: {
+				disposition: "safe",
+				complete: true,
+				commands: [traceEntry(["curl", "https://example.com"], [...endpoint])],
+			},
 		});
 		expect(
 			policy.evaluate({
@@ -385,11 +416,19 @@ describe("PermissionPolicy", () => {
 				autoCommandRules: [{ command: "curl", allowNetwork: false }],
 			}).kind,
 		).toBe("review");
+		// A legacy allowNetwork rule without targets cannot authorize network calls.
 		expect(
 			policy.evaluate({
 				settings: auto,
 				action: networkAction,
 				autoCommandRules: [{ command: "curl", allowNetwork: true }],
+			}).kind,
+		).toBe("review");
+		expect(
+			policy.evaluate({
+				settings: auto,
+				action: networkAction,
+				autoCommandRules: [{ command: "curl", allowNetwork: true, networkTargets: [...endpoint] }],
 			}).kind,
 		).toBe("allow");
 	});

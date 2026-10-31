@@ -16,6 +16,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { formatPermissionApproval, type PermissionApprovalRequest } from "./permissions/approval.ts";
 import { isPermissionPreset } from "./permissions/settings.ts";
+import { initializeShellAnalysis } from "./permissions/shell-parser.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult, PermissionRequester } from "./sdk.ts";
@@ -195,6 +196,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	try {
 		ensureVaultLayout(agentDir);
+		// Trusted parser assets are optional for session construction. A missing
+		// runtime is recorded as unavailable and never blocks Full execution.
+		await initializeShellAnalysis();
 		if (!mcpDisabled) {
 			mcpManager ??= await McpManager.create({
 				settingsManager,

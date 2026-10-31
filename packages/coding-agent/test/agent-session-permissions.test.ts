@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
@@ -6,7 +6,9 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
+import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
+import { createSessionWorkDir, SESSION_DELIVERED_DIR_NAME } from "../src/core/session-attachments.ts";
 import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 import { type BashOperations, createLocalBashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
@@ -14,7 +16,7 @@ import { canonicalizeActionPath } from "../src/utils/paths.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
-function customTool(name = "custom_action") {
+function customTool(name = "custom_action", options: { readonly write?: boolean } = {}) {
 	const parameters = Type.Object({ value: Type.String() });
 	const execute = vi.fn(async (_toolCallId: string, _params: unknown) => ({
 		content: [{ type: "text" as const, text: "done" }],
@@ -26,7 +28,9 @@ function customTool(name = "custom_action") {
 		description: "Test custom action",
 		parameters,
 		permission: permissionDescriptor((_params, context) =>
-			permissionClaim({ writePaths: [join(context.cwd, `.permission-fixture-${name}`)] }),
+			options.write === false
+				? permissionClaim()
+				: permissionClaim({ writePaths: [join(context.cwd, `.permission-fixture-${name}`)] }),
 		),
 		execute,
 	};
@@ -402,7 +406,14 @@ describe("AgentSession permission enforcement", () => {
 			harness.sessionManager
 				.getDurableJournalSnapshot()
 				.filter((entry) => entry.type === "session_permission_audit"),
-		).toEqual([expect.objectContaining({ source: "user", decision: "allow", toolName: "custom_action" })]);
+		).toEqual([
+			expect.objectContaining({
+				source: "user",
+				decision: "allow",
+				toolName: "custom_action",
+				manualReason: "write",
+			}),
+		]);
 	});
 
 	it("denies without execution and writes one user decision", async () => {
@@ -553,6 +564,11 @@ describe("AgentSession permission enforcement", () => {
 			sandboxHealthProbe: async () => ({
 				status: "unavailable",
 				code: "dependencies-unavailable",
+				mode: "readiness",
+				checkedAt: "2026-10-29T00:00:00.000Z",
+				platform: "darwin",
+				checks: [{ id: "dependencies", status: "failed", reason: "dependency-unavailable" }],
+				recoveryActions: [],
 				details: [],
 			}),
 		});
@@ -579,8 +595,26 @@ describe("AgentSession permission enforcement", () => {
 	it("rechecks an unhealthy sandbox immediately after Windows setup", async () => {
 		const sandboxHealthProbe = vi
 			.fn()
-			.mockResolvedValueOnce({ status: "unavailable", code: "dependencies-unavailable", details: [] })
-			.mockResolvedValueOnce({ status: "healthy", code: "ready", details: [] });
+			.mockResolvedValueOnce({
+				status: "unavailable",
+				code: "dependencies-unavailable",
+				mode: "readiness",
+				checkedAt: "2026-10-29T00:00:00.000Z",
+				platform: "win32",
+				checks: [{ id: "dependencies", status: "failed", reason: "dependency-unavailable" }],
+				recoveryActions: ["install-windows-sandbox", "check-app-update"],
+				details: [],
+			})
+			.mockResolvedValueOnce({
+				status: "healthy",
+				code: "ready",
+				mode: "readiness",
+				checkedAt: "2026-10-29T00:00:01.000Z",
+				platform: "win32",
+				checks: [{ id: "dependencies", status: "passed" }],
+				recoveryActions: [],
+				details: [],
+			});
 		const harness = await createHarness({ sandboxHealth: "unavailable", sandboxHealthProbe });
 		harnesses.push(harness);
 
@@ -794,7 +828,7 @@ describe("AgentSession permission enforcement", () => {
 	});
 
 	it("automatically trusts only explicitly named host control tools", async () => {
-		const inspect = customTool("inspect_agents");
+		const inspect = customTool("inspect_agents", { write: false });
 		const spawn = customTool("spawn_agent");
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
@@ -865,10 +899,12 @@ describe("AgentSession permission enforcement", () => {
 	});
 
 	describe("Plan mode Bash boundary", () => {
-		it("rejects sensitive Bash reads in full permission mode", async () => {
+		it("requires a human decision for sensitive Bash reads even in Full + Plan", async () => {
 			const fake = fakeBashBoundary();
+			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 			const harness = await createHarness({
 				permissionPreset: "full",
+				requestPermissionApproval: requestApproval,
 				interactiveBashBoundary: fake.boundary,
 			});
 			fake.setCwd(harness.tempDir);
@@ -885,7 +921,8 @@ describe("AgentSession permission enforcement", () => {
 			expect(fake.hostExec).not.toHaveBeenCalled();
 			const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
 			expect(toolResult?.isError).toBe(true);
-			expect(getMessageText(toolResult)).toMatch(/approval ceiling.*sensitive-read/iu);
+			expect(requestApproval).toHaveBeenCalledOnce();
+			expect(getMessageText(toolResult)).toMatch(/Permission denied/iu);
 		});
 
 		it("routes harmless Bash to sandbox without approval and rejects risky commands", async () => {
@@ -916,7 +953,6 @@ describe("AgentSession permission enforcement", () => {
 			for (const [command, pattern] of [
 				["curl https://example.com", /read-only sandbox.*(?:write scope|network)/iu],
 				["sudo true", /read-only sandbox.*elevation/iu],
-				["cat .env", /approval ceiling.*sensitive-read/iu],
 				["bash -c 'cat package.json'", /read-only sandbox.*write scope/iu],
 			] as const) {
 				fake.sandboxExec.mockClear();
@@ -941,6 +977,60 @@ describe("AgentSession permission enforcement", () => {
 			]);
 			await harness.session.prompt("write tracked");
 			expect(readFileSync(trackedFile, "utf8")).toBe("original");
+		});
+
+		it("keeps write/edit visible without allowing either to change files in Full + Plan", async () => {
+			const harness = await createHarness({ permissionPreset: "full" });
+			harnesses.push(harness);
+			const path = join(harness.tempDir, "tracked.txt");
+			writeFileSync(path, "original");
+			await harness.session.setCollaborationMode("plan");
+			expect(harness.session.getActiveToolNames()).toEqual(expect.arrayContaining(["write", "edit"]));
+			harness.setResponses([
+				fauxAssistantMessage(
+					[
+						fauxToolCall("write", { path, content: "changed" }),
+						fauxToolCall("edit", { path, oldText: "original", newText: "changed" }),
+					],
+					{ stopReason: "toolUse" },
+				),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("modify file");
+			expect(readFileSync(path, "utf8")).toBe("original");
+			const results = harness.session.messages.filter((message) => message.role === "toolResult");
+			expect(results).toHaveLength(2);
+			for (const result of results) {
+				expect(result.isError).toBe(true);
+				expect(getMessageText(result)).toMatch(/read-only sandbox ceiling/i);
+			}
+		});
+
+		it("keeps trusted host controls visible but blocks their execution in Plan", async () => {
+			const harness = await createHarness({ permissionPreset: "full" });
+			harnesses.push(harness);
+			const browser = customTool("browser_act", { write: false });
+			harness.session.installHostTools([browser.tool], { automaticPermissionToolNames: [browser.tool.name] });
+			const names = harness.session.getActiveToolNames();
+			await harness.session.setCollaborationMode("plan");
+			expect(harness.session.getActiveToolNames()).toEqual(names);
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("browser_act", { value: "click" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("click");
+			expect(browser.execute).not.toHaveBeenCalled();
+			expect(getMessageText(harness.session.messages.find((message) => message.role === "toolResult"))).toContain(
+				"unavailable in Plan mode",
+			);
+		});
+
+		it("does not add submit_plan outside an explicit capability allowlist", async () => {
+			const harness = await createHarness({ allowedToolNames: ["read"] });
+			harnesses.push(harness);
+			await harness.session.setCollaborationMode("plan");
+			expect(harness.session.getAllTools().map((tool) => tool.name)).not.toContain("submit_plan");
+			expect(harness.session.getActiveToolNames()).toEqual(["read"]);
 		});
 
 		it("emits Default mode after cancel even if sandbox reset fails", async () => {
@@ -996,5 +1086,51 @@ describe("AgentSession permission enforcement", () => {
 		expect(fake.sandboxExec).toHaveBeenCalledOnce();
 		expect(fake.hostExec).not.toHaveBeenCalled();
 		expect(harness.session.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write"]));
+	});
+
+	it("previews permission scopes without creating delivery directories or listing other session work", async () => {
+		const skillDir = join(tmpdir(), "metis-permission-preview-skill");
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getSkills: () => ({
+				skills: [
+					{
+						name: "preview",
+						description: "preview skill",
+						filePath: join(skillDir, "SKILL.md"),
+						baseDir: skillDir,
+						sourceInfo: {} as never,
+						disableModelInvocation: true,
+					},
+				],
+				diagnostics: [],
+			}),
+		};
+		const harness = await createHarness({
+			withAgentDir: true,
+			permissionPreset: "ask",
+			resourceLoader,
+		});
+		harnesses.push(harness);
+
+		const preview = harness.session.getPermissionScopePreview();
+		expect(preview.workspaceRoots).toEqual(harness.sessionManager.getWorkspaceRoots());
+		expect(preview.skillReadRoots).toEqual([skillDir]);
+		expect(preview.sessionWorkRoots).toEqual([]);
+		expect(preview.memoryRoots).toEqual([getVaultRoot(harness.tempDir)]);
+		expect(preview.deliveryRoots).toEqual([]);
+		const attachmentsRoot = join(harness.tempDir, "attachments");
+		expect(existsSync(attachmentsRoot)).toBe(false);
+
+		const sessionId = harness.sessionManager.getSessionId();
+		const otherWorkDir = createSessionWorkDir(harness.tempDir, "other-session");
+		const activeWorkDir = createSessionWorkDir(harness.tempDir, sessionId);
+		(harness.session as unknown as { _activeWorkDir?: string })._activeWorkDir = activeWorkDir;
+		expect(harness.session.getPermissionScopePreview().sessionWorkRoots).toEqual([activeWorkDir]);
+		expect(otherWorkDir).not.toBe(activeWorkDir);
+
+		const delivered = join(attachmentsRoot, sessionId, SESSION_DELIVERED_DIR_NAME);
+		mkdirSync(delivered, { recursive: true });
+		expect(harness.session.getPermissionScopePreview().deliveryRoots).toHaveLength(1);
 	});
 });

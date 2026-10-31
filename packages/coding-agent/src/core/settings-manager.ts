@@ -11,6 +11,19 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { replaceFileAtomicallySync } from "./durable-file.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import { type AutoCommandRule, normalizeAutoCommandRules } from "./permissions/auto-command-rules.ts";
+import {
+	createDefaultPermissionRules,
+	MAX_PERMISSION_RULES,
+	MAX_USER_PERMISSION_RULES,
+	normalizePermissionRules,
+	type PermissionRule,
+} from "./permissions/permission-rules.ts";
+import {
+	normalizePermissionReviewerConfig,
+	type PermissionReviewerConfig,
+	type PermissionReviewerView,
+	type ReviewerConfigurationStatus,
+} from "./permissions/reviewer-config.ts";
 import { isWebSearchProvider, type WebSearchProvider } from "./web-search-config.ts";
 
 export interface CompactionSettings {
@@ -196,7 +209,11 @@ export interface Settings {
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	mcpServers?: Record<string, McpServerSettings>;
 	webSearch?: WebSearchSettings; // global-only opt-in external search
-	autoCommandRules?: AutoCommandRule[]; // global-only Auto-mode command allowlist
+	autoCommandRules?: AutoCommandRule[]; // legacy Auto-mode command allowlist; migrated once into permissionRules
+	permissionRules?: PermissionRule[]; // global-only effective permission rules (defaults + user entries)
+	permissionRulesVersion?: number; // 1 once the global rule list has been initialized or migrated
+	permissionReviewer?: PermissionReviewerConfig; // global-only independent Auto approval model
+	autoReviewerEnabled?: boolean; // global-only; default false
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -562,17 +579,200 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getAutoCommandRules(): readonly AutoCommandRule[] {
-		try {
-			return normalizeAutoCommandRules(this.globalSettings.autoCommandRules ?? []);
-		} catch {
-			return Object.freeze([]);
+	/**
+	 * Effective global permission rules. The first read performs the one-time
+	 * migration from the legacy `autoCommandRules`; after that the persisted
+	 * array is authoritative, so deleted or disabled defaults never return.
+	 * Invalid persisted state throws instead of pretending there are no rules.
+	 */
+	getPermissionRules(): readonly PermissionRule[] {
+		const version = this.globalSettings.permissionRulesVersion;
+		if (version !== undefined) {
+			if (version !== 1) throw new Error("Unsupported permission rules version");
+			if (this.globalSettings.permissionRules === undefined) {
+				throw new Error("Permission rules are missing");
+			}
+			return normalizePermissionRules(this.globalSettings.permissionRules);
 		}
+		if (this.globalSettings.permissionRules !== undefined) {
+			throw new Error("Permission rules are missing their version");
+		}
+		if (this.globalSettingsLoadError) {
+			throw new Error("Permission rules are unavailable because global settings failed to load", {
+				cause: this.globalSettingsLoadError,
+			});
+		}
+		return this._loadOrInitializePermissionRules();
+	}
+
+	/**
+	 * Initialize the versioned rule list under the settings lock. Another
+	 * instance may have migrated already, so the persisted version/list always
+	 * wins instead of overwriting it from this instance's stale settings.
+	 * Local migration state is updated only after the storage call succeeds.
+	 */
+	private _loadOrInitializePermissionRules(): readonly PermissionRule[] {
+		let permissions: readonly PermissionRule[] | undefined;
+		this.storage.withLock("global", (current) => {
+			const fileSettings = current
+				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
+				: {};
+			const version = fileSettings.permissionRulesVersion;
+			if (version !== undefined) {
+				if (version !== 1) throw new Error("Unsupported permission rules version");
+				if (fileSettings.permissionRules === undefined) throw new Error("Permission rules are missing");
+				permissions = normalizePermissionRules(fileSettings.permissionRules);
+				return undefined;
+			}
+			if (fileSettings.permissionRules !== undefined) {
+				throw new Error("Permission rules are missing their version");
+			}
+			const legacy = normalizeAutoCommandRules(fileSettings.autoCommandRules ?? []);
+			const migrated = normalizePermissionRules([
+				...createDefaultPermissionRules(),
+				...legacy.map((rule, index) => this._legacyPermissionRule(rule, index)),
+			]);
+			fileSettings.permissionRules = migrated.map((rule) => ({ ...rule }));
+			fileSettings.permissionRulesVersion = 1;
+			permissions = migrated;
+			return JSON.stringify(fileSettings, null, 2);
+		});
+		if (!permissions) throw new Error("Permission rules are unavailable");
+		this.globalSettings.permissionRules = permissions.map((rule) => ({ ...rule }));
+		this.globalSettings.permissionRulesVersion = 1;
+		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		return permissions;
+	}
+
+	private _legacyPermissionRule(rule: AutoCommandRule, index: number): PermissionRule {
+		return Object.freeze({
+			id: this._uniqueUserIdSet(index),
+			kind: "command" as const,
+			origin: "user" as const,
+			name: rule.command,
+			enabled: true,
+			modes: Object.freeze(["auto"] as const),
+			// Legacy prefixes were never directory scoped, so keep their full
+			// ordinary-path and exact-network semantics instead of narrowing them.
+			scope: "all" as const,
+			directories: Object.freeze([]),
+			command: rule.command,
+			allowNetwork: rule.allowNetwork,
+			...(rule.networkTargets ? { networkTargets: rule.networkTargets } : {}),
+		});
+	}
+
+	private _uniqueUserIdSet(index: number): string {
+		return `user-command-${index + 1}`;
+	}
+
+	setPermissionRules(rules: readonly PermissionRule[]): void {
+		const normalized = normalizePermissionRules(rules);
+		this.globalSettings.permissionRules = normalized.map((rule) => ({ ...rule }));
+		this.globalSettings.permissionRulesVersion = 1;
+		this.markModified("permissionRules");
+		this.markModified("permissionRulesVersion");
+		this.save();
+	}
+
+	/**
+	 * Legacy Auto command allowlist retained for existing callers. It is a view
+	 * over enabled user command rules; setters only replace that subset and keep
+	 * every default C/T/E enabled or deleted state intact.
+	 */
+	getAutoCommandRules(): readonly AutoCommandRule[] {
+		return this.getPermissionRules()
+			.filter((rule) => rule.origin === "user" && rule.kind === "command" && rule.enabled)
+			.map((rule) => ({
+				command: rule.command!,
+				allowNetwork: rule.allowNetwork,
+				...(rule.networkTargets ? { networkTargets: rule.networkTargets.map((target) => ({ ...target })) } : {}),
+			}));
 	}
 
 	setAutoCommandRules(rules: readonly AutoCommandRule[]): void {
-		this.globalSettings.autoCommandRules = normalizeAutoCommandRules(rules).map((rule) => ({ ...rule }));
-		this.markModified("autoCommandRules");
+		const legacy = normalizeAutoCommandRules(rules);
+		const current = this.getPermissionRules();
+		const retained = current.filter((rule) => !(rule.origin === "user" && rule.kind === "command"));
+		const usedIds = new Set(retained.map((rule) => rule.id));
+		const added: PermissionRule[] = legacy.map((rule, index) => {
+			let id = `user-command-${index + 1}`;
+			let suffix = 1;
+			while (usedIds.has(id)) id = `user-command-${index + 1}-${suffix++}`;
+			usedIds.add(id);
+			return Object.freeze({
+				id,
+				kind: "command" as const,
+				origin: "user" as const,
+				name: rule.command,
+				enabled: true,
+				modes: Object.freeze(["auto"] as const),
+				scope: "all" as const,
+				directories: Object.freeze([]),
+				command: rule.command,
+				allowNetwork: rule.allowNetwork,
+				...(rule.networkTargets ? { networkTargets: rule.networkTargets } : {}),
+			});
+		});
+		if (added.length > MAX_USER_PERMISSION_RULES || retained.length + added.length > MAX_PERMISSION_RULES) {
+			throw new TypeError("too many permission rules");
+		}
+		this.setPermissionRules([...retained, ...added]);
+	}
+
+	/**
+	 * Read the independent reviewer profile from the global settings only.
+	 * Invalid legacy objects are reported as unconfigured rather than revived.
+	 */
+	getPermissionReviewerConfig(): PermissionReviewerConfig | undefined {
+		return this.getPermissionReviewerView().config ?? undefined;
+	}
+
+	getPermissionReviewerStatus(): ReviewerConfigurationStatus {
+		return this.getPermissionReviewerView().status;
+	}
+
+	/** Read the profile and its configured/invalid/unconfigured status in one strict parse. */
+	getPermissionReviewerView(): PermissionReviewerView {
+		const value = this.globalSettings.permissionReviewer;
+		if (value === undefined || value === null) return { config: null, status: "unconfigured" };
+		try {
+			return { config: normalizePermissionReviewerConfig(value) ?? null, status: "configured" };
+		} catch {
+			return { config: null, status: "invalid" };
+		}
+	}
+
+	setPermissionReviewerConfig(config: PermissionReviewerConfig | null): void {
+		const normalized = normalizePermissionReviewerConfig(config);
+		if (normalized) this.globalSettings.permissionReviewer = normalized;
+		else delete this.globalSettings.permissionReviewer;
+		this.markModified("permissionReviewer");
+		this.save();
+	}
+
+	/** Stage a strictly validated update; the returned closure can only restore its captured previous value. */
+	beginPermissionReviewerConfigUpdate(config: PermissionReviewerConfig | null): () => void {
+		const previous = structuredClone(this.globalSettings.permissionReviewer);
+		this.setPermissionReviewerConfig(config);
+		let pending = true;
+		return () => {
+			if (!pending) return;
+			pending = false;
+			if (previous === undefined) delete this.globalSettings.permissionReviewer;
+			else this.globalSettings.permissionReviewer = previous;
+			this.markModified("permissionReviewer");
+			this.save();
+		};
+	}
+
+	getAutoReviewerEnabled(): boolean {
+		return this.globalSettings.autoReviewerEnabled === true;
+	}
+
+	setAutoReviewerEnabled(enabled: boolean): void {
+		this.globalSettings.autoReviewerEnabled = enabled;
+		this.markModified("autoReviewerEnabled");
 		this.save();
 	}
 

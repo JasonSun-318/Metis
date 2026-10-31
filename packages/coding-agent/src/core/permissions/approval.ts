@@ -46,13 +46,14 @@ export interface PermissionApprovalRequest {
 	readonly executionTarget?: PermissionExecutionTarget;
 	readonly scopeComplete: boolean;
 	readonly rememberProjectEligible?: boolean;
+	readonly rememberSessionEligible?: boolean;
 	readonly actor?: PermissionActor;
 	readonly signal?: AbortSignal;
 }
 
 export interface PermissionApprovalDecision {
 	readonly decision: "allow" | "deny";
-	readonly remember?: "project";
+	readonly remember?: "session" | "project";
 	readonly reason?: string;
 }
 

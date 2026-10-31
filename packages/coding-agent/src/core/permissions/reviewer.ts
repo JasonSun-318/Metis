@@ -4,6 +4,28 @@ const MAX_REASON_BYTES = 2 * 1024;
 
 type Reviewer = "model" | "user";
 
+/**
+ * Stable display-only reasons for why an action needed a manual decision.
+ * They never participate in authorization and remain bounded for protocol use.
+ */
+export const PERMISSION_MANUAL_REASONS = [
+	"sensitive",
+	"write",
+	"network",
+	"destructive",
+	"analysis-incomplete",
+	"critical",
+	"model-denied",
+	"model-unavailable",
+	"model-timeout",
+	"policy",
+] as const;
+export type PermissionManualReason = (typeof PERMISSION_MANUAL_REASONS)[number];
+
+export function isPermissionManualReason(value: unknown): value is PermissionManualReason {
+	return typeof value === "string" && (PERMISSION_MANUAL_REASONS as readonly string[]).includes(value);
+}
+
 export interface TrustedUserMessage {
 	readonly messageId: string;
 	readonly text: string;
@@ -17,10 +39,17 @@ export interface PermissionReviewRequest {
 	readonly interactive: boolean;
 	readonly signal: AbortSignal;
 	readonly priorModelOutcome?: "deny" | "unavailable";
+	/** The model reviewer's bounded unavailable reason; display metadata only. */
+	readonly priorModelReason?: string;
 }
 
 export type PermissionReviewResult =
-	| { readonly kind: "allow" | "deny"; readonly reviewer: Reviewer }
+	| {
+			readonly kind: "allow" | "deny";
+			readonly reviewer: Reviewer;
+			readonly manualReason?: PermissionManualReason;
+			readonly remember?: "session" | "project";
+	  }
 	| { readonly kind: "unavailable"; readonly reviewer: Reviewer; readonly reason: string };
 
 export interface PermissionReviewer {
@@ -30,6 +59,8 @@ export interface PermissionReviewer {
 export interface PermissionReviewRouterOptions {
 	readonly model: PermissionReviewer;
 	readonly user?: PermissionReviewer;
+	/** The Auto approval-model switch. Missing or throwing means disabled. Read on every review. */
+	readonly isModelEnabled?: () => boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,10 +104,27 @@ function normalizedResult(result: unknown): PermissionReviewResult | undefined {
 		if (!exactKeys(result, ["kind", "reviewer", "reason"]) || typeof result.reason !== "string") return undefined;
 		return unavailableReview(result.reviewer, result.reason);
 	}
-	if ((result.kind !== "allow" && result.kind !== "deny") || !exactKeys(result, ["kind", "reviewer"])) {
+	const allowedKeys = [
+		"kind",
+		"reviewer",
+		...(result.manualReason === undefined ? [] : ["manualReason"]),
+		...(result.remember === undefined ? [] : ["remember"]),
+	];
+	if (
+		result.remember !== undefined &&
+		(result.reviewer !== "user" || (result.remember !== "session" && result.remember !== "project"))
+	)
+		return undefined;
+	if ((result.kind !== "allow" && result.kind !== "deny") || !exactKeys(result, allowedKeys)) {
 		return undefined;
 	}
-	return Object.freeze({ kind: result.kind, reviewer: result.reviewer });
+	if (result.manualReason !== undefined && !isPermissionManualReason(result.manualReason)) return undefined;
+	return Object.freeze({
+		kind: result.kind,
+		reviewer: result.reviewer,
+		...(result.manualReason === undefined ? {} : { manualReason: result.manualReason }),
+		...(result.remember === undefined ? {} : { remember: result.remember }),
+	});
 }
 
 export function validateReviewResult(
@@ -138,25 +186,45 @@ export class PermissionReviewRouter implements PermissionReviewer {
 		this.options = options;
 	}
 
+	private modelEnabled(): boolean {
+		try {
+			return this.options.isModelEnabled?.() === true;
+		} catch {
+			return false;
+		}
+	}
+
+	/** User review is either the required path or the interactive fallback; headless always denies. */
+	private async reviewUser(request: PermissionReviewRequest): Promise<PermissionReviewResult> {
+		const requiredReviewer = request.decision.minimumReviewer;
+		if (request.signal.aborted) {
+			return unavailableReview(requiredReviewer, "Permission review was cancelled");
+		}
+		if (!request.interactive) return fallbackDeny(requiredReviewer);
+		if (!this.options.user) return unavailableReview("user", "No user permission reviewer is available");
+		return runReviewer(this.options.user, "user", request);
+	}
+
 	async review(request: PermissionReviewRequest): Promise<PermissionReviewResult> {
 		const requiredReviewer = request.decision.minimumReviewer;
 		if (request.signal.aborted) {
 			return unavailableReview(requiredReviewer, "Permission review was cancelled");
 		}
 		if (requiredReviewer === "user") {
-			if (!request.interactive) {
-				return fallbackDeny("user");
-			}
-			if (!this.options.user) return unavailableReview("user", "No user permission reviewer is available");
-			return runReviewer(this.options.user, "user", request);
+			return this.reviewUser(request);
+		}
+		if (!this.modelEnabled()) {
+			return this.reviewUser(request);
 		}
 
 		const modelResult = await runReviewer(this.options.model, "model", request);
 		if (modelResult.kind === "allow" || request.signal.aborted) return modelResult;
-		if (!request.interactive) {
-			return modelResult.kind === "deny" ? modelResult : fallbackDeny("model");
-		}
-		if (!this.options.user) return modelResult;
-		return runReviewer(this.options.user, "user", Object.freeze({ ...request, priorModelOutcome: modelResult.kind }));
+		return this.reviewUser(
+			Object.freeze({
+				...request,
+				priorModelOutcome: modelResult.kind,
+				...(modelResult.kind === "unavailable" ? { priorModelReason: modelResult.reason } : {}),
+			}),
+		);
 	}
 }

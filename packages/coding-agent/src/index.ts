@@ -22,6 +22,7 @@ export {
 	type AgentSessionEventListener,
 	type ModelCycleResult,
 	type ParsedSkillBlock,
+	type PermissionScopePreview,
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
@@ -476,6 +477,18 @@ export {
 	unclassifiedAction,
 } from "./core/permissions/index.ts";
 export { digestCanonical } from "./core/permissions/normalize.ts";
+export {
+	createDefaultPermissionRules,
+	MAX_PERMISSION_RULES,
+	MAX_USER_PERMISSION_RULES,
+	normalizePermissionRules,
+	type PermissionRule,
+	type PermissionRuleKind,
+	type PermissionRuleMode,
+	type PermissionRuleScope,
+	type PermissionRuleView,
+	permissionRuleView,
+} from "./core/permissions/permission-rules.ts";
 export {
 	type ProjectPermissionRule,
 	type ProjectPermissionRuleInput,

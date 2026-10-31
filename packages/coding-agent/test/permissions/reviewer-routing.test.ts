@@ -7,7 +7,7 @@ import {
 	PermissionReviewRouter,
 	settingsForPreset,
 } from "../../src/core/permissions/index.ts";
-import { externalWrite, ordinaryRead } from "./fixtures.ts";
+import { externalWrite, ordinaryRead, sensitiveRead } from "./fixtures.ts";
 import { directUserMessage, reviewInput } from "./reviewer-fixtures.ts";
 
 function reviewer(result: PermissionReviewResult): PermissionReviewer & { review: ReturnType<typeof vi.fn> } {
@@ -34,14 +34,18 @@ function userResult(
 	};
 }
 
+function enabled(value = true): () => boolean {
+	return () => value;
+}
+
 describe("PermissionReviewRouter", () => {
-	it.each(["allow", "deny"] as const)("routes an Auto external effect directly to user %s", async (kind) => {
-		const action = externalWrite();
+	it.each(["allow", "deny"] as const)("routes an Auto sensitive action directly to user %s", async (kind) => {
+		const action = sensitiveRead();
 		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
 		if (decision.kind !== "review") throw new Error("expected review");
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult({ kind }));
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 		expect(await router.review(reviewInput({ action, decision }))).toEqual({ kind, reviewer: "user" });
 		expect(model.review).not.toHaveBeenCalled();
 		expect(user.review).toHaveBeenCalledOnce();
@@ -51,7 +55,7 @@ describe("PermissionReviewRouter", () => {
 	it("uses the user directly when deterministic policy requires a user", async () => {
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(
 			await router.review(reviewInput({ decision: { ...reviewInput().decision, minimumReviewer: "user" } })),
@@ -67,17 +71,74 @@ describe("PermissionReviewRouter", () => {
 	it("returns a valid model decision without opening user approval", async () => {
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput())).toMatchObject({ kind: "allow", reviewer: "model" });
 		expect(model.review).toHaveBeenCalledOnce();
 		expect(user.review).not.toHaveBeenCalled();
 	});
 
+	it("defaults to a disabled model and never calls it", async () => {
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult());
+		const router = new PermissionReviewRouter({ model, user });
+
+		expect(await router.review(reviewInput({ interactive: true }))).toMatchObject({
+			kind: "allow",
+			reviewer: "user",
+		});
+		expect(model.review).not.toHaveBeenCalled();
+		expect(user.review).toHaveBeenCalledOnce();
+	});
+
+	it("reads the Auto reviewer switch on every review", async () => {
+		let modelEnabled = false;
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult());
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: () => modelEnabled });
+
+		await router.review(reviewInput());
+		modelEnabled = true;
+		await router.review(reviewInput());
+		modelEnabled = false;
+		await router.review(reviewInput());
+
+		expect(model.review).toHaveBeenCalledOnce();
+		expect(user.review).toHaveBeenCalledTimes(2);
+	});
+
+	it("fails closed when the Auto reviewer switch throws", async () => {
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult());
+		const router = new PermissionReviewRouter({
+			model,
+			user,
+			isModelEnabled: () => {
+				throw new Error("settings unavailable");
+			},
+		});
+
+		expect(await router.review(reviewInput())).toMatchObject({ kind: "allow", reviewer: "user" });
+		expect(model.review).not.toHaveBeenCalled();
+	});
+
+	it("denies headless reviews when the model is disabled without creating a user request", async () => {
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult());
+		const router = new PermissionReviewRouter({ model, user });
+
+		expect(await router.review(reviewInput({ interactive: false }))).toEqual({
+			kind: "deny",
+			reviewer: "model",
+		});
+		expect(model.review).not.toHaveBeenCalled();
+		expect(user.review).not.toHaveBeenCalled();
+	});
+
 	it("escalates a model deny to the attached interactive user", async () => {
 		const model = reviewer({ kind: "deny", reviewer: "model" });
 		const user = reviewer({ kind: "allow", reviewer: "user" });
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput({ interactive: true }))).toEqual({
 			kind: "allow",
@@ -89,13 +150,15 @@ describe("PermissionReviewRouter", () => {
 	it("escalates an unavailable model to the attached interactive user", async () => {
 		const model = reviewer({ kind: "unavailable", reviewer: "model", reason: "provider unavailable" });
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput({ interactive: true }))).toMatchObject({
 			kind: "allow",
 			reviewer: "user",
 		});
-		expect(user.review).toHaveBeenCalledWith(expect.objectContaining({ priorModelOutcome: "unavailable" }));
+		expect(user.review).toHaveBeenCalledWith(
+			expect.objectContaining({ priorModelOutcome: "unavailable", priorModelReason: "provider unavailable" }),
+		);
 	});
 
 	it("denies instead of escalating in a headless session", async () => {
@@ -104,13 +167,17 @@ describe("PermissionReviewRouter", () => {
 		const user = reviewer(userResult());
 
 		expect(
-			await new PermissionReviewRouter({ model: unavailable, user }).review(reviewInput({ interactive: false })),
+			await new PermissionReviewRouter({ model: unavailable, user, isModelEnabled: enabled() }).review(
+				reviewInput({ interactive: false }),
+			),
 		).toMatchObject({
 			kind: "deny",
 			reviewer: "model",
 		});
 		expect(
-			await new PermissionReviewRouter({ model: denied, user }).review(reviewInput({ interactive: false })),
+			await new PermissionReviewRouter({ model: denied, user, isModelEnabled: enabled() }).review(
+				reviewInput({ interactive: false }),
+			),
 		).toEqual({
 			kind: "deny",
 			reviewer: "model",
@@ -119,12 +186,12 @@ describe("PermissionReviewRouter", () => {
 	});
 
 	it("fails closed when required user review has no interactive UI", async () => {
-		const action = externalWrite();
+		const action = sensitiveRead();
 		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
 		if (decision.kind !== "review") throw new Error("expected review");
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 		const input = reviewInput({
 			action,
 			interactive: false,
@@ -139,7 +206,7 @@ describe("PermissionReviewRouter", () => {
 	it("treats an explicit user deny as final", async () => {
 		const model = reviewer({ kind: "deny", reviewer: "model" });
 		const user = reviewer({ kind: "deny", reviewer: "user" });
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput({ interactive: true }))).toEqual({
 			kind: "deny",
@@ -149,7 +216,7 @@ describe("PermissionReviewRouter", () => {
 		expect(user.review).toHaveBeenCalledOnce();
 	});
 
-	it("lets cancellation override an adapter allow", async () => {
+	it("lets cancellation override an adapter allow and never opens user review", async () => {
 		const controller = new AbortController();
 		const model: PermissionReviewer = {
 			review: async () => {
@@ -158,7 +225,7 @@ describe("PermissionReviewRouter", () => {
 			},
 		};
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput({ signal: controller.signal }))).toMatchObject({
 			kind: "unavailable",
@@ -173,7 +240,7 @@ describe("PermissionReviewRouter", () => {
 			grant: { writeRoots: ["/"] },
 		} as never);
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
 
 		expect(await router.review(reviewInput())).toMatchObject({ kind: "allow", reviewer: "user" });
 		expect(user.review).toHaveBeenCalledOnce();
@@ -197,7 +264,7 @@ describe("PermissionReviewRouter", () => {
 
 	it("requires a fresh model review for every invocation and persists nothing", async () => {
 		const model = reviewer(modelResult());
-		const router = new PermissionReviewRouter({ model });
+		const router = new PermissionReviewRouter({ model, isModelEnabled: enabled() });
 
 		await router.review(reviewInput());
 		await router.review(reviewInput());
@@ -215,5 +282,24 @@ describe("PermissionReviewRouter", () => {
 		}
 		expect(model.review).not.toHaveBeenCalled();
 		expect(user.review).not.toHaveBeenCalled();
+	});
+
+	it("never calls the model in Ask or Full mode", async () => {
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult());
+		const policy = new PermissionPolicy();
+		const router = new PermissionReviewRouter({ model, user, isModelEnabled: enabled() });
+
+		const askDecision = policy.evaluate({ settings: settingsForPreset("ask"), action: ordinaryRead() });
+		expect(askDecision.kind).toBe("allow");
+		const fullDecision = policy.evaluate({
+			settings: settingsForPreset("full"),
+			action: externalWrite(),
+		});
+		expect(fullDecision.kind).toBe("allow");
+
+		await router.review(reviewInput({ decision: { ...reviewInput().decision, minimumReviewer: "user" } }));
+		expect(model.review).not.toHaveBeenCalled();
+		expect(user.review).toHaveBeenCalledOnce();
 	});
 });

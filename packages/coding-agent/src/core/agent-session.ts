@@ -15,9 +15,9 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -157,10 +157,12 @@ import type { ModelRegistry } from "./model-registry.ts";
 import type { RequestPermissionApproval } from "./permissions/approval.ts";
 import {
 	AgentModelReviewTransport,
+	canonicalJson,
 	claimConsumedExecutionGrant,
 	createPermissionAuditEvent,
 	digestCanonical,
 	intersectPermissionSettings,
+	isFullAccess,
 	isPermissionPreset,
 	ModelPermissionReviewer,
 	type PermissionAuditEvent,
@@ -170,10 +172,15 @@ import {
 	PermissionReviewRouter,
 	ToolAuthorizationRuntime as PermissionToolAuthorizationRuntime,
 	ProjectPermissionRuleStore,
+	resolveReviewerAuthentication,
 	settingsForPreset,
 	type TrustedUserMessage,
 	UserPermissionReviewer,
 } from "./permissions/index.ts";
+import type { PermissionManualReason } from "./permissions/reviewer.ts";
+import type { PermissionReviewerConfig } from "./permissions/reviewer-config.ts";
+import { type SessionPermissionRule, SessionPermissionRuleStore } from "./permissions/session-rules.ts";
+import { initializeShellAnalysis } from "./permissions/shell-parser.ts";
 import type {
 	ExecutionGrant,
 	PermissionSettings as NormalizedPermissionSettings,
@@ -205,6 +212,7 @@ import {
 	clearSessionWorkDir,
 	createSessionWorkDir,
 	getOwnedSessionAttachmentDir,
+	getOwnedSessionDeliveredDir,
 	getOwnedSessionWorkDirs,
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
@@ -287,6 +295,15 @@ export type AgentSessionEvent =
 	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode }
 	| { type: "sandbox_health_changed"; sandboxHealth: WorkspaceSandboxHealthStatus }
 	| {
+			type: "permission_decision";
+			actionId: string;
+			source: "rule" | "model" | "user" | "full";
+			ruleIds?: readonly string[];
+			matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
+			manualReason?: PermissionManualReason;
+			remember?: "session" | "project";
+	  }
+	| {
 			type: "permission_review_started";
 			actionId: string;
 			reviewer: "model" | "user";
@@ -305,6 +322,20 @@ export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
 
 function referencesManagedWorkEnvironment(command: string): boolean {
 	return /\$(?:\{)?(?:METIS_WORK_DIR|TMPDIR|TMP|TEMP)\b/u.test(command);
+}
+
+/** Stable identity of the independent reviewer profile; empty when unconfigured. */
+function reviewerProfileKey(config: PermissionReviewerConfig | undefined): string {
+	return config ? canonicalJson(config) : "";
+}
+
+/** Read-only resource roots shown alongside effective permission rule scopes. */
+export interface PermissionScopePreview {
+	readonly workspaceRoots: readonly string[];
+	readonly skillReadRoots: readonly string[];
+	readonly sessionWorkRoots: readonly string[];
+	readonly memoryRoots: readonly string[];
+	readonly deliveryRoots: readonly string[];
 }
 
 export interface AgentSessionConfig {
@@ -479,6 +510,9 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
+
+/** Trusted controls whose default T rule must govern the registration shortcut. */
+const TRUSTED_CONTROL_RULE_TOOLS: ReadonlySet<string> = new Set(["ask_user", "inspect_agents", "submit_plan"]);
 
 export function classifyRuntimeFailure(
 	message?: string,
@@ -732,6 +766,7 @@ export class AgentSession {
 	private _systemPromptOverride?: string;
 	private readonly _permissionAudit: PermissionAuditWriter;
 	private readonly _permissionRuntime: PermissionToolAuthorizationRuntime;
+	private readonly _sessionPermissionRules?: SessionPermissionRuleStore;
 	private _permissionApprovalHandler?: RequestPermissionApproval;
 	private readonly _trustedUserMessages: TrustedUserMessage[] = [];
 	private readonly _interactiveBashBoundary?: InteractiveBashBoundary;
@@ -876,19 +911,25 @@ export class AgentSession {
 		this._permissionApprovalHandler = config.requestPermissionApproval;
 		const projectRules =
 			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined;
+		// Exact session allows live only in memory and only inside this session;
+		// subagents and other sessions can never read or widen them.
+		this._sessionPermissionRules = this._unattendedExecution
+			? undefined
+			: new SessionPermissionRuleStore(this.sessionManager.getSessionId());
 		this._permissionAudit = new PermissionAuditWriter({
 			append: (event) => {
 				if (
 					event.stage === "review" &&
-					(event.outcome === "allow" || event.outcome === "deny") &&
+					(event.outcome === "deny" || (event.reviewer === "user" && event.outcome === "unavailable")) &&
 					!(event.reviewer === "user" && this._permissionApprovalHandler === undefined)
 				) {
 					this.sessionManager.appendPermissionAuditRecord({
 						actionId: event.actionId,
 						toolName: event.toolName,
 						source: event.reviewer === "user" ? "user" : "reviewer",
-						decision: event.outcome === "allow" ? "allow" : "deny",
+						decision: "deny",
 						reason: event.reasonCode,
+						...(event.remember ? { remember: event.remember } : {}),
 					});
 				} else if (event.stage === "decision" && event.outcome === "deny") {
 					this.sessionManager.appendPermissionAuditRecord({
@@ -905,22 +946,38 @@ export class AgentSession {
 			sessionId: this.sessionManager.getSessionId(),
 			projectPath: this._cwd,
 			projectRules,
+			sessionRules: this._sessionPermissionRules,
 			managedMemoryRoots: this._agentDir ? [getVaultRoot(this._agentDir)] : [],
 			audit: this._permissionAudit,
 			onReview: (event) => this._emitPermissionReview(event),
+			onDecision: (event) => {
+				// Full has no approval audit. Persist final rule/model/user decisions
+				// once, after grant consumption, so reconnects retain their source.
+				if (event.source !== "full") {
+					this.sessionManager.appendPermissionAuditRecord({
+						actionId: event.actionId,
+						toolName: event.toolName,
+						source: event.source,
+						decision: "allow",
+						reason: "authorization.allowed",
+						...(event.ruleIds ? { ruleIds: [...event.ruleIds] } : {}),
+						...(event.matchedRule ? { matchedRule: { ...event.matchedRule } } : {}),
+						...(event.manualReason ? { manualReason: event.manualReason } : {}),
+						...(event.remember ? { remember: event.remember } : {}),
+					});
+				}
+				this._emit({ type: "permission_decision", ...event });
+			},
 			reviewerFactory: () =>
 				new PermissionReviewRouter({
+					isModelEnabled: () => this.settingsManager.getAutoReviewerEnabled(),
 					model: new ModelPermissionReviewer({
-						getActiveModel: () => this.model,
-						transport: new AgentModelReviewTransport(async (model, context, options) => {
-							const auth = await this._getRequiredRequestAuth(model);
-							return this._modelRegistry.streamSimple(model, context, {
-								...options,
-								apiKey: auth.apiKey,
-								...(auth.headers ? { headers: auth.headers } : {}),
-								...(auth.env ? { env: auth.env } : {}),
-							});
-						}),
+						getConfiguration: () => this.settingsManager.getPermissionReviewerConfig(),
+						resolveModel: (provider, modelId) => this._modelRegistry.find(provider, modelId),
+						resolveAuthentication: (config, model) => this._getPermissionReviewerRequestAuth(config, model),
+						transport: new AgentModelReviewTransport((model, context, options) =>
+							this._modelRegistry.streamSimple(model, context, options),
+						),
 					}),
 					user: new UserPermissionReviewer({
 						requestApproval: (request) => {
@@ -929,6 +986,7 @@ export class AgentSession {
 							return handler(request);
 						},
 						projectRules,
+						sessionRules: this._sessionPermissionRules,
 						projectPath: this._cwd,
 					}),
 				}),
@@ -1057,6 +1115,71 @@ export class AgentSession {
 		this._permissionRuntime.invalidate("project-rules");
 	}
 
+	/**
+	 * Session rules are owner-scoped to the real project directory (symlink
+	 * aliases compare as one project); a missing path fails closed. Callers may
+	 * only address this session's own project, never another project's rules.
+	 */
+	private _sessionRuleProjectPath(callerProjectPath?: string): string | undefined {
+		if (!this._cwd) return undefined;
+		let own: string;
+		try {
+			own = realpathSync(this._cwd);
+		} catch {
+			return undefined;
+		}
+		if (callerProjectPath === undefined) return own;
+		if (!isAbsolute(callerProjectPath)) return undefined;
+		try {
+			return realpathSync(callerProjectPath) === own ? own : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** In-memory exact allows remembered by this session's owner; never persisted. */
+	listSessionPermissionRules(projectPath: string): readonly SessionPermissionRule[] {
+		const project = this._sessionRuleProjectPath(projectPath);
+		return project ? (this._sessionPermissionRules?.list(project) ?? []) : [];
+	}
+
+	deleteSessionPermissionRule(projectPath: string, ruleId: string): boolean {
+		const project = this._sessionRuleProjectPath(projectPath);
+		if (!project) return false;
+		const deleted = this._sessionPermissionRules?.delete(project, ruleId) ?? false;
+		// Revoking a remembered allow must also fail any outstanding exact grant.
+		if (deleted) this._permissionRuntime.invalidate("project-rules");
+		return deleted;
+	}
+
+	clearSessionPermissionRules(projectPath: string): number {
+		const project = this._sessionRuleProjectPath(projectPath);
+		if (!project) return 0;
+		const cleared = this._sessionPermissionRules?.clear(project) ?? 0;
+		if (cleared > 0) this._permissionRuntime.invalidate("project-rules");
+		return cleared;
+	}
+
+	/**
+	 * Read-only preview of the real roots behind W/K/A/M/D rule scopes. It never
+	 * creates work or delivery directories and never lists another session's work.
+	 */
+	getPermissionScopePreview(): PermissionScopePreview {
+		const agentDir = this._agentDir;
+		const delivered = agentDir
+			? getOwnedSessionDeliveredDir(agentDir, this.sessionManager.getSessionId())
+			: undefined;
+		return Object.freeze({
+			workspaceRoots: Object.freeze([...this.sessionManager.getWorkspaceRoots()]),
+			skillReadRoots: Object.freeze([
+				...new Set(this.resourceLoader.getSkills().skills.map(({ baseDir }) => baseDir)),
+			]),
+			sessionWorkRoots: Object.freeze(this._activeWorkDir ? [this._activeWorkDir] : []),
+			memoryRoots: Object.freeze(agentDir ? [getVaultRoot(agentDir)] : []),
+			deliveryRoots: Object.freeze(delivered ? [delivered] : []),
+		});
+	}
+
 	get permissionGrantCount(): number {
 		return this._permissionRuntime.activeGrantCount;
 	}
@@ -1155,7 +1278,7 @@ export class AgentSession {
 		if (this.sessionManager.getCollaborationMode() === "plan") {
 			settings = intersectPermissionSettings(settings, {
 				sandboxPolicy: "read-only",
-				approvalPolicy: "deny",
+				approvalPolicy: settings.approvalPolicy === "never" ? "auto-review" : settings.approvalPolicy,
 			});
 		}
 		if (this._unattendedExecution) {
@@ -1177,12 +1300,28 @@ export class AgentSession {
 	}
 
 	private _authorizeTool(tool: AgentTool, entry: ToolDefinitionEntry): AgentTool {
-		if (this._isTrustedControlTool(tool.name)) return tool;
+		// Trusted controls with a matching default T rule must honour the same
+		// enable/delete state as every other tool. Browser tools keep their own
+		// confirmation flow and are still not wrapped by local shell rules.
+		if (this._isTrustedControlTool(tool.name) && !TRUSTED_CONTROL_RULE_TOOLS.has(tool.name)) {
+			return {
+				...tool,
+				execute: (...args) => {
+					if (this.sessionManager.getCollaborationMode() === "plan") {
+						throw new Error(`Tool ${tool.name} is unavailable in Plan mode; use read-only exploration tools.`);
+					}
+					return tool.execute(...args);
+				},
+			};
+		}
 		return {
 			...tool,
 			execute: async (toolCallId, params, signal, onUpdate) => {
 				await this.refreshSandboxHealth();
 				const managedBash = tool.name === "bash" && entry.provenance === "builtin";
+				if (managedBash && !isFullAccess(this._effectiveNormalizedPermissionSettings())) {
+					await initializeShellAnalysis();
+				}
 				if (
 					managedBash &&
 					!this._unattendedExecution &&
@@ -1208,6 +1347,7 @@ export class AgentSession {
 							cwd: session._cwd,
 							workspaceRoots: session._permissionWorkspaceRoots(tool.name, managedWorkDir),
 							...(managedWorkDir ? { managedWorkDir } : {}),
+							shellPath: session.settingsManager.getShellPath(),
 							provenance: entry.provenance,
 							toolIdentity: entry.toolIdentity,
 						});
@@ -1224,23 +1364,27 @@ export class AgentSession {
 					get autoCommandRules() {
 						return session.settingsManager.getAutoCommandRules();
 					},
+					get permissionRules() {
+						return session.settingsManager.getPermissionRules();
+					},
 					execute: async (grant: ExecutionGrant) => {
 						const bindBash = tool.name === "bash" && this._interactiveBashBoundary;
 						if (bindBash) this._interactiveBashBoundary!.bind(grant);
 						else claimConsumedExecutionGrant(grant);
 						try {
 							const execute = () => tool.execute(toolCallId, params, signal, onUpdate);
-							const action = request.action;
+							// The consumed grant already binds the exact write scope and command;
+							// re-describing the action here would re-run the tool adapter.
 							if (
 								this.sessionManager.getMode() === "code" &&
 								((entry.provenance === "builtin" && ["edit", "write", "bash"].includes(tool.name)) ||
-									action.writePaths.length > 0 ||
-									action.command !== undefined)
+									grant.writeRoots.length > 0 ||
+									grant.command !== undefined)
 							) {
 								return await this._codeChanges.run(
 									this._durableTurn?.turnId ?? this._codeChangeTurnId,
 									toolCallId,
-									{ cwd: this._cwd, paths: action.writePaths, scanWorkspace: action.command !== undefined },
+									{ cwd: this._cwd, paths: grant.writeRoots, scanWorkspace: grant.command !== undefined },
 									execute,
 								);
 							}
@@ -2107,6 +2251,21 @@ export class AgentSession {
 			);
 		}
 		throw new Error(formatNoApiKeyFoundMessage(model.provider));
+	}
+
+	/**
+	 * Dedicated reviewer connections use only their isolated AuthStorage key;
+	 * provider-selected reviewer models keep their normal provider credentials.
+	 * The saved profile's source decides, not the synthesized model provider.
+	 */
+	private _getPermissionReviewerRequestAuth(
+		config: PermissionReviewerConfig,
+		model: Model<any>,
+	): Promise<{ apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }> {
+		return resolveReviewerAuthentication(config, model, {
+			authStorage: this._modelRegistry.authStorage,
+			getSharedAuth: (sharedModel) => this._getRequiredRequestAuth(sharedModel),
+		});
 	}
 
 	private async _getSummarizationRequestAuth(model: Model<any>): Promise<{
@@ -3040,6 +3199,10 @@ export class AgentSession {
 				}
 				this.deliveredArtifacts?.rollbackAll();
 				this._permissionRuntime.invalidate("session");
+				// Closing the session clears its exact session allows (the design keeps
+				// them across aborts and reviewer switches, but never across close).
+				const sessionProject = this._sessionRuleProjectPath();
+				if (sessionProject) this._sessionPermissionRules?.clear(sessionProject);
 				this._permissionApprovalHandler = undefined;
 
 				this._extensionRunner.invalidate(
@@ -3450,12 +3613,22 @@ export class AgentSession {
 	}
 
 	async applyModelServiceSettingsRefresh(): Promise<void> {
-		await this.settingsManager.reload();
-		this._modelRegistry.refresh();
-		this._refreshCurrentModelFromRegistry();
-		this._applyImageToolSettings();
-		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
-		this.refreshSystemPrompt();
+		const reviewerProfileBefore = reviewerProfileKey(this.settingsManager.getPermissionReviewerConfig());
+		try {
+			await this.settingsManager.reload();
+			this._modelRegistry.refresh();
+			this._refreshCurrentModelFromRegistry();
+			this._applyImageToolSettings();
+			this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
+			this.refreshSystemPrompt();
+		} finally {
+			// A saved reviewer profile or its registered model must invalidate in-flight
+			// approvals; a reload failure must never leave stale authority alive.
+			const reviewerProfileAfter = reviewerProfileKey(this.settingsManager.getPermissionReviewerConfig());
+			if (reviewerProfileAfter !== reviewerProfileBefore || reviewerProfileAfter !== "") {
+				this._permissionRuntime.invalidate("settings");
+			}
+		}
 	}
 
 	/**
@@ -6062,9 +6235,10 @@ export class AgentSession {
 			const definition = this._trustedControlTools.get(trustedName);
 			if (!definition) continue;
 			const sourceInfo = createSyntheticSourceInfo(`<trusted:${trustedName}>`, { source: "trusted" });
-			definitionRegistry.set(trustedName, createToolDefinitionEntry(definition, sourceInfo));
+			const entry = createToolDefinitionEntry(definition, sourceInfo);
+			definitionRegistry.set(trustedName, entry);
 			const wrapped = wrapRegisteredTools([{ definition, sourceInfo }], runner)[0] as AgentTool;
-			toolRegistry.set(trustedName, wrapped);
+			toolRegistry.set(trustedName, this._authorizeTool(wrapped, entry));
 		}
 		const registryChanged =
 			previousDefinitions.size > 0 &&

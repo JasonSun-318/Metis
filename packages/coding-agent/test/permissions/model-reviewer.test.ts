@@ -3,7 +3,6 @@ import {
 	type AssistantMessage,
 	type Context,
 	createAssistantMessageEventStream,
-	getSupportedThinkingLevels,
 	type Model,
 	type SimpleStreamOptions,
 } from "@metis/ai/compat";
@@ -16,9 +15,12 @@ import {
 	type ModelReviewTransportRequest,
 	type ModelReviewVerdict,
 } from "../../src/core/permissions/model-reviewer.ts";
+import type { PermissionReviewerConfig } from "../../src/core/permissions/reviewer-config.ts";
 import { request, reviewInput } from "./reviewer-fixtures.ts";
 
-function model(id: string, reasoning = false): Model<any> {
+const MAX_TEST_OUTPUT_BYTES = 64 * 1024;
+
+function model(id: string, reasoning = false, overrides: Partial<Model<any>> = {}): Model<any> {
 	return {
 		id,
 		name: id,
@@ -31,7 +33,23 @@ function model(id: string, reasoning = false): Model<any> {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 8_192,
 		maxTokens: 1_024,
+		...overrides,
 	};
+}
+
+function reviewerModel(overrides: Partial<Model<any>> = {}): Model<any> {
+	return model("review-only", false, { provider: "review-provider", ...overrides });
+}
+
+function reviewerConfig(overrides: Partial<PermissionReviewerConfig> = {}): PermissionReviewerConfig {
+	return Object.freeze({
+		provider: "review-provider",
+		modelId: "review-only",
+		thinkingLevel: "off",
+		timeoutMs: 8_000,
+		maxOutputTokens: 512,
+		...overrides,
+	});
 }
 
 class FakeTransport implements ModelReviewTransport {
@@ -68,10 +86,18 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 function createReviewer(
 	transport: ModelReviewTransport,
-	getActiveModel: () => Model<any> | undefined = () => model("active"),
-	timeoutMs?: number,
+	options: {
+		readonly getConfiguration?: () => PermissionReviewerConfig | undefined;
+		readonly resolveModel?: (provider: string, modelId: string) => Model<any> | undefined;
+		readonly timeoutMs?: number;
+	} = {},
 ): ModelPermissionReviewer {
-	return new ModelPermissionReviewer({ getActiveModel, transport, timeoutMs });
+	return new ModelPermissionReviewer({
+		getConfiguration: options.getConfiguration ?? (() => reviewerConfig()),
+		resolveModel: options.resolveModel ?? (() => reviewerModel()),
+		transport,
+		timeoutMs: options.timeoutMs,
+	});
 }
 
 function assistantMessage(text: string): AssistantMessage {
@@ -94,7 +120,10 @@ function assistantMessage(text: string): AssistantMessage {
 	};
 }
 
-function verdictMessage(decision: "allow" | "deny"): AssistantMessage {
+function verdictMessage(
+	decision: "allow" | "deny",
+	argumentsValue: Record<string, unknown> = { decision },
+): AssistantMessage {
 	return {
 		...assistantMessage(""),
 		content: [
@@ -102,20 +131,22 @@ function verdictMessage(decision: "allow" | "deny"): AssistantMessage {
 				type: "toolCall",
 				id: "review-verdict-1",
 				name: "submit_permission_review",
-				arguments: { decision },
+				arguments: argumentsValue,
 			},
 		],
 		stopReason: "toolUse",
 	};
 }
 
-function transportRequest(): ModelReviewTransportRequest {
+function transportRequest(overrides: Partial<ModelReviewTransportRequest> = {}): ModelReviewTransportRequest {
 	return {
-		model: model("isolated"),
+		model: model("isolated", false, { provider: "review-provider" }),
 		thinkingLevel: "off",
+		maxOutputTokens: 512,
 		systemPrompt: "permission reviewer",
 		userPayload: '{"schemaVersion":2}',
 		signal: new AbortController().signal,
+		...overrides,
 	};
 }
 
@@ -131,21 +162,134 @@ function emit(
 }
 
 describe("ModelPermissionReviewer", () => {
-	it("uses the active model and its lowest supported thinking at call time", async () => {
-		const modelA = model("model-a");
-		const modelB = model("model-b", true);
-		let activeModel = modelA;
+	it("uses the independently selected model, thinking level, and budget exactly once", async () => {
+		const reviewModel = reviewerModel();
+		const transport = new FakeTransport(["allow"]);
+		const resolveModel = vi.fn(() => reviewModel);
+		const reviewer = new ModelPermissionReviewer({
+			getConfiguration: () =>
+				reviewerConfig({ provider: "review-provider", modelId: "review-only", thinkingLevel: "off" }),
+			resolveModel,
+			transport,
+		});
+
+		await reviewer.review(request());
+
+		expect(resolveModel).toHaveBeenCalledWith("review-provider", "review-only");
+		expect(transport.calls).toHaveLength(1);
+		expect(transport.calls[0]).toMatchObject({
+			model: reviewModel,
+			thinkingLevel: "off",
+			maxOutputTokens: 512,
+		});
+	});
+
+	it("snapshots authentication once before transport without re-reading it", async () => {
+		const authentication = { apiKey: "first-key", headers: { "x-review": "1" } };
+		const resolveAuthentication = vi.fn((_config: PermissionReviewerConfig, _model: Model<any>) => authentication);
+		const transport = new FakeTransport(["allow"]);
+		const reviewer = new ModelPermissionReviewer({
+			getConfiguration: () => reviewerConfig(),
+			resolveModel: () => reviewerModel(),
+			resolveAuthentication,
+			transport,
+		});
+
+		const result = await reviewer.review(request());
+
+		expect(result).toEqual({ kind: "allow", reviewer: "model" });
+		expect(resolveAuthentication).toHaveBeenCalledTimes(1);
+		expect(resolveAuthentication.mock.calls[0]?.[0]).toEqual(reviewerConfig());
+		expect(transport.calls[0]?.authentication).toEqual(authentication);
+	});
+
+	it("fails closed before transport when authentication is unavailable", async () => {
+		const transport = new FakeTransport(["allow"]);
+		const reviewer = new ModelPermissionReviewer({
+			getConfiguration: () => reviewerConfig(),
+			resolveModel: () => reviewerModel(),
+			resolveAuthentication: async () => {
+				throw new Error("no dedicated key");
+			},
+			transport,
+		});
+
+		const result = await reviewer.review(request());
+
+		expect(result).toMatchObject({ kind: "unavailable", reviewer: "model" });
+		expect(transport.calls).toHaveLength(0);
+	});
+
+	it("reads the independent configuration for each review without a chat-model fallback", async () => {
+		const firstModel = reviewerModel();
+		const secondModel = reviewerModel({ id: "review-second", reasoning: true });
 		const transport = new FakeTransport(["allow", "deny"]);
-		const reviewer = createReviewer(transport, () => activeModel);
+		const resolveModel = vi.fn((provider: string, modelId: string) => {
+			if (provider !== "review-provider") return undefined;
+			return modelId === "review-second" ? secondModel : firstModel;
+		});
+		let config = reviewerConfig();
+		const reviewer = createReviewer(transport, { getConfiguration: () => config, resolveModel });
 
 		await reviewer.review(request());
-		activeModel = modelB;
+		config = reviewerConfig({ modelId: "review-second", thinkingLevel: "low", maxOutputTokens: 1_024 });
 		await reviewer.review(request());
 
-		expect(transport.calls.map(({ model: used, thinkingLevel }) => [used.id, thinkingLevel])).toEqual([
-			[modelA.id, getSupportedThinkingLevels(modelA)[0]],
-			[modelB.id, getSupportedThinkingLevels(modelB)[0]],
+		expect(resolveModel.mock.calls).toEqual([
+			["review-provider", "review-only"],
+			["review-provider", "review-second"],
 		]);
+		expect(
+			transport.calls.map(({ model: used, thinkingLevel, maxOutputTokens }) => [
+				used.id,
+				thinkingLevel,
+				maxOutputTokens,
+			]),
+		).toEqual([
+			[firstModel.id, "off", 512],
+			[secondModel.id, "low", 1_024],
+		]);
+	});
+
+	it.each([
+		["missing configuration", (): undefined => undefined, (): Model<any> => reviewerModel()],
+		["an unavailable exact model", () => reviewerConfig(), (): Model<any> | undefined => undefined],
+		["an unsupported thinking level", () => reviewerConfig({ thinkingLevel: "high" }), () => reviewerModel()],
+		["an unsupported API adapter", () => reviewerConfig(), () => reviewerModel({ api: "google-generative-ai" })],
+		[
+			"an output budget above the model limit",
+			() => reviewerConfig({ maxOutputTokens: 2_048 }),
+			() => reviewerModel({ maxTokens: 1_024 }),
+		],
+	] as const)("fails closed without a transport call for %s", async (_label, getConfiguration, resolveModel) => {
+		const transport = new FakeTransport(["allow"]);
+		const result = await createReviewer(transport, { getConfiguration, resolveModel }).review(request());
+
+		expect(result).toMatchObject({ kind: "unavailable", reviewer: "model" });
+		expect(transport.calls).toHaveLength(0);
+	});
+
+	it("freezes the configuration when a review starts", async () => {
+		const started = deferred();
+		const release = deferred();
+		const transport = new FakeTransport([
+			async () => {
+				started.resolve();
+				await release.promise;
+				return "allow";
+			},
+		]);
+		let config = reviewerConfig({ maxOutputTokens: 512 });
+		const reviewer = createReviewer(transport, { getConfiguration: () => config });
+		const pending = reviewer.review(request());
+
+		await started.promise;
+		config = reviewerConfig({ maxOutputTokens: 4_096 });
+		release.resolve();
+		await pending;
+
+		expect(transport.calls[0]?.maxOutputTokens).toBe(512);
+		expect(transport.calls).toHaveLength(1);
 	});
 
 	it("sends one bounded payload through an isolated request", async () => {
@@ -155,11 +299,11 @@ describe("ModelPermissionReviewer", () => {
 		const call = transport.calls[0];
 		expect(call).toBeDefined();
 		expect(Object.keys(call ?? {}).sort()).toEqual(
-			["model", "signal", "systemPrompt", "thinkingLevel", "userPayload"].sort(),
+			["model", "signal", "systemPrompt", "thinkingLevel", "userPayload", "maxOutputTokens"].sort(),
 		);
 		expect(call?.systemPrompt).toContain("submit_permission_review");
-		expect(call?.systemPrompt).toContain("trustedUserMessages may confirm user intent");
-		expect(call?.systemPrompt).toContain("Allow clear non-destructive reads");
+		expect(call?.systemPrompt).toContain("trustedUserMessages establish the user's task");
+		expect(call?.systemPrompt).toContain("Allow ordinary reads");
 		expect(call?.systemPrompt).toContain("Emit no other output");
 		expect(JSON.parse(call?.userPayload ?? "{}")).toMatchObject({ schemaVersion: 2 });
 		expect(call).not.toHaveProperty("sessionHistory");
@@ -183,15 +327,17 @@ describe("ModelPermissionReviewer", () => {
 		expect(transport.calls).toHaveLength(1);
 	});
 
-	it("uses one timeout budget and does not retry", async () => {
+	it("uses the configured deadline as a single budget and does not retry", async () => {
 		const transport = new FakeTransport([
-			async ({ signal }) =>
+			async ({ signal }): Promise<ModelReviewVerdict> =>
 				new Promise<ModelReviewVerdict>((_resolve, reject) => {
 					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 				}),
 		]);
 
-		const result = await createReviewer(transport, undefined, 5).review(request());
+		const result = await createReviewer(transport, {
+			getConfiguration: () => reviewerConfig({ timeoutMs: 1_000 }),
+		}).review(request());
 
 		expect(result).toMatchObject({ kind: "unavailable", reviewer: "model" });
 		expect(transport.calls).toHaveLength(1);
@@ -213,7 +359,7 @@ describe("ModelPermissionReviewer", () => {
 		const parent = new AbortController();
 		const started = deferred();
 		const transport = new FakeTransport([
-			async ({ signal }) => {
+			async ({ signal }): Promise<ModelReviewVerdict> => {
 				started.resolve();
 				return new Promise<ModelReviewVerdict>((_resolve, reject) => {
 					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -229,11 +375,8 @@ describe("ModelPermissionReviewer", () => {
 		expect(transport.calls).toHaveLength(1);
 	});
 
-	it("fails closed before transport when no active model or input is invalid", async () => {
+	it("fails closed before transport when input is invalid", async () => {
 		const transport = new FakeTransport(["allow"]);
-		expect(await createReviewer(transport, () => undefined).review(request())).toMatchObject({
-			kind: "unavailable",
-		});
 		expect(
 			await createReviewer(transport).review(reviewInput({ redactedArguments: { cycle: undefined } })),
 		).toMatchObject({
@@ -245,6 +388,8 @@ describe("ModelPermissionReviewer", () => {
 	it("turns text-only, missing, wrong, malformed, extra, multiple, oversized, and incomplete outputs into unavailable", async () => {
 		const cases: Array<[string, StreamFn]> = [
 			["text-only", emit(assistantMessage("allow"))],
+			["truncated terminal", emit({ ...verdictMessage("allow"), stopReason: "length" })],
+			["wrong finish reason", emit({ ...verdictMessage("allow"), stopReason: "stop" })],
 			["no call", emit({ ...assistantMessage(""), content: [] })],
 			[
 				"wrong tool",
@@ -296,7 +441,14 @@ describe("ModelPermissionReviewer", () => {
 					],
 				}),
 			],
-			["oversized", emit(assistantMessage("x".repeat(16 * 1_024 + 1)))],
+			["oversized", emit(assistantMessage("x".repeat(MAX_TEST_OUTPUT_BYTES + 1)))],
+			[
+				"oversized thinking",
+				emit({
+					...assistantMessage(""),
+					content: [{ type: "thinking", thinking: "x".repeat(MAX_TEST_OUTPUT_BYTES + 1) }],
+				}),
+			],
 			[
 				"incomplete",
 				() => {
@@ -315,22 +467,18 @@ describe("ModelPermissionReviewer", () => {
 });
 
 describe("AgentModelReviewTransport", () => {
-	it("creates a fresh Agent with one terminal verdict tool and required tool choice", async () => {
+	it("creates a fresh Agent with one terminal verdict tool and the configured budget", async () => {
 		const calls: Array<{ model: Model<any>; context: Context; options?: SimpleStreamOptions }> = [];
 		const streamFn: StreamFn = (usedModel, context, options) => {
 			calls.push({ model: usedModel, context, options });
 			return emit(verdictMessage("allow"))(usedModel, context, options);
 		};
 		const transport = new AgentModelReviewTransport(streamFn);
-		const activeModel = model("isolated", true);
+		const activeModel = reviewerModel({ reasoning: true, maxTokens: 2_048 });
 
-		const output = await transport.run({
-			model: activeModel,
-			thinkingLevel: "low",
-			systemPrompt: "permission reviewer",
-			userPayload: '{"schemaVersion":2}',
-			signal: new AbortController().signal,
-		});
+		const output = await transport.run(
+			transportRequest({ model: activeModel, thinkingLevel: "low", maxOutputTokens: 2_048 }),
+		);
 
 		expect(output).toBe("allow");
 		expect(calls).toHaveLength(1);
@@ -341,11 +489,66 @@ describe("AgentModelReviewTransport", () => {
 		expect(calls[0]?.context.messages[0]).toMatchObject({ role: "user" });
 		expect(calls[0]?.options).toMatchObject({
 			maxRetries: 0,
-			maxTokens: 256,
-			toolChoice: "required",
+			maxTokens: 2_048,
+			toolChoice: "auto",
 			reasoning: "low",
 		});
 		expect(calls[0]?.options?.sessionId).toBeUndefined();
+	});
+
+	it("applies the review's authentication snapshot to the single provider request", async () => {
+		let observed: SimpleStreamOptions | undefined;
+		const streamFn: StreamFn = (usedModel, context, options) => {
+			observed = options;
+			return emit(verdictMessage("allow"))(usedModel, context, options);
+		};
+
+		await new AgentModelReviewTransport(streamFn).run(
+			transportRequest({
+				authentication: { apiKey: "snapshot-key", headers: { "x-review": "1" }, env: { REVIEW: "1" } },
+			}),
+		);
+
+		expect(observed).toMatchObject({
+			apiKey: "snapshot-key",
+			headers: { "x-review": "1" },
+			env: { REVIEW: "1" },
+		});
+	});
+
+	it.each([
+		["openai-completions", "off", "required"],
+		["openai-responses", "off", "required"],
+		["anthropic-messages", "off", "required"],
+		["openai-completions", "low", "auto"],
+		["openai-responses", "low", "auto"],
+		["anthropic-messages", "low", "auto"],
+	] as const)("maps %s with thinking %s to tool choice %s", async (api, thinkingLevel, expected) => {
+		let observed: SimpleStreamOptions | undefined;
+		const streamFn: StreamFn = (usedModel, context, options) => {
+			observed = options;
+			return emit(verdictMessage("allow"))(usedModel, context, options);
+		};
+
+		await new AgentModelReviewTransport(streamFn).run(
+			transportRequest({
+				model: reviewerModel({ api, reasoning: thinkingLevel !== "off" }),
+				thinkingLevel,
+				maxOutputTokens: 512,
+			}),
+		);
+
+		expect(observed).toMatchObject({ maxRetries: 0, maxTokens: 512, toolChoice: expected });
+	});
+
+	it("does not issue a provider request for an unsupported API adapter", async () => {
+		const streamFn = vi.fn<StreamFn>();
+		await expect(
+			new AgentModelReviewTransport(streamFn).run(
+				transportRequest({ model: reviewerModel({ api: "google-generative-ai" }) }),
+			),
+		).rejects.toMatchObject({ retryable: false });
+		expect(streamFn).not.toHaveBeenCalled();
 	});
 
 	it("returns deny from one tool execution and does not issue a second provider request", async () => {
@@ -359,12 +562,28 @@ describe("AgentModelReviewTransport", () => {
 		expect(calls).toHaveLength(1);
 	});
 
+	it("rejects an invalid final message before any recovery request", async () => {
+		let requests = 0;
+		const streamFn: StreamFn = (usedModel, context, options) => {
+			requests += 1;
+			if (requests > 1) throw new Error("unexpected recovery request");
+			return emit(verdictMessage("allow", { decision: "allow", extra: true }))(usedModel, context, options);
+		};
+
+		await expect(new AgentModelReviewTransport(streamFn).run(transportRequest())).rejects.toMatchObject({
+			retryable: false,
+		});
+		expect(requests).toBe(1);
+	});
+
 	it("rejects tool-isolation bypasses, oversized output, and incomplete streams", async () => {
 		await expect(
 			new AgentModelReviewTransport(emit(assistantMessage("allow"))).run(transportRequest()),
 		).rejects.toMatchObject({ retryable: false });
 		await expect(
-			new AgentModelReviewTransport(emit(assistantMessage("x".repeat(16 * 1_024 + 1)))).run(transportRequest()),
+			new AgentModelReviewTransport(emit(assistantMessage("x".repeat(MAX_TEST_OUTPUT_BYTES + 1)))).run(
+				transportRequest(),
+			),
 		).rejects.toMatchObject({ retryable: false });
 		await expect(
 			new AgentModelReviewTransport(() => {

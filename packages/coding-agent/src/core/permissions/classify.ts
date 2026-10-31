@@ -1,8 +1,11 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalizeActionPath, isPathInside } from "../../utils/paths.ts";
+import { getShellConfig } from "../../utils/shell.ts";
 import type { ActionRisk, NetworkTarget, PermissionAction, ToolProvenance } from "./approval.ts";
 import { bashReferencesSensitivePath, isSensitivePath } from "./sensitive-paths.ts";
+import { analyzeShellCommand } from "./shell-analysis.ts";
+import { getShellParserStatus } from "./shell-parser.ts";
 
 export type { ActionRisk, NetworkTarget, PermissionAction, ToolProvenance } from "./approval.ts";
 
@@ -14,6 +17,7 @@ export interface ClassifyActionInput {
 	readonly cwd: string;
 	readonly workspaceRoots: readonly string[];
 	readonly readOnlyRoots?: readonly string[];
+	readonly shellPath?: string;
 	readonly mcpAnnotations?: {
 		readonly readOnlyHint?: boolean;
 		readonly destructiveHint?: boolean;
@@ -154,6 +158,26 @@ function classifyBash(input: ClassifyActionInput, command: string): PermissionAc
 	const risks: ActionRisk[] = ["shell"];
 	if (bashReferencesSensitivePath(command)) risks.push("sensitive-read");
 	if (isOpaqueBashExecution(command)) risks.push("unknown");
+	// The trusted AST analyzer shares its facts with the permission claim; its
+	// effects only ever add risks here, never clear the conservative ones above.
+	if (getShellParserStatus().ready) {
+		try {
+			const analysis = analyzeShellCommand({
+				command,
+				cwd: input.cwd,
+				workspaceRoots: input.workspaceRoots,
+				readOnlyRoots: input.readOnlyRoots,
+				shellPath: input.shellPath ?? getShellConfig().shell,
+			});
+			for (const effect of analysis.effects) {
+				if ((RISK_ORDER as readonly string[]).includes(effect)) risks.push(effect as ActionRisk);
+			}
+			if (analysis.networkEndpoints.length > 0) risks.push("network");
+			if (!analysis.complete || analysis.disposition === "user") risks.push("unknown");
+		} catch {
+			risks.push("unknown");
+		}
+	}
 	if (
 		/\b(?:rm|rmdir|shred|truncate|dd|mkfs|del|erase|format)\b/iu.test(command) ||
 		/\bfind\b[^\n]*\s-delete\b/iu.test(command) ||

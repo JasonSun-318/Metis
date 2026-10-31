@@ -6,35 +6,43 @@ import type {
 	PermissionApprovalRequest,
 	RequestPermissionApproval,
 } from "./approval.ts";
-import { digestCanonical, digestPermissionAction } from "./normalize.ts";
+import { digestCanonical, digestRememberedPermissionAction } from "./normalize.ts";
 import type {
 	ProjectPermissionRuleInput,
 	ProjectPermissionRuleStore,
 	ProjectPermissionRuleSummary,
 } from "./project-rules.ts";
 import {
+	type PermissionManualReason,
 	type PermissionReviewer,
 	type PermissionReviewRequest,
 	type PermissionReviewResult,
 	unavailableReview,
 	validateReviewResult,
 } from "./reviewer.ts";
-import { buildModelReviewInput } from "./reviewer-input.ts";
+import { buildUserReviewInput } from "./reviewer-input.ts";
+import type { SessionPermissionRuleStore } from "./session-rules.ts";
 import type { NormalizedPermissionAction, PermissionEffect } from "./types.ts";
 
 const MAX_APPROVAL_REASON_BYTES = 2 * 1024;
 const MAX_SUMMARY_VALUE_LENGTH = 256;
 const MAX_SUMMARY_ITEMS = 16;
+// Mirrors the reviewer input bound: oversized commands are never approved or
+// truncated; the session owner is told to split the command and retry.
+const MAX_APPROVAL_COMMAND_BYTES = 32 * 1024;
 
 export interface UserPermissionReviewerOptions {
 	readonly requestApproval: RequestPermissionApproval;
 	readonly projectRules?: ProjectPermissionRuleStore;
+	/** In-memory exact allows owned by the current live session. */
+	readonly sessionRules?: SessionPermissionRuleStore;
 	readonly projectPath?: string;
 }
 
 interface ParsedApprovalDecision {
 	readonly decision: "allow" | "deny";
 	readonly rememberProject: boolean;
+	readonly rememberSession: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,10 +77,18 @@ function parseApprovalDecision(value: unknown): ParsedApprovalDecision {
 			throw new TypeError("Approval response is invalid");
 		}
 	}
-	if (value.remember !== undefined && value.remember !== "project") {
+	if (value.remember !== undefined && value.remember !== "project" && value.remember !== "session") {
 		throw new TypeError("Approval response is invalid");
 	}
-	return Object.freeze({ decision: value.decision, rememberProject: value.remember === "project" });
+	// Session rules are exact allows only; a deny has no session-scope form.
+	if (value.remember === "session" && value.decision !== "allow") {
+		throw new TypeError("Approval response is invalid");
+	}
+	return Object.freeze({
+		decision: value.decision,
+		rememberProject: value.remember === "project",
+		rememberSession: value.remember === "session",
+	});
 }
 
 function actionRisks(action: NormalizedPermissionAction): readonly ActionRisk[] {
@@ -103,7 +119,7 @@ function actionRisks(action: NormalizedPermissionAction): readonly ActionRisk[] 
 	return Object.freeze([...risks]);
 }
 
-function approvalAction(action: NormalizedPermissionAction): PermissionAction {
+function approvalAction(action: NormalizedPermissionAction, command?: string): PermissionAction {
 	return Object.freeze({
 		actionId: action.actionId,
 		toolName: action.toolName,
@@ -113,7 +129,7 @@ function approvalAction(action: NormalizedPermissionAction): PermissionAction {
 		networkTargets: Object.freeze(
 			action.networkEndpoints.map(({ hostname, port }) => Object.freeze({ host: hostname, port })),
 		),
-		...(action.command === undefined ? {} : { command: action.command }),
+		...(command === undefined ? {} : { command }),
 	});
 }
 
@@ -133,12 +149,14 @@ function exactProjectPath(action: NormalizedPermissionAction, configured: string
 function structuredApprovalRequest(
 	request: PermissionReviewRequest,
 	redactedArguments: unknown,
+	redactedCommand: string | undefined,
 	scopeComplete: boolean,
 	rememberProjectEligible: boolean,
+	rememberSessionEligible: boolean,
 ): PermissionApprovalRequest {
 	const { action, decision } = request;
 	return Object.freeze({
-		action: approvalAction(action),
+		action: approvalAction(action, redactedCommand),
 		args: Object.freeze({
 			reviewer: "user",
 			deterministicRisk: decision.riskLevel,
@@ -160,6 +178,7 @@ function structuredApprovalRequest(
 		executionTarget: decision.grant.executionTarget,
 		scopeComplete,
 		rememberProjectEligible,
+		rememberSessionEligible,
 		signal: request.signal,
 	});
 }
@@ -192,13 +211,37 @@ function ruleSummary(request: PermissionReviewRequest): readonly ProjectPermissi
 function ruleInput(request: PermissionReviewRequest, projectPath: string): ProjectPermissionRuleInput {
 	return Object.freeze({
 		projectPath,
-		actionDigest: digestPermissionAction(request.action),
+		actionDigest: digestRememberedPermissionAction(request.action),
 		grantDigest: digestCanonical(request.decision.grant),
 		toolName: request.action.toolName,
 		toolIdentity: request.action.toolIdentity,
 		riskLevel: request.decision.riskLevel,
 		summary: ruleSummary(request),
 	});
+}
+
+function manualDecisionReason(request: PermissionReviewRequest): PermissionManualReason {
+	if (request.priorModelOutcome === "deny") return "model-denied";
+	if (request.priorModelOutcome === "unavailable") {
+		return request.priorModelReason && /\btime(?:d)?\s*out\b|\btimeout\b/iu.test(request.priorModelReason)
+			? "model-timeout"
+			: "model-unavailable";
+	}
+	const { action, decision } = request;
+	if (decision.riskLevel === "critical") return "critical";
+	if (action.effects.includes("sensitive-read")) return "sensitive";
+	if (action.effects.includes("destructive")) return "destructive";
+	if (action.writePaths.length > 0) return "write";
+	if (action.networkEndpoints.length > 0) return "network";
+	if (action.effects.includes("unknown")) return "analysis-incomplete";
+	if (
+		action.provenance === "builtin" &&
+		action.toolName === "bash" &&
+		(!action.shellAnalysis || !action.shellAnalysis.complete || action.shellAnalysis.disposition === "user")
+	) {
+		return "analysis-incomplete";
+	}
+	return "policy";
 }
 
 async function approvalUntilAbort(
@@ -228,12 +271,23 @@ export class UserPermissionReviewer implements PermissionReviewer {
 
 	async review(request: PermissionReviewRequest): Promise<PermissionReviewResult> {
 		if (request.signal.aborted) return unavailableReview("user", "Permission approval was cancelled");
+		if (
+			request.action.command !== undefined &&
+			Buffer.byteLength(request.action.command, "utf8") > MAX_APPROVAL_COMMAND_BYTES
+		) {
+			return unavailableReview("user", "Command exceeds 32 KiB; split it into smaller commands and retry");
+		}
 
 		let redactedArguments: unknown;
+		let redactedCommand: string | undefined;
 		let scopeComplete: boolean;
 		let projectPath: string | undefined;
 		try {
-			redactedArguments = buildModelReviewInput(request).redactedArguments;
+			// Keep model redaction and scope validation without making the human
+			// fallback depend on the model-only shell-analysis size limit.
+			const reviewInput = buildUserReviewInput(request);
+			redactedArguments = reviewInput.redactedArguments;
+			redactedCommand = reviewInput.action.command;
 			scopeComplete = scopeIsComplete(request);
 			projectPath = exactProjectPath(request.action, this.options.projectPath);
 		} catch {
@@ -242,19 +296,40 @@ export class UserPermissionReviewer implements PermissionReviewer {
 		const rememberProjectEligible = Boolean(
 			this.options.projectRules && projectPath && scopeComplete && request.decision.riskLevel !== "critical",
 		);
+		const rememberSessionEligible = Boolean(
+			this.options.sessionRules && projectPath && scopeComplete && request.decision.riskLevel !== "critical",
+		);
 
 		let approval: ParsedApprovalDecision;
 		try {
 			approval = parseApprovalDecision(
 				await approvalUntilAbort(
 					this.options.requestApproval,
-					structuredApprovalRequest(request, redactedArguments, scopeComplete, rememberProjectEligible),
+					structuredApprovalRequest(
+						request,
+						redactedArguments,
+						redactedCommand,
+						scopeComplete,
+						rememberProjectEligible,
+						rememberSessionEligible,
+					),
 					request.signal,
 				),
 			);
 			if (request.signal.aborted) throw request.signal.reason ?? new Error("Approval aborted");
 		} catch {
 			return unavailableReview("user", "Permission approval UI closed or returned an invalid response");
+		}
+
+		if (approval.rememberSession) {
+			if (!rememberSessionEligible || !this.options.sessionRules || !projectPath) {
+				return unavailableReview("user", "This permission decision cannot be remembered safely");
+			}
+			try {
+				this.options.sessionRules.rememberAllow(ruleInput(request, projectPath));
+			} catch {
+				return unavailableReview("user", "The exact session permission rule could not be saved safely");
+			}
 		}
 
 		if (approval.rememberProject) {
@@ -274,6 +349,19 @@ export class UserPermissionReviewer implements PermissionReviewer {
 			}
 		}
 
-		return validateReviewResult(request, Object.freeze({ kind: approval.decision, reviewer: "user" as const }));
+		const manualReason = manualDecisionReason(request);
+		return validateReviewResult(
+			request,
+			Object.freeze({
+				kind: approval.decision,
+				reviewer: "user" as const,
+				manualReason,
+				...(approval.rememberProject
+					? { remember: "project" as const }
+					: approval.rememberSession
+						? { remember: "session" as const }
+						: {}),
+			}),
+		);
 	}
 }

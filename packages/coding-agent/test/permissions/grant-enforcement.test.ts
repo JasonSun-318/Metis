@@ -8,13 +8,29 @@ import {
 	ExecutionGrantStore,
 	normalizePermissionAction,
 	ToolAuthorizationRuntime,
+	tokenizeShellWords,
 } from "../../src/core/permissions/index.ts";
 import type { BashOperations } from "../../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../../src/core/workspace-sandbox.ts";
 
 const cwd = process.cwd();
 
-function action(command: string, timeout?: number, provenance: "builtin" | "mcp" = "builtin") {
+/** The trusted analysis trace the builtin bash claim attaches for these commands. */
+function bashTrace(command: string) {
+	const commands = command
+		.split(/\s*(?:\|\||&&|;|\|)\s*/u)
+		.filter(Boolean)
+		.map((segment) => ({
+			argv: [...tokenizeShellWords(segment).words],
+			complete: true,
+			disposition: "safe" as const,
+			effects: [] as const,
+			networkEndpoints: [] as const,
+		}));
+	return { disposition: "safe" as const, complete: true, commands };
+}
+
+function action(command: string, timeout?: number, provenance: "builtin" | "mcp" | "host" = "builtin") {
 	return normalizePermissionAction({
 		actionId: "bash-1",
 		toolName: "bash",
@@ -28,6 +44,9 @@ function action(command: string, timeout?: number, provenance: "builtin" | "mcp"
 		networkEndpoints: [],
 		command,
 		effects: [],
+		...(provenance === "builtin" ? { shellAnalysis: bashTrace(command) } : {}),
+		// Host target comes from the tool provenance, not a widened sandbox policy.
+		...(provenance === "host" ? { effects: [] as const } : {}),
 	});
 }
 
@@ -64,11 +83,15 @@ function request(
 ) {
 	const target = overrides.target ?? "sandbox";
 	return {
-		action: action(command, overrides.timeout, target === "external" ? "mcp" : "builtin"),
+		action: action(
+			command,
+			overrides.timeout,
+			target === "external" ? "mcp" : target === "host" ? "host" : "builtin",
+		),
 		args: { command, ...(overrides.timeout === undefined ? {} : { timeout: overrides.timeout }) },
 		settings:
 			target === "host"
-				? ({ sandboxPolicy: "danger-full-access", approvalPolicy: "user" } as const)
+				? ({ sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const)
 				: target === "external"
 					? ({ sandboxPolicy: "external-sandbox", approvalPolicy: "auto-review" } as const)
 					: ({ sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const),

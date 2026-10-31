@@ -1,8 +1,11 @@
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { initializeShellAnalysis } from "../src/core/permissions/shell-parser.ts";
 import { createToolIdentity, describeToolAction } from "../src/core/tool-permission-adapter.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { createAllToolDefinitions } from "../src/core/tools/index.ts";
+
+beforeAll(async () => initializeShellAnalysis());
 
 const cwd = join(process.cwd(), "builtin-permission-project");
 const definitions = createAllToolDefinitions(cwd, {
@@ -82,7 +85,7 @@ describe("built-in tool permission descriptors", () => {
 		expect(read.readPaths).toEqual(["README.md"]);
 		expect(write.writePaths).toEqual(["out.txt"]);
 		expect(JSON.stringify(write)).not.toContain("secret payload");
-		expect(bash).toMatchObject({ command: "rm -rf ./build", writePaths: ["./build"] });
+		expect(bash).toMatchObject({ command: "rm -rf ./build", writePaths: [join(cwd, "build")] });
 		expect(bash.effects).toContain("destructive");
 		expect(web.networkEndpoints).toEqual([{ hostname: "example.com", port: 443 }]);
 	});
@@ -124,7 +127,7 @@ describe("built-in tool permission descriptors", () => {
 			{ command: `echo result > ${target}` },
 			{ ...context, provenance: "builtin", toolIdentity: "builtin-bash-redirection" },
 		);
-		expect(exact.writePaths).toEqual([cwd, target]);
+		expect(exact.writePaths).toEqual([target]);
 		expect(
 			describeToolAction(
 				definitions.bash,
@@ -165,10 +168,15 @@ describe("built-in tool permission descriptors", () => {
 		expect(read.readPaths).toContain(outside);
 		expect(read.writePaths).toEqual([]);
 		const python = describe(`python ./script.py ${outside}`, "builtin-bash-unknown-paths");
-		expect(python.writePaths).toEqual(expect.arrayContaining([join(cwd, "script.py"), outside]));
-		expect(python.effects).not.toContain("unknown");
+		expect(python.writePaths).toEqual([cwd]);
+		expect(python.effects).toContain("unknown");
+		expect(python.shellAnalysis?.complete).toBe(false);
 		expect(describe("touch $OUTPUT_PATH", "builtin-bash-dynamic-operand").effects).toContain("unknown");
-		expect(describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory").effects).toContain("unknown");
+		const targetCopy = describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory");
+		expect(targetCopy.shellAnalysis?.complete).toBe(false);
+		expect(targetCopy.writePaths).toContain(outside);
+		expect(targetCopy.readPaths).toContain(join(cwd, "source.txt"));
+		expect(targetCopy.effects).toContain("unknown");
 	});
 
 	it("marks structured and shell reads of credential-shaped paths as sensitive", () => {

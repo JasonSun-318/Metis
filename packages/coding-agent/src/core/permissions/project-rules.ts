@@ -324,6 +324,10 @@ export class ProjectPermissionRuleStore {
 		}));
 	}
 
+	listAll(): readonly ProjectPermissionRule[] {
+		return this.transact((rules) => ({ result: Object.freeze(rules.map(freezeRule)) }));
+	}
+
 	delete(projectPath: string, id: string): boolean {
 		const canonicalProject = canonicalProjectPath(projectPath);
 		const ruleId = requiredDigest(id, "id");
@@ -345,3 +349,6 @@ export class ProjectPermissionRuleStore {
 		});
 	}
 }
+
+// Share only the existing pure identity/path normalization with in-memory rules.
+export { canonicalProjectPath as canonicalPermissionRuleProjectPath, normalizeInput as normalizePermissionRuleInput };

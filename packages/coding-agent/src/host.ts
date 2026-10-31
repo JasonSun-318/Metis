@@ -15,6 +15,54 @@ export {
 	readKnowledgeLinks,
 } from "./core/knowledge-context.ts";
 export { parseKnowledgeNote, resolveKnowledgeLink } from "./core/knowledge-markdown.ts";
+export {
+	AgentModelReviewTransport,
+	ModelPermissionReviewer,
+	type ModelPermissionReviewerOptions,
+	type ModelReviewTransport,
+	ModelReviewTransportError,
+	type ModelReviewTransportRequest,
+	type ModelReviewVerdict,
+	reviewerToolChoice,
+} from "./core/permissions/model-reviewer.ts";
+export { normalizePermissionAction } from "./core/permissions/normalize.ts";
+export {
+	createDefaultPermissionRules,
+	MAX_PERMISSION_RULES,
+	MAX_USER_PERMISSION_RULES,
+	normalizePermissionRules,
+	type PermissionRule,
+	type PermissionRuleKind,
+	type PermissionRuleMode,
+	type PermissionRuleScope,
+	type PermissionRuleView,
+	permissionRuleView,
+} from "./core/permissions/permission-rules.ts";
+export {
+	isDedicatedReviewerConfig,
+	normalizePermissionReviewerConfig,
+	type PermissionReviewerConfig,
+	type PermissionReviewerDedicatedConfig,
+	type PermissionReviewerProviderConfig,
+	type PermissionReviewerView,
+	REVIEWER_APIS,
+	type ReviewerApi,
+	type ReviewerConfigurationStatus,
+	type ReviewerReasoningMode,
+} from "./core/permissions/reviewer-config.ts";
+export { redactPermissionCommand } from "./core/permissions/reviewer-input.ts";
+export {
+	DEDICATED_REVIEWER_AUTH_KEY,
+	DEDICATED_REVIEWER_PROVIDER,
+	type ReviewerApiKeySource,
+	type ReviewerModelLookup,
+	type ReviewerModelResolution,
+	type ReviewerRequestAuth,
+	resolveDedicatedReviewerApiKey,
+	resolveReviewerAuthentication,
+	resolveReviewerModel,
+} from "./core/permissions/reviewer-model.ts";
+export { type SessionPermissionRule, SessionPermissionRuleStore } from "./core/permissions/session-rules.ts";
 export type { DurablePromptInput } from "./core/runtime-recovery.ts";
 // Schedule data trash seam for hosts that need to inject a non-OS trash implementation.
 export { trashScheduledTaskData } from "./core/schedules/delete.ts";
@@ -81,6 +129,7 @@ export type {
 	PermissionApprovalRequest,
 	PermissionAuditEvent,
 	PermissionAuditSink,
+	PermissionScopePreview,
 	PluginFormat,
 	PluginIssue,
 	PluginRecord,

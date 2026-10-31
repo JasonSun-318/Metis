@@ -20,7 +20,10 @@ export interface PermissionAuditEvent {
 	readonly stage: (typeof STAGES)[number];
 	readonly outcome: (typeof OUTCOMES)[number];
 	readonly reviewer?: (typeof REVIEWERS)[number];
+	readonly remember?: "session" | "project";
 	readonly executionTarget?: (typeof TARGETS)[number];
+	readonly ruleIds?: readonly string[];
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
 	readonly reasonCode: string;
 	readonly timestamp: string;
 }
@@ -75,9 +78,26 @@ export function createPermissionAuditEvent(input: PermissionAuditEventInput): Pe
 		stage: enumValue(input.stage, STAGES, "stage"),
 		outcome: enumValue(input.outcome, OUTCOMES, "outcome"),
 		...(input.reviewer === undefined ? {} : { reviewer: enumValue(input.reviewer, REVIEWERS, "reviewer") }),
+		...(input.remember === undefined
+			? {}
+			: { remember: enumValue(input.remember, ["session", "project"] as const, "remember") }),
 		...(input.executionTarget === undefined
 			? {}
 			: { executionTarget: enumValue(input.executionTarget, TARGETS, "executionTarget") }),
+		...(input.ruleIds === undefined
+			? {}
+			: {
+					ruleIds: Object.freeze(input.ruleIds.map((id) => text(id, "ruleId", 128))),
+				}),
+		...(input.matchedRule === undefined
+			? {}
+			: {
+					matchedRule: Object.freeze({
+						id: text(input.matchedRule.id, "matchedRule.id", 128),
+						name: text(input.matchedRule.name, "matchedRule.name", 256),
+						scope: text(input.matchedRule.scope, "matchedRule.scope", 32),
+					}),
+				}),
 		reasonCode,
 		timestamp,
 	});

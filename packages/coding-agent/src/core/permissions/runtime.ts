@@ -4,10 +4,12 @@ import { canonicalizeActionPath } from "../../utils/paths.ts";
 import { createPermissionAuditEvent, type PermissionAuditEvent, type PermissionAuditWriter } from "./audit.ts";
 import type { AutoCommandRule } from "./auto-command-rules.ts";
 import { ExecutionGrantStore } from "./grant-store.ts";
-import { digestCanonical, digestPermissionAction } from "./normalize.ts";
+import { digestCanonical, digestPermissionAction, digestRememberedPermissionAction } from "./normalize.ts";
+import type { PermissionRule } from "./permission-rules.ts";
 import { PermissionPolicy, type PermissionPolicyInput } from "./policy.ts";
 import type { ProjectPermissionRuleInput } from "./project-rules.ts";
 import {
+	type PermissionManualReason,
 	type PermissionReviewer,
 	type PermissionReviewRequest,
 	type PermissionReviewResult,
@@ -35,6 +37,11 @@ export interface PermissionExecutionRequest<T> {
 	readonly signal: AbortSignal;
 	readonly execute: (grant: ExecutionGrant) => Promise<T>;
 	readonly autoCommandRules: readonly AutoCommandRule[];
+	/**
+	 * Effective permission rules. When omitted, the policy uses the 51 defaults
+	 * plus `autoCommandRules`; an explicit empty array authorizes no rule.
+	 */
+	readonly permissionRules?: readonly PermissionRule[];
 	/** Re-evaluate an unstarted action after a live permission change. Action identity must stay exact. */
 	readonly revalidateOnSettingsChange?: boolean;
 }
@@ -51,10 +58,17 @@ export type PermissionRuntimeInvalidation =
 
 interface ProjectRuleMatch {
 	readonly decision: "allow" | "deny";
+	readonly id?: string;
+	readonly toolName?: string;
+	readonly summary?: ProjectPermissionRuleInput["summary"];
+	/** Present only when a real store returned its exact rule; test stubs may omit it. */
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: "project" | "session" };
 }
 
 export interface ProjectPermissionRuleMatcher {
 	match(input: ProjectPermissionRuleInput): ProjectRuleMatch | undefined;
+	/** Optional so stub matchers only implement matching; live stores support clearing. */
+	clear?(projectPath: string): number;
 }
 
 export type PermissionReviewBoundaryEvent =
@@ -72,10 +86,22 @@ export type PermissionReviewBoundaryEvent =
 			readonly riskLevel: RiskLevel;
 	  };
 
+export interface PermissionAuthorizationDecision {
+	readonly actionId: string;
+	readonly toolName: string;
+	readonly source: "rule" | "model" | "user" | "full";
+	readonly ruleIds?: readonly string[];
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
+	readonly manualReason?: PermissionManualReason;
+	readonly remember?: "session" | "project";
+}
+
 export interface ToolAuthorizationRuntimeOptions {
 	readonly sessionId: string;
 	readonly policy?: PermissionPolicy;
 	readonly projectRules?: ProjectPermissionRuleMatcher;
+	/** In-memory exact allows remembered for this live session; never shared across sessions. */
+	readonly sessionRules?: ProjectPermissionRuleMatcher;
 	readonly projectPath?: string;
 	/** Engine-managed roots (e.g. the memory vault) builtin memory tools may write under. */
 	readonly managedMemoryRoots?: readonly string[];
@@ -85,10 +111,11 @@ export interface ToolAuthorizationRuntimeOptions {
 	readonly now?: () => number;
 	readonly createEventId?: () => string;
 	readonly onReview?: (event: PermissionReviewBoundaryEvent) => void;
+	readonly onDecision?: (event: PermissionAuthorizationDecision) => void;
 }
 
 type AllowedDecision = Exclude<PermissionPolicyDecision, { readonly kind: "deny" }>;
-type AuthorizationSource = "policy" | "rule" | "review";
+type AuthorizationSource = "policy" | "rule" | "permission-rule" | "review";
 
 interface RuntimeSnapshot {
 	readonly action: NormalizedPermissionAction;
@@ -96,6 +123,7 @@ interface RuntimeSnapshot {
 	readonly sandboxHealth: PermissionExecutionRequest<unknown>["sandboxHealth"];
 	readonly epoch: number;
 	readonly autoCommandRules: readonly AutoCommandRule[];
+	readonly permissionRules: readonly PermissionRule[] | undefined;
 }
 
 export class PermissionDeniedError extends Error {
@@ -127,6 +155,29 @@ function actionChangeReason(
 	return undefined;
 }
 
+/** Exact stores return validated rule fields; minimal matchers may omit display metadata. */
+function exactRuleMatch(match: ProjectRuleMatch, scope: "project" | "session"): ProjectRuleMatch {
+	if (match.id === undefined || match.toolName === undefined) return { decision: match.decision };
+	const name = match.summary?.find((entry) => entry.label === "Command")?.value ?? match.toolName;
+	const shortName =
+		Buffer.byteLength(name, "utf8") <= 256
+			? name
+			: `${Buffer.from(name).subarray(0, 253).toString("utf8").replace(/�$/u, "")}…`;
+	return Object.freeze({
+		decision: match.decision,
+		matchedRule: Object.freeze({ id: match.id, name: shortName, scope }),
+	});
+}
+
+function ruleMatchDetails(match: ProjectRuleMatch | undefined): {
+	readonly ruleIds?: readonly string[];
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
+} {
+	const matchedRule = match?.matchedRule;
+	if (!matchedRule) return {};
+	return { ruleIds: [matchedRule.id], matchedRule };
+}
+
 function ruleInput(
 	projectPath: string,
 	action: NormalizedPermissionAction,
@@ -134,13 +185,24 @@ function ruleInput(
 ): ProjectPermissionRuleInput {
 	return Object.freeze({
 		projectPath,
-		actionDigest: digestPermissionAction(action),
+		actionDigest: digestRememberedPermissionAction(action),
 		grantDigest: digestCanonical(decision.grant),
 		toolName: action.toolName,
 		toolIdentity: action.toolIdentity,
 		riskLevel: decision.riskLevel,
 		summary: Object.freeze([]),
 	});
+}
+
+/**
+ * Exact remembered allows may only replace a human review when the action scope
+ * is complete: unknown effects or a commandless Bash action have no reusable
+ * exact identity. Critical effects are excluded by the risk level check.
+ */
+function rememberedScopeIsReusable(action: NormalizedPermissionAction): boolean {
+	if (action.effects.includes("unknown")) return false;
+	if (action.toolName === "bash" && action.command === undefined) return false;
+	return true;
 }
 
 function reasonCodeForReview(result: PermissionReviewResult): string {
@@ -213,13 +275,44 @@ export class ToolAuthorizationRuntime {
 		this.currentReview = undefined;
 		this.grants.revokeAll();
 		if (reason === "model" || reason === "session") this.reviewer = undefined;
+		// Session allows bind to the cwd, tool identity and provenance they were
+		// approved for; a reviewer/model switch or mode change must keep them.
+		if (reason === "cwd" || reason === "provenance" || reason === "tool-registry") this.clearSessionRules();
 		return this.epoch;
+	}
+
+	private clearSessionRules(): void {
+		const { sessionRules } = this.options;
+		if (!sessionRules || !this.projectPath) return;
+		try {
+			sessionRules.clear?.(this.projectPath);
+		} catch {
+			// Store failures cannot resurrect revoked grants; matching re-checks anyway.
+		}
 	}
 
 	private snapshot<T>(request: PermissionExecutionRequest<T>): RuntimeSnapshot {
 		const action = request.action;
 		if (digestCanonical(request.args) !== action.argsDigest) {
 			throw new PermissionDeniedError("Tool arguments changed");
+		}
+		let permissionRules: readonly PermissionRule[] | undefined;
+		let autoCommandRules: readonly AutoCommandRule[] = [];
+		if (!isFullAccess(request.settings)) {
+			try {
+				const configured = request.permissionRules;
+				if (configured !== undefined) {
+					permissionRules = Object.freeze(configured.map((rule) => Object.freeze({ ...rule })));
+				} else {
+					autoCommandRules = Object.freeze(
+						(request.autoCommandRules ?? []).map((rule) => Object.freeze({ ...rule })),
+					);
+				}
+			} catch {
+				// Settings reports the configuration error. Disable rule-based allows,
+				// while independent exact grants and the review path remain available.
+				permissionRules = Object.freeze([]);
+			}
 		}
 		return Object.freeze({
 			action: Object.freeze({
@@ -235,7 +328,8 @@ export class ToolAuthorizationRuntime {
 			settings: Object.freeze({ ...request.settings }),
 			sandboxHealth: request.sandboxHealth,
 			epoch: this.epoch,
-			autoCommandRules: Object.freeze((request.autoCommandRules ?? []).map((rule) => Object.freeze({ ...rule }))),
+			autoCommandRules,
+			permissionRules,
 		});
 	}
 
@@ -244,6 +338,7 @@ export class ToolAuthorizationRuntime {
 			action: snapshot.action,
 			settings: snapshot.settings,
 			autoCommandRules: snapshot.autoCommandRules,
+			...(snapshot.permissionRules === undefined ? {} : { permissionRules: snapshot.permissionRules }),
 			managedMemoryRoots: this.managedMemoryRoots,
 		} satisfies PermissionPolicyInput);
 		if (
@@ -257,11 +352,18 @@ export class ToolAuthorizationRuntime {
 	}
 
 	private matchRule(action: NormalizedPermissionAction, decision: AllowedDecision): ProjectRuleMatch | undefined {
-		const { projectRules } = this.options;
+		const { projectRules, sessionRules } = this.options;
 		const projectPath = this.projectPath;
-		if (!projectPath || !projectRules || !action.workspaceRoots.includes(projectPath)) return undefined;
+		if (!projectPath || (!projectRules && !sessionRules) || !action.workspaceRoots.includes(projectPath)) {
+			return undefined;
+		}
 		try {
-			return projectRules.match(ruleInput(projectPath, action, decision));
+			const input = ruleInput(projectPath, action, decision);
+			// A project deny always wins; both stores otherwise only ever allow.
+			const project = projectRules?.match(input);
+			if (project) return exactRuleMatch(project, "project");
+			const session = sessionRules?.match(input);
+			return session ? exactRuleMatch(session, "session") : undefined;
 		} catch {
 			throw new PermissionDeniedError("rule.unavailable");
 		}
@@ -314,6 +416,9 @@ export class ToolAuthorizationRuntime {
 		if (digestCanonical(current.autoCommandRules) !== digestCanonical(initial.autoCommandRules)) {
 			throw new PermissionDeniedError("Auto command rules changed");
 		}
+		if (digestCanonical(current.permissionRules ?? null) !== digestCanonical(initial.permissionRules ?? null)) {
+			throw new PermissionDeniedError("Permission rules changed");
+		}
 		if (current.sandboxHealth !== initial.sandboxHealth) {
 			throw new PermissionDeniedError("Sandbox health changed");
 		}
@@ -336,6 +441,12 @@ export class ToolAuthorizationRuntime {
 		if (source === "rule" && rule?.decision !== "allow") {
 			throw new PermissionDeniedError("rule.changed");
 		}
+		if (
+			source === "permission-rule" &&
+			(currentDecision.kind !== "allow" || (currentDecision.ruleIds?.length ?? 0) === 0)
+		) {
+			throw new PermissionDeniedError("permission.rule.changed");
+		}
 	}
 
 	private async appendAudit(
@@ -344,7 +455,7 @@ export class ToolAuthorizationRuntime {
 		stage: PermissionAuditEvent["stage"],
 		outcome: PermissionAuditEvent["outcome"],
 		reasonCode: string,
-		details: Pick<PermissionAuditEvent, "reviewer" | "executionTarget"> = {},
+		details: Pick<PermissionAuditEvent, "reviewer" | "executionTarget" | "ruleIds" | "matchedRule" | "remember"> = {},
 	): Promise<void> {
 		if (!this.options.audit) return;
 		try {
@@ -369,14 +480,15 @@ export class ToolAuthorizationRuntime {
 	}
 
 	async authorizeAndExecute<T>(request: PermissionExecutionRequest<T>): Promise<T> {
-		const originalAction = this.snapshot(request).action;
+		const initial = this.snapshot(request);
+		const originalAction = initial.action;
 		const authorityEpoch = this.authorityEpoch;
 		for (let attempt = 0; attempt < 16; attempt++) {
 			throwIfAborted(request.signal);
 			const epoch = this.epoch;
 			let started = false;
 			try {
-				return await this.authorizeAttempt(request, () => {
+				return await this.authorizeAttempt(request, attempt === 0 ? initial : undefined, () => {
 					started = true;
 				});
 			} catch (error) {
@@ -395,9 +507,13 @@ export class ToolAuthorizationRuntime {
 		throw new PermissionDeniedError("settings.unstable");
 	}
 
-	private async authorizeAttempt<T>(request: PermissionExecutionRequest<T>, onStarted: () => void): Promise<T> {
+	private async authorizeAttempt<T>(
+		request: PermissionExecutionRequest<T>,
+		firstSnapshot: RuntimeSnapshot | undefined,
+		onStarted: () => void,
+	): Promise<T> {
 		throwIfAborted(request.signal);
-		const initial = this.snapshot(request);
+		const initial = firstSnapshot ?? this.snapshot(request);
 		const initialDecision = this.evaluate(initial);
 		if (initialDecision.kind === "deny") {
 			await this.appendAudit(initial.action, initialDecision.riskLevel, "decision", "deny", "policy.deny");
@@ -405,22 +521,43 @@ export class ToolAuthorizationRuntime {
 		}
 
 		const initialRule = isFullAccess(initial.settings) ? undefined : this.matchRule(initial.action, initialDecision);
+		const initialRuleDetails = ruleMatchDetails(initialRule);
 		if (initialRule?.decision === "deny") {
-			await this.appendAudit(initial.action, initialDecision.riskLevel, "decision", "deny", "rule.deny");
+			await this.appendAudit(
+				initial.action,
+				initialDecision.riskLevel,
+				"decision",
+				"deny",
+				"rule.deny",
+				initialRuleDetails,
+			);
 			throw new PermissionDeniedError("rule.deny");
 		}
 
+		let finalSource: PermissionAuthorizationDecision["source"] = isFullAccess(initial.settings) ? "full" : "rule";
+		let manualReason: PermissionManualReason | undefined;
+		let remember: "session" | "project" | undefined;
+		const permissionRuleAllowed = initialDecision.kind === "allow" && (initialDecision.ruleIds?.length ?? 0) > 0;
 		let source: AuthorizationSource =
 			initialDecision.kind === "review" &&
 			initialRule?.decision === "allow" &&
-			initialDecision.riskLevel !== "critical"
+			initialDecision.riskLevel !== "critical" &&
+			rememberedScopeIsReusable(initial.action)
 				? "rule"
-				: "policy";
+				: permissionRuleAllowed
+					? "permission-rule"
+					: "policy";
 		if (initialDecision.kind === "review" && source !== "rule") {
 			const signal = this.linkedSignal(request.signal);
 			let redactedArguments: unknown;
 			try {
-				redactedArguments = redactPermissionArguments(request.args);
+				// Builtin Bash may prepend runtime protections. Review the command
+				// that the trusted descriptor bound to execution, including that prefix.
+				const args =
+					initial.action.provenance === "builtin" && initial.action.toolName === "bash"
+						? { ...(request.args as Record<string, unknown>), command: initial.action.command }
+						: request.args;
+				redactedArguments = redactPermissionArguments(args);
 			} catch {
 				throw new PermissionDeniedError("review.arguments.invalid");
 			}
@@ -462,18 +599,39 @@ export class ToolAuthorizationRuntime {
 				"review",
 				review.kind === "allow" ? "allow" : review.kind === "deny" ? "deny" : "unavailable",
 				reasonCodeForReview(review),
-				{ reviewer: review.reviewer },
+				{
+					reviewer: review.reviewer,
+					...(review.kind !== "unavailable" && review.remember ? { remember: review.remember } : {}),
+				},
 			);
 			if (review.kind !== "allow") throw new PermissionDeniedError(reasonCodeForReview(review));
 			source = "review";
+			finalSource = review.reviewer;
+			manualReason = review.reviewer === "user" ? review.manualReason : undefined;
+			remember = review.reviewer === "user" ? review.remember : undefined;
 		}
+		const policyRuleDetails =
+			initialDecision.kind === "allow" && initialDecision.ruleIds
+				? {
+						...(initialDecision.ruleIds ? { ruleIds: initialDecision.ruleIds } : {}),
+						...(initialDecision.matchedRule ? { matchedRule: initialDecision.matchedRule } : {}),
+					}
+				: {};
+		const decisionRuleDetails = source === "rule" ? initialRuleDetails : policyRuleDetails;
 		await this.appendAudit(
 			initial.action,
 			initialDecision.riskLevel,
 			"decision",
 			"allow",
-			source === "rule" ? "rule.allow" : source === "review" ? "review.allow" : "policy.allow",
-			{ executionTarget: initialDecision.grant.executionTarget },
+			source === "rule" || source === "permission-rule"
+				? "rule.allow"
+				: source === "review"
+					? "review.allow"
+					: "policy.allow",
+			{
+				executionTarget: initialDecision.grant.executionTarget,
+				...decisionRuleDetails,
+			},
 		);
 
 		throwIfAborted(request.signal);
@@ -512,6 +670,20 @@ export class ToolAuthorizationRuntime {
 			}
 			try {
 				onStarted();
+				try {
+					this.options.onDecision?.({
+						actionId: current.action.actionId,
+						toolName: current.action.toolName,
+						source: finalSource,
+						...decisionRuleDetails,
+						...(manualReason ? { manualReason } : {}),
+						...(remember ? { remember } : {}),
+					});
+				} catch {
+					// Presentation observers do not grant or reverse authority.
+				}
+				throwIfAborted(request.signal);
+				this.assertAuthorizationStillValid(this.assertUnchanged(request, initial), initialDecision, source);
 				const result = await request.execute(consumed);
 				await this.appendAudit(
 					current.action,

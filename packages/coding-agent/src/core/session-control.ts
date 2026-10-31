@@ -1,5 +1,6 @@
 import { isAbsolute, normalize } from "node:path";
 import { dataFields } from "./data-fields.ts";
+import { isPermissionManualReason, type PermissionManualReason } from "./permissions/reviewer.ts";
 import { isPermissionPreset, type PermissionPreset } from "./permissions/settings.ts";
 import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
 import { type DurablePromptInput, parseDurablePromptSubmission } from "./runtime-recovery.ts";
@@ -25,7 +26,7 @@ export interface SessionPermissionPresetEntry extends SessionControlEntryBase {
 }
 
 export type PermissionDecision = "allow" | "ask" | "deny";
-export type PermissionDecisionSource = "user" | "reviewer" | "policy";
+export type PermissionDecisionSource = "user" | "reviewer" | "policy" | "rule" | "model" | "full";
 
 export interface SessionPermissionAuditEntry extends SessionControlEntryBase {
 	readonly type: "session_permission_audit";
@@ -34,6 +35,10 @@ export interface SessionPermissionAuditEntry extends SessionControlEntryBase {
 	readonly source: PermissionDecisionSource;
 	readonly decision: PermissionDecision;
 	readonly reason: string;
+	readonly ruleIds?: readonly string[];
+	readonly matchedRule?: { readonly id: string; readonly name: string; readonly scope: string };
+	readonly manualReason?: PermissionManualReason;
+	readonly remember?: "session" | "project";
 }
 
 export interface SessionDirectoryAddedEntry extends SessionControlEntryBase {
@@ -459,14 +464,75 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		};
 	}
 	if (type === "session_permission_audit") {
-		assertOnlyFields(fields, [...baseFields, "actionId", "toolName", "source", "decision", "reason"]);
+		assertOnlyFields(fields, [
+			...baseFields,
+			"actionId",
+			"toolName",
+			"source",
+			"decision",
+			"reason",
+			"ruleIds",
+			"matchedRule",
+			"manualReason",
+			"remember",
+		]);
 		const source = fields.get("source");
 		const decision = fields.get("decision");
-		if (source !== "user" && source !== "reviewer" && source !== "policy") {
+		if (
+			source !== "user" &&
+			source !== "reviewer" &&
+			source !== "policy" &&
+			source !== "rule" &&
+			source !== "model" &&
+			source !== "full"
+		) {
 			invalid("Session control entry.source is invalid");
 		}
 		if (decision !== "allow" && decision !== "ask" && decision !== "deny")
 			invalid("Session control entry.decision is invalid");
+		const rawRuleIds = fields.get("ruleIds");
+		if (rawRuleIds !== undefined && (!Array.isArray(rawRuleIds) || rawRuleIds.length > 115)) {
+			invalid("Session control entry.ruleIds is invalid");
+		}
+		const ruleIds = rawRuleIds?.map((value) => {
+			if (typeof value !== "string" || !value || encoder.encode(value).byteLength > 128) {
+				invalid("Session control entry.ruleIds is invalid");
+			}
+			return value;
+		});
+		let matchedRule: { readonly id: string; readonly name: string; readonly scope: string } | undefined;
+		if (fields.has("matchedRule")) {
+			const value = fields.get("matchedRule");
+			if (typeof value !== "object" || value === null || Array.isArray(value)) {
+				invalid("Session control entry.matchedRule is invalid");
+			}
+			const rule = dataFields(value, "Session control entry.matchedRule");
+			assertOnlyFields(rule, ["id", "name", "scope"], "Session control entry.matchedRule");
+			matchedRule = Object.freeze({
+				id: requiredString(rule, "id", {
+					label: "Session control entry.matchedRule",
+					maxBytes: 128,
+					noControls: true,
+				}),
+				name: requiredString(rule, "name", {
+					label: "Session control entry.matchedRule",
+					maxBytes: 256,
+					noControls: true,
+				}),
+				scope: requiredString(rule, "scope", {
+					label: "Session control entry.matchedRule",
+					maxBytes: 256,
+					noControls: true,
+				}),
+			});
+		}
+		const remember = fields.get("remember");
+		if (remember !== undefined && remember !== "session" && remember !== "project")
+			invalid("Session control entry.remember is invalid");
+		const manualReason = fields.get("manualReason");
+		if (manualReason !== undefined && !isPermissionManualReason(manualReason)) {
+			invalid("Session control entry.manualReason is invalid");
+		}
 		return {
 			type,
 			...parseBase(fields),
@@ -475,6 +541,10 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			source,
 			decision,
 			reason: requiredString(fields, "reason"),
+			...(ruleIds === undefined ? {} : { ruleIds: Object.freeze(ruleIds) }),
+			...(matchedRule === undefined ? {} : { matchedRule }),
+			...(manualReason === undefined ? {} : { manualReason }),
+			...(remember === undefined ? {} : { remember }),
 		};
 	}
 	if (isSessionDirectoryControlEntryType(type)) {

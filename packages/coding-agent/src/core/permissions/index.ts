@@ -23,10 +23,12 @@ export {
 export * from "./grant-store.ts";
 export * from "./model-reviewer.ts";
 export * from "./normalize.ts";
+export * from "./permission-rules.ts";
 export * from "./policy.ts";
 export * from "./project-rules.ts";
 export * from "./reviewer.ts";
 export * from "./reviewer-input.ts";
+export * from "./reviewer-model.ts";
 export * from "./runtime.ts";
 export * from "./settings.ts";
 export * from "./types.ts";
