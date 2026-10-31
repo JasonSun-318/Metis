@@ -764,7 +764,13 @@ export class Dispatcher {
 				return this.modelSettings.view();
 			case "model/settings/update":
 				return await this.replayMutation(request, () =>
-					this.mutateModelServiceSettings(() => this.modelSettings.update(request.params.mutation)),
+					this.mutateModelServiceSettings(async () => {
+						const result = await this.modelSettings.update(request.params.mutation);
+						if (request.params.mutation.type === "set_permission_reviewer") {
+							this.dropRuntimeSubscriptions(await this.registry.refreshOpenPermissionAutoSettings());
+						}
+						return result;
+					}),
 				);
 			case "model/testConnection":
 				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
@@ -775,7 +781,7 @@ export class Dispatcher {
 			case "permission/sandbox/selfTest":
 				return await runPermissionSandboxSelfTest();
 			case "permission/auto/get":
-				return this.permissionAutoSettings.view();
+				return await this.permissionAutoSettings.read();
 			case "permission/auto/update":
 				return await this.replayMutation(request, () =>
 					this.mutatePermissionAutoSettings(() => this.permissionAutoSettings.update(request.params)),

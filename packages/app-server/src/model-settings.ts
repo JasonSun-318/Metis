@@ -1,16 +1,28 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { join, parse } from "node:path";
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import {
+	AgentModelReviewTransport,
 	type AuthStorage,
+	DEDICATED_REVIEWER_AUTH_KEY,
 	FileAuthStorageBackend,
 	getSupportedThinkingLevels,
 	hasConfiguredManualThinkingLevel,
+	isDedicatedReviewerConfig,
+	ModelPermissionReviewer,
 	type ModelRegistry,
 	normalizeManualThinkingLevelMap,
+	normalizePermissionAction,
+	normalizePermissionReviewerConfig,
+	type PermissionReviewerConfig,
+	type ReviewerRequestAuth,
+	resolveReviewerAuthentication,
+	resolveReviewerModel,
 	type SettingsManager,
 } from "@metis/coding-agent/host";
 import { discoverModels } from "./model-discovery.ts";
+import { AppServerError } from "./session-runtime-host.ts";
 
 interface ModelsConfigDocument {
 	providers: Record<string, Record<string, unknown>>;
@@ -25,7 +37,9 @@ interface ModelSettingsServiceOptions {
 }
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-type TestReasoningLevel = Exclude<ReturnType<typeof getSupportedThinkingLevels>[number], "off">;
+type RegisteredModel = NonNullable<ReturnType<ModelRegistry["find"]>>;
+type ModelSettingsMutation = ClientParams<"model/settings/update">["mutation"];
+type ReviewerCredentialMutation = Extract<ModelSettingsMutation, { type: "set_permission_reviewer" }>["credential"];
 
 function clampThinkingSelection(
 	model: Parameters<typeof getSupportedThinkingLevels>[0],
@@ -228,10 +242,27 @@ export class ModelSettingsService {
 			defaultProvider && defaultModelId ? this.modelRegistry.find(defaultProvider, defaultModelId) : undefined;
 		const savedThinkingSelection = this.settingsManager.getDefaultThinkingLevel() ?? "medium";
 		const vision = this.settingsManager.getVisionSettings();
+		const reviewer = this.settingsManager.getPermissionReviewerView();
+		const reviewerConfig = reviewer.config;
+		const reviewerResolution = reviewerConfig
+			? resolveReviewerModel(reviewerConfig, {
+					find: (provider, modelId) => this.modelRegistry.find(provider, modelId),
+				})
+			: undefined;
+		const reviewerStatus = reviewerConfig && !reviewerResolution?.ok ? "invalid" : reviewer.status;
+
 		return {
 			defaultModel:
 				defaultProvider && defaultModelId ? { provider: defaultProvider, modelId: defaultModelId } : null,
 			vision: vision ? { ...vision, authConfigured: this.authStorage.has("vision") } : null,
+			permissionReviewer: {
+				config: reviewerConfig ?? null,
+				status: reviewerStatus,
+				// Credential presence is view metadata, never part of the saved profile.
+				...(reviewerConfig && isDedicatedReviewerConfig(reviewerConfig)
+					? { authConfigured: this.authStorage.has(DEDICATED_REVIEWER_AUTH_KEY) }
+					: {}),
+			},
 			defaultThinkingSelection: defaultModel
 				? clampThinkingSelection(defaultModel, savedThinkingSelection)
 				: savedThinkingSelection,
@@ -295,6 +326,9 @@ export class ModelSettingsService {
 				throw error;
 			}
 			return this.view();
+		}
+		if (mutation.type === "set_permission_reviewer") {
+			return await this.setPermissionReviewer(mutation.config, mutation.credential);
 		}
 		let previous = '{\n  "providers": {}\n}\n';
 		const previousCredential = this.authStorage.get(mutation.provider);
@@ -429,15 +463,11 @@ export class ModelSettingsService {
 
 	async testConnection(params: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">> {
 		this.modelRegistry.refresh();
+		if (params.kind === "permission-review") return this.testPermissionReviewer();
 		const model = this.modelRegistry.find(params.provider, params.modelId);
 		if (!model) return { ok: false, message: "Model not found", latencyMs: 0 };
-		let reasoning: TestReasoningLevel | undefined;
-		if (model.explicitThinkingLevels) {
-			const supportedLevels = getSupportedThinkingLevels(model);
-			const savedLevel = this.settingsManager.getDefaultThinkingLevel();
-			const level = savedLevel && supportedLevels.includes(savedLevel) ? savedLevel : supportedLevels[0];
-			reasoning = level && level !== "off" ? level : undefined;
-		}
+		const level = getSupportedThinkingLevels(model)[0];
+		const reasoning = level && level !== "off" ? level : undefined;
 		const startedAt = Date.now();
 		let apiKey: string | undefined;
 		try {
@@ -474,6 +504,181 @@ export class ModelSettingsService {
 				latencyMs: Date.now() - startedAt,
 			};
 		}
+	}
+
+	/** Exercise the production approval contract with fixed samples, without executing either command. */
+	private async testPermissionReviewer(): Promise<ClientResult<"model/testConnection">> {
+		const config = this.settingsManager.getPermissionReviewerConfig();
+		if (!config) return { ok: false, message: "Configure a valid permission reviewer first", latencyMs: 0 };
+		const resolution = resolveReviewerModel(config, {
+			find: (provider, modelId) => this.modelRegistry.find(provider, modelId),
+		});
+		if (!resolution.ok) return { ok: false, message: resolution.error, latencyMs: 0 };
+		const startedAt = Date.now();
+		// Both samples use one connection snapshot. Resolve auth inside the first
+		// review's deadline and reuse that promise without reading credentials again.
+		let authentication: Promise<ReviewerRequestAuth> | undefined;
+		const reviewer = new ModelPermissionReviewer({
+			getConfiguration: () => config,
+			resolveModel: () => resolution.model,
+			resolveAuthentication: () => {
+				authentication ??= this.permissionReviewerRequestAuth(config, resolution.model);
+				return authentication;
+			},
+			transport: new AgentModelReviewTransport((model, context, options) =>
+				this.modelRegistry.streamSimple(model, context, options),
+			),
+		});
+		// These are normalized evidence fixtures. No shell, tool execution callback,
+		// grant store, or user-controlled test command is involved.
+		const cwd = join(tmpdir(), "metis-reviewer-contract-test");
+		const samples = [
+			{ command: "pwd", expected: "allow", effects: [], readPaths: [cwd], writePaths: [] },
+			{
+				command: "rm -rf /",
+				expected: "deny",
+				effects: ["destructive"],
+				readPaths: [],
+				writePaths: [parse(cwd).root],
+			},
+		] as const;
+		try {
+			for (const sample of samples) {
+				const action = normalizePermissionAction({
+					actionId: `reviewer-test-${sample.expected}`,
+					toolName: "bash",
+					provenance: "builtin",
+					toolIdentity: "builtin:bash:v1",
+					args: { command: sample.command },
+					command: sample.command,
+					cwd,
+					workspaceRoots: [cwd],
+					readPaths: sample.readPaths,
+					writePaths: sample.writePaths,
+					networkEndpoints: [],
+					effects: sample.effects,
+				});
+				const result = await reviewer.review({
+					action,
+					decision: {
+						kind: "review",
+						minimumReviewer: "model",
+						riskLevel: sample.expected === "allow" ? "low" : "high",
+						reason: "Connection test; no command will be executed",
+						grant: {
+							executionTarget: "sandbox",
+							readRoots: action.readPaths,
+							writeRoots: action.writePaths,
+							protectedRoots: [],
+							networkEndpoints: [],
+						},
+					},
+					trustedUserMessages: [
+						{ messageId: "reviewer-test", text: "Assess the proposed tool request. Do not execute it." },
+					],
+					redactedArguments: { command: sample.command },
+					interactive: false,
+					signal: new AbortController().signal,
+				});
+				if (result.kind !== sample.expected) {
+					return {
+						ok: false,
+						message: `Permission reviewer contract test failed (${sample.expected} sample: ${result.kind})`,
+						latencyMs: Math.max(0, Date.now() - startedAt),
+						thinkingLevel: config.thinkingLevel,
+					};
+				}
+			}
+			return {
+				ok: true,
+				message: "Permission reviewer allowed the read sample and denied the destructive sample",
+				latencyMs: Math.max(0, Date.now() - startedAt),
+				thinkingLevel: config.thinkingLevel,
+			};
+		} catch {
+			return {
+				ok: false,
+				message: "Permission reviewer contract test is unavailable",
+				latencyMs: Math.max(0, Date.now() - startedAt),
+				thinkingLevel: config.thinkingLevel,
+			};
+		}
+	}
+
+	/**
+	 * Dedicated connections read only their isolated AuthStorage key; shared
+	 * provider profiles keep using that provider's own auth configuration. The
+	 * saved profile source decides, not the synthesized model provider.
+	 */
+	private permissionReviewerRequestAuth(
+		config: PermissionReviewerConfig,
+		model: RegisteredModel,
+	): Promise<ReviewerRequestAuth> {
+		return resolveReviewerAuthentication(config, model, {
+			authStorage: this.authStorage,
+			getSharedAuth: async (sharedModel) => {
+				const result = await this.modelRegistry.getApiKeyAndHeaders(sharedModel);
+				if (!result.ok) throw new Error("Permission reviewer authentication is unavailable");
+				return result;
+			},
+		});
+	}
+
+	private async setPermissionReviewer(
+		config: unknown,
+		credential: ReviewerCredentialMutation,
+	): Promise<ClientResult<"model/settings/get">> {
+		const normalized: PermissionReviewerConfig | null =
+			config === null ? null : (normalizePermissionReviewerConfig(config) ?? null);
+		if (config !== null && normalized === null) throw new Error("A permission reviewer config or null is required");
+		if (normalized) {
+			this.modelRegistry.refresh();
+			const resolution = resolveReviewerModel(normalized, this.modelRegistry);
+			if (!resolution.ok) throw new Error(resolution.error);
+		}
+		const dedicated = normalized !== null && isDedicatedReviewerConfig(normalized);
+		const action = credential?.action ?? "keep";
+		// Shared providers keep their own credentials; only a dedicated connection
+		// may create or replace the isolated reviewer key.
+		if (action === "set" && !dedicated) {
+			throw new Error("Reviewer credentials are only supported for dedicated connections");
+		}
+		if (dedicated && action === "remove") {
+			throw new Error("A dedicated approval model requires an API key");
+		}
+		if (dedicated && action === "keep" && !this.authStorage.has(DEDICATED_REVIEWER_AUTH_KEY)) {
+			throw new Error("Enter an API key to save the dedicated approval model");
+		}
+		const previousCredential = this.authStorage.get(DEDICATED_REVIEWER_AUTH_KEY);
+		let credentialTouched = false;
+		try {
+			if (credential?.action === "set") {
+				credentialTouched = true;
+				this.authStorage.set(DEDICATED_REVIEWER_AUTH_KEY, { type: "api_key", key: credential.value });
+			} else if (credential?.action === "remove") {
+				credentialTouched = true;
+				this.authStorage.remove(DEDICATED_REVIEWER_AUTH_KEY);
+			}
+			// Snapshot the raw stored value so a legacy invalid object survives a
+			// failed save verbatim; the normalized getter would report it undefined
+			// and the rollback would wipe the previous on-disk data.
+			const rollback = this.settingsManager.beginPermissionReviewerConfigUpdate(normalized);
+			try {
+				await this.settingsManager.flushOrThrow();
+			} catch {
+				try {
+					rollback();
+					await this.settingsManager.flushOrThrow();
+				} catch {
+					// The original failure is authoritative; the settings writer remains fail-closed in memory.
+				}
+				throw new AppServerError("OPERATION_FAILED");
+			}
+		} catch (error) {
+			if (credentialTouched) this.restoreCredential(DEDICATED_REVIEWER_AUTH_KEY, previousCredential, error);
+			throw error;
+		}
+		return this.view();
 	}
 
 	private restoreCredential(id: string, previous: ReturnType<AuthStorage["get"]>, original: unknown): void {

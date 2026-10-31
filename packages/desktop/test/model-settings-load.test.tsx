@@ -16,6 +16,7 @@ function view(loadError: string | null = null): ModelSettingsView {
 		defaultModel: { provider: "openai", modelId: "gpt-5" },
 		defaultThinkingSelection: "high",
 		vision: null,
+		permissionReviewer: { config: null, status: "unconfigured" },
 		loadError,
 		providers: [
 			{
@@ -74,6 +75,43 @@ afterEach(async () => {
 });
 
 describe("model settings initial load", () => {
+	it("preserves edits started from cached settings while a background refresh is pending", async () => {
+		let resolveRefresh!: (settings: ModelSettingsView) => void;
+		const api = {
+			getModelSettings: vi.fn(
+				() =>
+					new Promise<ModelSettingsView>((resolve) => {
+						resolveRefresh = resolve;
+					}),
+			),
+			updateModelSettings: vi.fn(),
+			testModelConnection: vi.fn(),
+			discoverModels: vi.fn(),
+		} as unknown as PanelApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const onDirtyChange = vi.fn();
+		await act(async () =>
+			root.render(
+				<ModelSettingsPanel api={api} initialSettings={view()} onDirtyChange={onDirtyChange} serverReady />,
+			),
+		);
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await act(async () => button(container, "New task defaults").click());
+		await act(async () => button(container, "Default reasoning").click());
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((option) => option.textContent?.trim() === "Low")!
+				.click(),
+		);
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+		await act(async () => resolveRefresh(view()));
+		expect(button(container, "Default reasoning").textContent).toContain("Low");
+		expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+	});
+
 	it("shows a local error and Retry without editor actions when the transport rejects", async () => {
 		const getModelSettings = vi.fn().mockRejectedValue(new Error("transport unavailable"));
 		const { container } = await mount({
@@ -87,9 +125,10 @@ describe("model settings initial load", () => {
 		expect(alert?.textContent).toContain("transport unavailable");
 		expect(alert?.textContent).toContain("Retry");
 		expect(container.textContent).not.toContain("Choose default model");
+		expect(container.textContent).not.toContain("Add provider");
 		expect(container.textContent).not.toContain("Add custom provider");
 		expect(container.textContent).not.toContain("Configure");
-		expect(container.querySelector(".model-provider-catalog")).toBeNull();
+		expect(container.querySelector(".model-provider-catalog-dialog")).toBeNull();
 		expect(container.querySelector(".model-service-panel")).toBeNull();
 	});
 
@@ -112,6 +151,7 @@ describe("model settings initial load", () => {
 		expect(container.querySelector('[role="alert"]')).toBeNull();
 		expect(container.textContent).toContain("OpenAI");
 		expect(container.textContent).toContain("GPT-5");
+		expect(container.textContent).toContain("Add provider");
 		expect(container.textContent).toContain("Add custom provider");
 		expect(container.textContent).toContain("Change default model");
 	});
@@ -129,7 +169,39 @@ describe("model settings initial load", () => {
 		expect(alert?.textContent).toContain(loadError);
 		expect(container.textContent).toContain("OpenAI");
 		expect(container.textContent).toContain("Add custom provider");
-		expect(container.textContent).toContain("Hide provider catalog");
+		expect(container.textContent).toContain("Add provider");
+		await act(async () => button(container, "Add provider").click());
+		expect(container.querySelector(".model-provider-catalog-dialog")?.hasAttribute("open")).toBe(true);
 		expect(button(container, "Configure")).toBeTruthy();
+	});
+
+	it("renders the saved approval model independently from the chat default", async () => {
+		const settings = {
+			...view(),
+			permissionReviewer: {
+				config: {
+					provider: "openai",
+					modelId: "gpt-5",
+					thinkingLevel: "low",
+					timeoutMs: 8000,
+					maxOutputTokens: 2048,
+				},
+				status: "configured",
+			},
+		};
+		const { container } = await mount({
+			getModelSettings: vi.fn().mockResolvedValue(settings),
+			updateModelSettings: vi.fn(),
+			testModelConnection: vi.fn(),
+			discoverModels: vi.fn(),
+		} as unknown as PanelApi);
+
+		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Approval model configured");
+		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("GPT-5");
+		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Low");
+		expect(container.textContent).toContain("New task defaults");
+		expect(container.textContent).toContain("High");
+		expect(container.querySelector(".reviewer-model-section input[role='switch']")).toBeNull();
+		expect(container.textContent).not.toMatch(/enable auto/i);
 	});
 });

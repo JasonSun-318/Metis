@@ -2,9 +2,27 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { AuthStorage, ModelRegistry, SettingsManager } from "@metis/coding-agent/host";
+import {
+	AuthStorage,
+	DEDICATED_REVIEWER_AUTH_KEY,
+	DEDICATED_REVIEWER_PROVIDER,
+	ModelRegistry,
+	SettingsManager,
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsService } from "../src/model-settings.ts";
+
+const dedicatedReviewer = {
+	source: "dedicated",
+	name: "Local reviewer",
+	api: "openai-completions",
+	baseUrl: "http://127.0.0.1:1234/v1",
+	modelId: "review-model",
+	thinkingLevel: "off",
+	timeoutMs: 8_000,
+	maxOutputTokens: 512,
+	reasoningMode: "off",
+} as const;
 
 describe("ModelSettingsService", () => {
 	let agentDir: string;
@@ -310,7 +328,7 @@ describe("ModelSettingsService", () => {
 		const byId = new Map(provider?.models.map((model) => [model.modelId, model]));
 		expect(byId.get("zai-org/GLM-5.3-Fast")).toMatchObject({
 			reasoning: true,
-			thinkingLevels: ["off", "low", "high", "max"],
+			thinkingLevels: ["low", "high", "max"],
 			reasoningMode: "auto",
 			reasoningSource: "catalog",
 		});
@@ -489,6 +507,11 @@ describe("ModelSettingsService", () => {
 		const fakeStream = { result: async () => ({}) } as unknown as ReturnType<ModelRegistry["streamSimple"]>;
 		const streamSimple = vi.spyOn(modelRegistry, "streamSimple").mockReturnValue(fakeStream);
 
+		await service.update({
+			type: "set_defaults",
+			model: { provider: "manual-test", modelId: "manual-test-model" },
+			thinkingSelection: "xhigh",
+		});
 		const result = await service.testConnection({
 			requestId: "00000000-0000-4000-8000-000000000000",
 			kind: "chat",
@@ -499,6 +522,7 @@ describe("ModelSettingsService", () => {
 		expect(result.ok).toBe(true);
 		const options = streamSimple.mock.calls[0]?.[2];
 		expect(options?.reasoning).toBe("high");
+		expect(settingsManager.getDefaultThinkingLevel()).toBe("xhigh");
 		expect(options?.apiKey).toBe("manual-test-key");
 
 		const modelsPath = join(agentDir, "models.json");
@@ -518,6 +542,61 @@ describe("ModelSettingsService", () => {
 		});
 		expect(offResult.ok).toBe(true);
 		expect(streamSimple.mock.calls[1]?.[2]?.reasoning).toBeUndefined();
+	});
+
+	it("uses the lowest supported level for a legacy reasoning-only model without a manual flag", async () => {
+		const modelsPath = join(agentDir, "models.json");
+		writeFileSync(
+			modelsPath,
+			JSON.stringify({
+				providers: {
+					legacy: {
+						api: "openai-completions",
+						baseUrl: "https://example.test/v1",
+						apiKey: "fixture-key",
+						models: [
+							{
+								id: "legacy-reasoning",
+								name: "Legacy",
+								reasoning: true,
+								input: ["text"],
+								contextWindow: 128000,
+								maxTokens: 8192,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+								thinkingLevelMap: {
+									off: null,
+									minimal: null,
+									low: "low",
+									medium: null,
+									high: "high",
+									xhigh: null,
+									max: null,
+								},
+							},
+						],
+					},
+				},
+			}),
+		);
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		expect(modelRegistry.find("legacy", "legacy-reasoning")?.explicitThinkingLevels).toBeUndefined();
+		const stream = vi
+			.spyOn(modelRegistry, "streamSimple")
+			.mockReturnValue({ result: async () => ({}) } as unknown as ReturnType<ModelRegistry["streamSimple"]>);
+		expect(
+			(
+				await service.testConnection({
+					requestId: "00000000-0000-4000-8000-000000000000",
+					kind: "chat",
+					provider: "legacy",
+					modelId: "legacy-reasoning",
+				})
+			).ok,
+		).toBe(true);
+		expect(stream.mock.calls[0]?.[2]?.reasoning).toBe("low");
 	});
 
 	it("reports stream error and aborted outcomes instead of successful connections", async () => {
@@ -638,6 +717,509 @@ describe("ModelSettingsService", () => {
 			compat: { supportsReasoningEffort: true },
 		});
 		expect(savedModel).not.toHaveProperty("reasoningMode");
+	});
+
+	it("reports an unconfigured independent permission reviewer by default", () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+	});
+
+	it("marks a structurally valid profile invalid when its model is no longer registered", () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const config = {
+			provider: "removed-provider",
+			modelId: "removed-model",
+			thinkingLevel: "off",
+			timeoutMs: 8000,
+			maxOutputTokens: 512,
+		} as const;
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.inMemory({ permissionReviewer: config }),
+		});
+		expect(service.view().permissionReviewer).toEqual({ config, status: "invalid" });
+	});
+
+	it("saves an independent reviewer profile without changing chat defaults", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "save_provider",
+			provider: "review-provider",
+			name: "Review Provider",
+			baseUrl: "https://review.example.test/v1",
+			api: "openai-responses",
+			models: [
+				{
+					modelId: "review-model",
+					name: "Review Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					thinkingLevelMap: { low: "low", high: "high", max: null },
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "review-test-key" },
+		});
+		await service.update({
+			type: "set_defaults",
+			model: { provider: "review-provider", modelId: "review-model" },
+			thinkingSelection: "high",
+		});
+
+		const saved = await service.update({
+			type: "set_permission_reviewer",
+			config: {
+				provider: "review-provider",
+				modelId: "review-model",
+				thinkingLevel: "low",
+				timeoutMs: 12_000,
+				maxOutputTokens: 2_048,
+			},
+		});
+		expect(saved.permissionReviewer).toEqual({
+			config: {
+				provider: "review-provider",
+				modelId: "review-model",
+				thinkingLevel: "low",
+				timeoutMs: 12_000,
+				maxOutputTokens: 2_048,
+			},
+			status: "configured",
+		});
+		expect(saved.defaultModel).toEqual({ provider: "review-provider", modelId: "review-model" });
+		expect(saved.defaultThinkingSelection).toBe("high");
+		expect(settingsManager.getAutoReviewerEnabled()).toBe(false);
+
+		const persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
+		expect(persisted).toMatchObject({
+			defaultProvider: "review-provider",
+			defaultModel: "review-model",
+			defaultThinkingLevel: "high",
+			permissionReviewer: {
+				provider: "review-provider",
+				modelId: "review-model",
+				thinkingLevel: "low",
+				timeoutMs: 12_000,
+				maxOutputTokens: 2_048,
+			},
+		});
+
+		const cleared = await service.update({ type: "set_permission_reviewer", config: null });
+		expect(cleared.permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+		expect(cleared.defaultModel).toEqual({ provider: "review-provider", modelId: "review-model" });
+	});
+
+	it("rejects missing models, unsupported thinking, oversized budgets, and extra fields", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "save_provider",
+			provider: "review-provider",
+			name: "Review Provider",
+			baseUrl: "https://review.example.test/v1",
+			api: "anthropic-messages",
+			models: [
+				{
+					modelId: "review-model",
+					name: "Review Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					thinkingLevelMap: { low: "low", high: "high", max: null },
+					imageInput: false,
+				},
+				{
+					modelId: "small-model",
+					name: "Small Model",
+					contextWindow: 32_000,
+					maxOutputTokens: 4_096,
+					reasoningMode: "off",
+					imageInput: false,
+				},
+			],
+			credential: { action: "keep" },
+		});
+		const base = {
+			provider: "review-provider",
+			modelId: "review-model",
+			thinkingLevel: "low",
+			timeoutMs: 8_000,
+			maxOutputTokens: 2_048,
+		} as const;
+
+		for (const config of [
+			{ ...base, provider: "missing-provider" },
+			{ ...base, modelId: "missing-model" },
+			{ ...base, thinkingLevel: "off" },
+			{ ...base, modelId: "small-model", maxOutputTokens: 8_192 },
+			{ ...base, apiKey: "not-allowed" },
+		]) {
+			await expect(service.update({ type: "set_permission_reviewer", config: config as never })).rejects.toThrow();
+		}
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+	});
+
+	it("marks a legacy reviewer object invalid without reviving or enabling it", () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const settingsManager = SettingsManager.inMemory({
+			permissionReviewer: {
+				provider: "review-provider",
+				modelId: "review-model",
+				version: 2,
+				assessmentId: "old",
+			},
+		} as never);
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager,
+		});
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "invalid" });
+		expect(settingsManager.getAutoReviewerEnabled()).toBe(false);
+		expect(settingsManager.getPermissionReviewerConfig()).toBeUndefined();
+	});
+
+	it("restores the previous reviewer profile when persistence fails", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "save_provider",
+			provider: "review-provider",
+			name: "Review Provider",
+			baseUrl: "https://review.example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "review-model",
+					name: "Review Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					thinkingLevelMap: { low: "low", high: "high" },
+					imageInput: false,
+				},
+			],
+			credential: { action: "keep" },
+		});
+		const previous = {
+			provider: "review-provider",
+			modelId: "review-model",
+			thinkingLevel: "low",
+			timeoutMs: 8_000,
+			maxOutputTokens: 1_024,
+		} as const;
+		await service.update({ type: "set_permission_reviewer", config: previous });
+		vi.spyOn(settingsManager, "flushOrThrow").mockRejectedValueOnce(new Error("disk unavailable"));
+
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: { ...previous, thinkingLevel: "high", timeoutMs: 10_000 },
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+		expect(service.view().permissionReviewer).toEqual({ config: previous, status: "configured" });
+	});
+
+	it("preserves a legacy invalid reviewer object verbatim when persistence fails", async () => {
+		const legacy = {
+			provider: "review-provider",
+			modelId: "review-model",
+			version: 2,
+			assessmentId: "old",
+		};
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ permissionReviewer: legacy }));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "save_provider",
+			provider: "review-provider",
+			name: "Review Provider",
+			baseUrl: "https://review.example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "review-model",
+					name: "Review Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					thinkingLevelMap: { low: "low", high: "high" },
+					imageInput: false,
+				},
+			],
+			credential: { action: "keep" },
+		});
+		vi.spyOn(settingsManager, "flushOrThrow").mockRejectedValueOnce(new Error("disk unavailable"));
+
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: {
+					provider: "review-provider",
+					modelId: "review-model",
+					thinkingLevel: "low",
+					timeoutMs: 8_000,
+					maxOutputTokens: 1_024,
+				},
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).permissionReviewer).toEqual(legacy);
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "invalid" });
+	});
+
+	it("saves a dedicated reviewer credential in its isolated auth key", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "save_provider",
+			provider: "permission-reviewer",
+			name: "Shared fixture provider",
+			baseUrl: "https://shared.example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "shared-model",
+					name: "Shared Model",
+					contextWindow: 32_000,
+					maxOutputTokens: 8_192,
+					reasoningMode: "off",
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "shared-key" },
+		});
+		const sharedCredential = authStorage.get("permission-reviewer");
+
+		const saved = await service.update({
+			type: "set_permission_reviewer",
+			config: dedicatedReviewer,
+			credential: { action: "set", value: "dedicated-key" },
+		});
+		expect(saved.permissionReviewer).toEqual({
+			config: dedicatedReviewer,
+			status: "configured",
+			authConfigured: true,
+		});
+		// The dedicated model is synthesized on demand and never joins the chat catalog.
+		expect(modelRegistry.find(DEDICATED_REVIEWER_PROVIDER, "review-model")).toBeUndefined();
+		expect(saved.providers.some((provider) => provider.provider === DEDICATED_REVIEWER_PROVIDER)).toBe(false);
+		expect(authStorage.get(DEDICATED_REVIEWER_AUTH_KEY)).toMatchObject({
+			type: "api_key",
+			key: "dedicated-key",
+		});
+		// Shared provider configuration and auth stay untouched.
+		expect(authStorage.get("permission-reviewer")).toEqual(sharedCredential);
+		expect(saved.providers.find((provider) => provider.provider === "permission-reviewer")).toMatchObject({
+			auth: { configured: true, source: "stored" },
+			models: [{ modelId: "shared-model" }],
+		});
+		const settings = readFileSync(join(agentDir, "settings.json"), "utf8");
+		expect(JSON.parse(settings).permissionReviewer).toEqual(dedicatedReviewer);
+		expect(settings).not.toContain("dedicated-key");
+		expect(JSON.stringify(saved)).not.toContain("dedicated-key");
+
+		const kept = await service.update({
+			type: "set_permission_reviewer",
+			config: { ...dedicatedReviewer, timeoutMs: 9_000 },
+			credential: { action: "keep" },
+		});
+		expect(kept.permissionReviewer).toMatchObject({ status: "configured", config: { timeoutMs: 9_000 } });
+		expect(authStorage.get(DEDICATED_REVIEWER_AUTH_KEY)).toMatchObject({ key: "dedicated-key" });
+
+		const cleared = await service.update({
+			type: "set_permission_reviewer",
+			config: null,
+			credential: { action: "remove" },
+		});
+		expect(cleared.permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+		expect(authStorage.has(DEDICATED_REVIEWER_AUTH_KEY)).toBe(false);
+		expect(authStorage.get("permission-reviewer")).toEqual(sharedCredential);
+	});
+
+	it("requires a dedicated credential and keeps it away from shared profiles", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+
+		await expect(service.update({ type: "set_permission_reviewer", config: dedicatedReviewer })).rejects.toThrow(
+			/Enter an API key/,
+		);
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: dedicatedReviewer,
+				credential: { action: "remove" },
+			}),
+		).rejects.toThrow(/requires an API key/);
+		await service.update({
+			type: "save_provider",
+			provider: "shared-provider",
+			name: "Shared Provider",
+			baseUrl: "https://shared.example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "shared-model",
+					name: "Shared Model",
+					contextWindow: 32_000,
+					maxOutputTokens: 8_192,
+					reasoningMode: "off",
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "shared-key" },
+		});
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: {
+					provider: "shared-provider",
+					modelId: "shared-model",
+					thinkingLevel: "off",
+					timeoutMs: 8_000,
+					maxOutputTokens: 512,
+				},
+				credential: { action: "set", value: "shared-key" },
+			}),
+		).rejects.toThrow(/only supported for dedicated/);
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+		expect(authStorage.has(DEDICATED_REVIEWER_AUTH_KEY)).toBe(false);
+
+		for (const config of [
+			{ ...dedicatedReviewer, api: "unsupported-api" },
+			{ ...dedicatedReviewer, baseUrl: "ftp://review.example.test/v1" },
+			{ ...dedicatedReviewer, reasoningMode: "manual" },
+			{ ...dedicatedReviewer, maxOutputTokens: 8_193 },
+			{ ...dedicatedReviewer, apiKey: "leaked" },
+		]) {
+			await expect(
+				service.update({
+					type: "set_permission_reviewer",
+					config: config as never,
+					credential: { action: "set", value: "dedicated-key" },
+				}),
+			).rejects.toThrow();
+		}
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "unconfigured" });
+		expect(authStorage.has(DEDICATED_REVIEWER_AUTH_KEY)).toBe(false);
+	});
+
+	it("shows the normalized manual map for a dedicated reviewer", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry,
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+		const saved = await service.update({
+			type: "set_permission_reviewer",
+			config: {
+				...dedicatedReviewer,
+				thinkingLevel: "low",
+				reasoningMode: "manual",
+				thinkingLevelMap: { low: "low" },
+			},
+			credential: { action: "set", value: "dedicated-key" },
+		});
+		expect(saved.permissionReviewer).toMatchObject({
+			status: "configured",
+			authConfigured: true,
+			config: {
+				thinkingLevel: "low",
+				reasoningMode: "manual",
+				thinkingLevelMap: {
+					off: null,
+					minimal: null,
+					low: "low",
+					medium: null,
+					high: null,
+					xhigh: null,
+					max: null,
+				},
+			},
+		});
+	});
+
+	it("restores the previous dedicated config and credential when persistence fails", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		await service.update({
+			type: "set_permission_reviewer",
+			config: dedicatedReviewer,
+			credential: { action: "set", value: "first-key" },
+		});
+		vi.spyOn(settingsManager, "flushOrThrow").mockRejectedValueOnce(new Error("disk unavailable"));
+
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: { ...dedicatedReviewer, name: "Renamed reviewer" },
+				credential: { action: "set", value: "second-key" },
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+		expect(service.view().permissionReviewer).toEqual({
+			config: dedicatedReviewer,
+			status: "configured",
+			authConfigured: true,
+		});
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).permissionReviewer).toEqual(
+			dedicatedReviewer,
+		);
+		expect(authStorage.get(DEDICATED_REVIEWER_AUTH_KEY)).toMatchObject({ key: "first-key" });
+	});
+
+	it("preserves a legacy invalid reviewer object and drops a failed dedicated credential", async () => {
+		const legacy = {
+			provider: "review-provider",
+			modelId: "review-model",
+			version: 2,
+			assessmentId: "old",
+		};
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ permissionReviewer: legacy }));
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+		vi.spyOn(settingsManager, "flushOrThrow").mockRejectedValueOnce(new Error("disk unavailable"));
+
+		await expect(
+			service.update({
+				type: "set_permission_reviewer",
+				config: dedicatedReviewer,
+				credential: { action: "set", value: "dedicated-key" },
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).permissionReviewer).toEqual(legacy);
+		expect(service.view().permissionReviewer).toEqual({ config: null, status: "invalid" });
+		expect(authStorage.has(DEDICATED_REVIEWER_AUTH_KEY)).toBe(false);
 	});
 
 	it("rejects invalid custom provider URLs without touching disk", async () => {
