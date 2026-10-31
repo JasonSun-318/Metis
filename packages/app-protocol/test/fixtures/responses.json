@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 26,
+				"protocolVersion": 27,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -595,7 +595,8 @@
 						"executionTarget": "sandbox",
 						"createdAt": "2026-08-11T00:00:00.000Z"
 					}
-				]
+				],
+				"scope": "project"
 			}
 		}
 	},
@@ -607,7 +608,8 @@
 			"id": "permission-rules-delete",
 			"result": {
 				"projectPath": "/tmp/metis-project",
-				"rules": []
+				"rules": [],
+				"scope": "project"
 			}
 		}
 	},
@@ -619,7 +621,8 @@
 			"id": "permission-rules-clear",
 			"result": {
 				"projectPath": "/tmp/metis-project",
-				"rules": []
+				"rules": [],
+				"scope": "project"
 			}
 		}
 	},

@@ -193,6 +193,7 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
+			permissionReviewer: { config: null, status: "unconfigured" },
 			defaultThinkingSelection: "high",
 			providers: [
 				{
@@ -241,6 +242,40 @@ const scheduleCases = [
 				modelId: "gpt-4o",
 				authConfigured: true,
 			},
+			permissionReviewer: { config: null, status: "unconfigured" },
+			defaultThinkingSelection: "high",
+			providers: [],
+			loadError: null,
+		},
+	],
+	[
+		"model/settings/update",
+		{
+			requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			mutation: {
+				type: "set_permission_reviewer",
+				config: {
+					provider: "review-provider",
+					modelId: "review-model",
+					thinkingLevel: "off",
+					timeoutMs: 8000,
+					maxOutputTokens: 512,
+				},
+			},
+		},
+		{
+			defaultModel: { provider: "openai", modelId: "gpt-test" },
+			vision: null,
+			permissionReviewer: {
+				config: {
+					provider: "review-provider",
+					modelId: "review-model",
+					thinkingLevel: "off",
+					timeoutMs: 8000,
+					maxOutputTokens: 512,
+				},
+				status: "configured",
+			},
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -259,6 +294,7 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
+			permissionReviewer: { config: null, status: "unconfigured" },
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -516,23 +552,83 @@ const scheduleCases = [
 	],
 	["schedule/subscribe", {}, { snapshot: { serverEpoch: EPOCH, tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
 	["schedule/unsubscribe", {}, { unsubscribed: true }],
+	["permission/sandbox/health", {}, { status: "healthy", code: "ready" }],
+	["permission/rules/catalog", {}, { groups: [] }],
+	[
+		"permission/rules/revoke",
+		{ requestId: RUN_ID, scope: "project", projectPath: "/tmp/project", ruleId: "a".repeat(64) },
+		{ deleted: true },
+	],
+	[
+		"permission/sandbox/selfTest",
+		{},
+		{
+			status: "healthy",
+			code: "ready",
+			checkedAt: "2026-10-29T00:00:00.000Z",
+			platform: "darwin",
+			mode: "self-test",
+			checks: [
+				{ id: "platform", status: "passed" },
+				{ id: "package", status: "skipped", reason: "not-applicable" },
+				{ id: "dependencies", status: "passed" },
+				{ id: "sandbox-startup", status: "passed" },
+				{ id: "filesystem-permitted", status: "passed" },
+				{ id: "filesystem-denied", status: "passed" },
+				{ id: "network-denied", status: "passed" },
+			],
+			recoveryActions: [],
+		},
+	],
 	[
 		"permission/auto/get",
 		{},
 		{
 			rules: [{ command: "ls", allowNetwork: false }],
 			suggestions: ["ls", "git status"],
+			permissionRules: [],
+			permissionRuleDefaults: [],
+			reviewerEnabled: false,
 		},
 	],
 	[
 		"permission/auto/update",
 		{
 			requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-			rules: [{ command: "git status", allowNetwork: false }],
+			reviewerEnabled: true,
 		},
 		{
-			rules: [{ command: "git status", allowNetwork: false }],
+			rules: [{ command: "ls", allowNetwork: false }],
 			suggestions: ["ls", "git status"],
+			permissionRules: [],
+			permissionRuleDefaults: [],
+			reviewerEnabled: true,
+		},
+	],
+	[
+		"permission/auto/update",
+		{
+			requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+			rules: [
+				{
+					command: "curl",
+					allowNetwork: true,
+					networkTargets: [{ hostname: "api.example.com", port: 443 }],
+				},
+			],
+		},
+		{
+			rules: [
+				{
+					command: "curl",
+					allowNetwork: true,
+					networkTargets: [{ hostname: "api.example.com", port: 443 }],
+				},
+			],
+			suggestions: ["ls", "git status"],
+			permissionRules: [],
+			permissionRuleDefaults: [],
+			reviewerEnabled: false,
 		},
 	],
 	[
@@ -906,6 +1002,22 @@ describe("manual model thinking map schema", () => {
 });
 
 describe("golden protocol fixtures", () => {
+	it("requires an exact owner when revoking remembered permissions", () => {
+		const params = { requestId: RUN_ID, ruleId: "a".repeat(64) };
+		expect(() => validateClientRequest(makeClientRequest("permission/rules/revoke", params))).toThrow();
+		const project = { ...params, scope: "project", projectPath: "/tmp/project" };
+		const session = { ...params, scope: "session", sessionId: SESSION_ID };
+		expect(validateClientRequest(makeClientRequest("permission/rules/revoke", project))).toBeDefined();
+		expect(validateClientRequest(makeClientRequest("permission/rules/revoke", session))).toBeDefined();
+		expect(() =>
+			validateClientRequest(makeClientRequest("permission/rules/revoke", { ...project, sessionId: SESSION_ID })),
+		).toThrow();
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("permission/rules/revoke", { ...session, projectPath: "/tmp/project" }),
+			),
+		).toThrow();
+	});
 	it("accepts knowledge removal by registered id and rejects arbitrary filesystem targets", () => {
 		const params = {
 			requestId: "00000000-0000-4000-8000-000000000002",
@@ -1606,6 +1718,168 @@ describe("golden protocol fixtures", () => {
 				}),
 			),
 		).toThrow(ProtocolValidationError);
+		expect(() => validateClientRequest(makeClientRequest("permission/auto/update", { requestId: RUN_ID }))).toThrow(
+			ProtocolValidationError,
+		);
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("permission/auto/update", { requestId: RUN_ID, reviewerEnabled: "yes" }),
+			),
+		).toThrow(ProtocolValidationError);
+		for (const networkTargets of [
+			[{ hostname: "*.example.com", port: 443 }],
+			[{ hostname: "https://example.com", port: 443 }],
+			[{ hostname: "example.com", port: 0 }],
+			[{ hostname: "example.com", port: 65_536 }],
+			[{ hostname: "example.com", port: 443, apiKey: "secret" }],
+			[{ hostname: "example.com", port: 443, endpoint: "https://elsewhere" }],
+			Array.from({ length: 33 }, (_, index) => ({ hostname: `host${index}.example.com`, port: 443 })),
+		]) {
+			expect(() =>
+				validateClientRequest(
+					makeClientRequest("permission/auto/update", {
+						requestId: RUN_ID,
+						rules: [{ command: "curl", allowNetwork: true, networkTargets }],
+					}),
+				),
+			).toThrow(ProtocolValidationError);
+		}
+	});
+
+	it("validates the independent permission reviewer mutation strictly", () => {
+		const config = {
+			provider: "review-provider",
+			modelId: "review-model",
+			thinkingLevel: "off",
+			timeoutMs: 8000,
+			maxOutputTokens: 512,
+		};
+		const valid = makeClientRequest("model/settings/update", {
+			requestId: RUN_ID,
+			mutation: { type: "set_permission_reviewer", config },
+		});
+		expect(() => validateClientRequest(valid)).not.toThrow();
+		const cleared = makeClientRequest("model/settings/update", {
+			requestId: RUN_ID,
+			mutation: { type: "set_permission_reviewer", config: null },
+		});
+		expect(() => validateClientRequest(cleared)).not.toThrow();
+		for (const mutation of [
+			{ type: "set_permission_reviewer" },
+			{ type: "set_permission_reviewer", config: { ...config, apiKey: "secret" } },
+			{ type: "set_permission_reviewer", config: { ...config, baseUrl: "https://elsewhere.test" } },
+			{ type: "set_permission_reviewer", config: { ...config, timeoutMs: 15_001 } },
+			{ type: "set_permission_reviewer", config: { ...config, maxOutputTokens: 8_193 } },
+			{ type: "set_permission_reviewer", config: { ...config, thinkingLevel: "ultra" } },
+			{ type: "set_permission_reviewer", config: { ...config, provider: "" } },
+		]) {
+			expect(() =>
+				validateClientRequest(makeClientRequest("model/settings/update", { requestId: RUN_ID, mutation })),
+			).toThrow(ProtocolValidationError);
+		}
+	});
+
+	it("validates dedicated reviewer connections and their credential mutations", () => {
+		const dedicated = {
+			source: "dedicated",
+			name: "Local reviewer",
+			api: "openai-completions",
+			baseUrl: "http://127.0.0.1:1234/v1",
+			modelId: "review-model",
+			thinkingLevel: "off",
+			timeoutMs: 8_000,
+			maxOutputTokens: 512,
+			reasoningMode: "off",
+		};
+		for (const credential of [
+			undefined,
+			{ action: "keep" },
+			{ action: "remove" },
+			{ action: "set", value: "dedicated-key" },
+		]) {
+			expect(() =>
+				validateClientRequest(
+					makeClientRequest("model/settings/update", {
+						requestId: RUN_ID,
+						mutation: {
+							type: "set_permission_reviewer",
+							config: dedicated,
+							...(credential ? { credential } : {}),
+						},
+					}),
+				),
+			).not.toThrow();
+		}
+		const manual = {
+			...dedicated,
+			thinkingLevel: "low",
+			reasoningMode: "manual",
+			thinkingLevelMap: { low: "low" },
+		};
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("model/settings/update", {
+					requestId: RUN_ID,
+					mutation: {
+						type: "set_permission_reviewer",
+						config: manual,
+						credential: { action: "set", value: "key" },
+					},
+				}),
+			),
+		).not.toThrow();
+
+		const request = makeClientRequest("model/settings/get", {});
+		const response = {
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				defaultModel: null,
+				vision: null,
+				permissionReviewer: {
+					config: dedicated,
+					status: "configured",
+					authConfigured: true,
+				},
+				defaultThinkingSelection: "off",
+				providers: [],
+				loadError: null,
+			},
+		};
+		expect(() => validateResponseFor("client", request, response)).not.toThrow();
+		const withKey = structuredClone(response) as Record<string, unknown> & {
+			result: { permissionReviewer: { config: Record<string, unknown> } };
+		};
+		withKey.result.permissionReviewer.config.apiKey = "leaked";
+		expect(() => validateResponseFor("client", request, withKey)).toThrow(ProtocolValidationError);
+		const badAuthFlag = structuredClone(response) as typeof withKey & {
+			result: { permissionReviewer: Record<string, unknown> };
+		};
+		badAuthFlag.result.permissionReviewer.authConfigured = "yes";
+		expect(() => validateResponseFor("client", request, badAuthFlag)).toThrow(ProtocolValidationError);
+		const metadataInProfile = structuredClone(response) as typeof withKey;
+		metadataInProfile.result.permissionReviewer.config.authConfigured = true;
+		expect(() => validateResponseFor("client", request, metadataInProfile)).toThrow(ProtocolValidationError);
+
+		for (const config of [
+			{ ...dedicated, api: "unsupported-api" },
+			{ ...dedicated, baseUrl: "ftp://review.example.test/v1" },
+			{ ...dedicated, baseUrl: "https://user:password@review.example.test/v1" },
+			{ ...dedicated, name: "" },
+			{ ...dedicated, reasoningMode: "auto" },
+			{ ...dedicated, source: "provider" },
+			{ ...dedicated, authConfigured: true },
+			{ ...manual, thinkingLevelMap: { unknown: "value" } },
+		]) {
+			expect(() =>
+				validateClientRequest(
+					makeClientRequest("model/settings/update", {
+						requestId: RUN_ID,
+						mutation: { type: "set_permission_reviewer", config },
+					}),
+				),
+			).toThrow(ProtocolValidationError);
+		}
 	});
 
 	it("rejects invalid session action parameters", () => {
@@ -2729,4 +3003,12 @@ it("validates plugin schemas strictly: rejects unknown fields, oversized URLs, p
 			},
 		),
 	).toThrow();
+});
+
+it("limits reviewer connection tests to the saved profile and fixed server samples", () => {
+	const params = { requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", kind: "permission-review" };
+	expect(() => validateClientRequest(makeClientRequest("model/testConnection", params))).not.toThrow();
+	for (const extra of [{ provider: "override" }, { modelId: "override" }, { command: "pwd" }, { apiKey: "secret" }]) {
+		expect(() => validateClientRequest(makeClientRequest("model/testConnection", { ...params, ...extra }))).toThrow();
+	}
 });

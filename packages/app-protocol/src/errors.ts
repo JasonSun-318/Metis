@@ -28,6 +28,7 @@ export const RPC_ERROR_CODES = {
 	GITHUB_ACCESS_DENIED: -32018,
 	PAGE_IN_USE: -32019,
 	USER_PAUSED: -32020,
+	SESSION_VERSION_UNSUPPORTED: -32021,
 } as const;
 
 export type RpcErrorName = keyof typeof RPC_ERROR_CODES;
@@ -60,6 +61,7 @@ const ERROR_MESSAGES: Record<RpcErrorName, string> = {
 	USER_PAUSED: "Agent execution is paused by the user",
 	GITHUB_ACCESS_DENIED:
 		"GitHub repository is unavailable or access was denied. Check the address and repository visibility.",
+	SESSION_VERSION_UNSUPPORTED: "Session format is not supported by this version of Metis",
 };
 
 const RETRYABLE: Record<RpcErrorName, boolean> = {
@@ -88,6 +90,7 @@ const RETRYABLE: Record<RpcErrorName, boolean> = {
 	GITHUB_ACCESS_DENIED: false,
 	PAGE_IN_USE: true,
 	USER_PAUSED: false,
+	SESSION_VERSION_UNSUPPORTED: false,
 };
 
 const STANDARD_ERROR_NAMES = new Set<RpcErrorName>([
@@ -156,6 +159,7 @@ export const RpcErrorObjectSchema = Type.Union([
 	ApplicationErrorSchema("GITHUB_ACCESS_DENIED"),
 	ApplicationErrorSchema("PAGE_IN_USE"),
 	ApplicationErrorSchema("USER_PAUSED"),
+	ApplicationErrorSchema("SESSION_VERSION_UNSUPPORTED"),
 ]);
 
 export interface RpcErrorContext {

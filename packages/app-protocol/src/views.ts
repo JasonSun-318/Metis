@@ -29,6 +29,7 @@ export const SessionStateSchema = Type.Union([
 	Type.Literal("interrupted"),
 	Type.Literal("corrupt"),
 	Type.Literal("in_use"),
+	Type.Literal("unsupported"),
 ]);
 
 export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
@@ -454,6 +455,35 @@ export const ImageBlockViewSchema = StrictObject({
 	image: DurableImageRefViewSchema,
 });
 
+const PermissionManualReasonSchema = Type.Union([
+	Type.Literal("sensitive"),
+	Type.Literal("write"),
+	Type.Literal("network"),
+	Type.Literal("destructive"),
+	Type.Literal("analysis-incomplete"),
+	Type.Literal("critical"),
+	Type.Literal("model-denied"),
+	Type.Literal("model-unavailable"),
+	Type.Literal("model-timeout"),
+	Type.Literal("policy"),
+]);
+
+export const PermissionDecisionViewSchema = StrictObject({
+	outcome: Type.Optional(Type.Union([Type.Literal("allow"), Type.Literal("deny"), Type.Literal("unavailable")])),
+	remember: Type.Optional(Type.Union([Type.Literal("session"), Type.Literal("project")])),
+	source: Type.Union([Type.Literal("rule"), Type.Literal("model"), Type.Literal("user"), Type.Literal("full")]),
+	ruleIds: Type.Optional(Type.Array(Utf8String(128, { minLength: 1 }), { maxItems: 115 })),
+	matchedRule: Type.Optional(
+		StrictObject({
+			id: Utf8String(128, { minLength: 1 }),
+			name: Utf8String(256, { minLength: 1 }),
+			scope: Utf8String(256, { minLength: 1 }),
+		}),
+	),
+	manualReason: Type.Optional(PermissionManualReasonSchema),
+});
+export type PermissionDecisionView = Static<typeof PermissionDecisionViewSchema>;
+
 export const ToolCallBlockViewSchema = StrictObject({
 	type: Type.Literal("tool_call"),
 	toolCallId: OpaqueIdSchema,
@@ -465,10 +495,12 @@ export const ToolCallBlockViewSchema = StrictObject({
 		Type.Literal("interrupted"),
 	]),
 	inputPreview: Type.Optional(PublicTextSchema),
+	permissionDecision: Type.Optional(PermissionDecisionViewSchema),
 });
 
 export const SessionDeliveredFileViewSchema = StrictObject({
 	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
+	sourcePath: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
 	name: Type.String({ minLength: 1, maxLength: 255 }),
 	byteLength: Type.Integer({ minimum: 1, maximum: 128 * 1024 * 1024 }),
 	message: Type.Optional(Utf8String(512, { minLength: 1, maxLength: 512 })),
@@ -497,9 +529,26 @@ export const CodeChangesViewSchema = StrictObject({
 	version: Type.Literal(1),
 	sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
 	files: Type.Array(CodeFileChangeViewSchema, { maxItems: 64 }),
+	turnFiles: Type.Optional(Type.Array(CodeFileChangeViewSchema, { maxItems: 64 })),
 	partial: Type.Boolean(),
 	turn: CodeChangeCountsViewSchema,
 });
+
+export const SessionTaskViewSchema = StrictObject({
+	task: Type.String({ minLength: 1, maxLength: 512 }),
+	completed: Type.Boolean(),
+});
+
+export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
+
+export const AskUserAnswersSchema = Type.Array(
+	StrictObject({
+		question: Type.String({ minLength: 1, maxLength: 512 }),
+		selected: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 4 }),
+		customAnswer: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+	}),
+	{ maxItems: 4 },
+);
 
 export const ToolResultBlockViewSchema = StrictObject({
 	type: Type.Literal("tool_result"),
@@ -510,6 +559,8 @@ export const ToolResultBlockViewSchema = StrictObject({
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 4 })),
 	deliveredFile: Type.Optional(SessionDeliveredFileViewSchema),
 	codeChanges: Type.Optional(CodeChangesViewSchema),
+	tasks: Type.Optional(SessionTasksSchema),
+	userAnswers: Type.Optional(AskUserAnswersSchema),
 });
 
 export const NoticeBlockViewSchema = StrictObject({
@@ -656,6 +707,7 @@ export const InteractionChoiceSchema = StrictObject({
 });
 
 const InteractionBase = {
+	toolCallId: Type.Optional(OpaqueIdSchema),
 	interactionId: UuidSchema,
 	sessionId: SessionIdSchema,
 	rootSessionId: Type.Optional(SessionIdSchema),
@@ -712,6 +764,7 @@ export const ProjectPermissionRuleViewSchema = StrictObject({
 export const PermissionApprovalChoiceSchema = Type.Union([
 	Type.Literal("allow-once"),
 	Type.Literal("deny-once"),
+	Type.Literal("allow-session-exact"),
 	Type.Literal("always-allow-exact"),
 	Type.Literal("always-deny-exact"),
 ]);
@@ -726,10 +779,13 @@ export const PermissionApprovalInteractionViewSchema = StrictObject({
 	executionTarget: PermissionExecutionTargetSchema,
 	reason: PublicTextSchema,
 	scopeComplete: Type.Boolean(),
+	/** Full redacted display command; never an executable identity. */
+	command: Type.Optional(Utf8String(32_768)),
+	rememberSessionEligible: Type.Optional(Type.Boolean()),
 	details: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
 	priorReviewer: Type.Optional(Type.Literal("model")),
 	priorReviewerOutcome: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("unavailable")])),
-	choices: Type.Array(PermissionApprovalChoiceSchema, { minItems: 1, maxItems: 4, uniqueItems: true }),
+	choices: Type.Array(PermissionApprovalChoiceSchema, { minItems: 1, maxItems: 5, uniqueItems: true }),
 });
 
 export const SelectInteractionViewSchema = StrictObject({
@@ -859,10 +915,65 @@ export const VisionSettingsViewSchema = StrictObject({
 	modelId: Type.String({ minLength: 1, maxLength: 300 }),
 	authConfigured: Type.Boolean(),
 });
+/** Existing independent reviewer profile: an exact chat provider/model selection. */
+export const PermissionReviewerProviderConfigSchema = StrictObject({
+	provider: NameSchema,
+	modelId: NameSchema,
+	thinkingLevel: ThinkingSelectionSchema,
+	timeoutMs: Type.Integer({ minimum: 1_000, maximum: 15_000 }),
+	maxOutputTokens: Type.Integer({ minimum: 128, maximum: 8_192 }),
+});
+const PermissionReviewerApiSchema = Type.Union([
+	Type.Literal("openai-responses"),
+	Type.Literal("openai-completions"),
+	Type.Literal("anthropic-messages"),
+]);
+const PermissionReviewerBaseUrlSchema = Type.Refine(
+	Type.String({ minLength: 1, maxLength: 2_048 }),
+	(value) => {
+		try {
+			const parsed = new URL(value);
+			return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password;
+		} catch {
+			return false;
+		}
+	},
+	"must be an HTTP(S) URL without credentials",
+);
+/** Dedicated reviewer connection; never registered in the chat model catalog. */
+export const PermissionReviewerDedicatedConfigSchema = StrictObject({
+	source: Type.Literal("dedicated"),
+	name: Type.String({ minLength: 1, maxLength: 120 }),
+	api: PermissionReviewerApiSchema,
+	baseUrl: PermissionReviewerBaseUrlSchema,
+	modelId: Type.String({ minLength: 1, maxLength: 300 }),
+	thinkingLevel: ThinkingSelectionSchema,
+	timeoutMs: Type.Integer({ minimum: 1_000, maximum: 15_000 }),
+	maxOutputTokens: Type.Integer({ minimum: 128, maximum: 8_192 }),
+	reasoningMode: Type.Union([Type.Literal("off"), Type.Literal("manual")]),
+	thinkingLevelMap: Type.Optional(CustomModelThinkingLevelMapSchema),
+});
+export const PermissionReviewerConfigSchema = Type.Union([
+	PermissionReviewerProviderConfigSchema,
+	PermissionReviewerDedicatedConfigSchema,
+]);
+export const PermissionReviewerStatusSchema = Type.Union([
+	Type.Literal("unconfigured"),
+	Type.Literal("configured"),
+	Type.Literal("invalid"),
+]);
+export const PermissionReviewerViewSchema = StrictObject({
+	config: Type.Union([PermissionReviewerConfigSchema, Type.Null()]),
+	status: PermissionReviewerStatusSchema,
+	/** Credential presence metadata for dedicated connections; never persisted. */
+	authConfigured: Type.Optional(Type.Boolean()),
+});
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([ModelRefSchema, Type.Null()]),
 	/** Vision-describer service for image-less models; null when unset. */
 	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
+	/** Independent reviewer profile; invalid legacy objects are never revived. */
+	permissionReviewer: PermissionReviewerViewSchema,
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
@@ -1156,13 +1267,6 @@ export const AgentSummaryViewSchema = StrictObject({
 	updatedAt: TimestampSchema,
 });
 
-export const SessionTaskViewSchema = StrictObject({
-	task: Type.String({ minLength: 1, maxLength: 512 }),
-	completed: Type.Boolean(),
-});
-
-export const SessionTasksSchema = Type.Array(SessionTaskViewSchema, { maxItems: 256 });
-
 export const SessionDeliveredFilesSchema = Type.Array(SessionDeliveredFileViewSchema, { maxItems: 32 });
 
 export const SessionGoalStatusSchema = Type.Union([
@@ -1247,7 +1351,12 @@ export const SessionStatusViewSchema = Type.Refine(
 export const SessionProcessViewSchema = StrictObject({
 	processId: OpaqueIdSchema,
 	command: PublicTextSchema,
-	state: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed")]),
+	state: Type.Union([
+		Type.Literal("awaiting_approval"),
+		Type.Literal("running"),
+		Type.Literal("completed"),
+		Type.Literal("failed"),
+	]),
 	output: PublicTextSchema,
 	truncated: Type.Boolean(),
 });
@@ -1782,6 +1891,11 @@ export type CustomModelThinkingLevelMap = Static<typeof CustomModelThinkingLevel
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
+export type PermissionReviewerProviderConfigView = Static<typeof PermissionReviewerProviderConfigSchema>;
+export type PermissionReviewerDedicatedConfigView = Static<typeof PermissionReviewerDedicatedConfigSchema>;
+export type PermissionReviewerConfigView = Static<typeof PermissionReviewerConfigSchema>;
+export type PermissionReviewerStatusView = Static<typeof PermissionReviewerStatusSchema>;
+export type PermissionReviewerView = Static<typeof PermissionReviewerViewSchema>;
 export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
 export type MemoryScopeView = Static<typeof MemoryScopeViewSchema>;

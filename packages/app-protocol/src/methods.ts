@@ -76,6 +76,7 @@ import {
 	ModelSettingsViewSchema,
 	PermissionApprovalChoiceSchema,
 	PermissionPresetSchema,
+	PermissionReviewerConfigSchema,
 	PermissionSettingsViewSchema,
 	PlanViewSchema,
 	PluginActivationStatusSchema,
@@ -458,6 +459,8 @@ export const SessionReadDeliveredFileParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	rootSessionId: Type.Optional(SessionIdSchema),
 	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
+	// Desktop resolves the authorized path, then reads preview bytes locally (up to 50 MiB).
+	metadataOnly: Type.Optional(Type.Boolean()),
 });
 export const SessionReadDeliveredFileResultSchema = StrictObject({
 	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
@@ -599,32 +602,211 @@ export const PlanCancelResultSchema = StrictObject({
 	collaborationMode: Type.Literal("default"),
 });
 
-export const PermissionRulesListParamsSchema = StrictObject({ sessionId: SessionIdSchema });
+const PermissionRulesScopeSchema = Type.Union([Type.Literal("project"), Type.Literal("session")]);
+export const PermissionRulesListParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	/** Defaults to project scope; session scope only ever sees the current live session. */
+	scope: Type.Optional(PermissionRulesScopeSchema),
+});
 export const PermissionRulesDeleteParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	ruleId: OpaqueIdSchema,
 	requestId: UuidSchema,
+	scope: Type.Optional(PermissionRulesScopeSchema),
 });
 export const PermissionRulesClearParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	requestId: UuidSchema,
+	scope: Type.Optional(PermissionRulesScopeSchema),
 });
+export const PermissionScopePreviewSchema = StrictObject({
+	workspaceRoots: Type.Array(PathSchema, { maxItems: 4096 }),
+	skillReadRoots: Type.Array(PathSchema, { maxItems: 4096 }),
+	sessionWorkRoots: Type.Array(PathSchema, { maxItems: 4096 }),
+	memoryRoots: Type.Array(PathSchema, { maxItems: 4096 }),
+	deliveryRoots: Type.Array(PathSchema, { maxItems: 4096 }),
+});
+export type PermissionScopePreview = Static<typeof PermissionScopePreviewSchema>;
 export const PermissionRulesResultSchema = StrictObject({
+	scopePreview: Type.Optional(PermissionScopePreviewSchema),
 	projectPath: PathSchema,
+	scope: PermissionRulesScopeSchema,
+	/** Present for session scope; the rows are bound to this live session. */
+	sessionId: Type.Optional(SessionIdSchema),
 	rules: Type.Array(ProjectPermissionRuleViewSchema, { maxItems: 256 }),
+});
+export const RememberedPermissionRulesParamsSchema = StrictObject({});
+export const RememberedPermissionRulesResultSchema = StrictObject({
+	groups: Type.Array(
+		StrictObject({
+			projectPath: PathSchema,
+			projectName: Type.String({ maxLength: 32768 }),
+			scope: PermissionRulesScopeSchema,
+			sessionId: Type.Optional(SessionIdSchema),
+			sessionTitle: Type.Optional(Type.String({ maxLength: 32768 })),
+			rules: Type.Array(ProjectPermissionRuleViewSchema, { maxItems: 256 }),
+		}),
+		{ maxItems: 4096 },
+	),
+});
+export const RevokeRememberedPermissionRuleParamsSchema = Type.Union([
+	StrictObject({
+		requestId: UuidSchema,
+		scope: Type.Literal("project"),
+		projectPath: PathSchema,
+		ruleId: OpaqueIdSchema,
+	}),
+	StrictObject({
+		requestId: UuidSchema,
+		scope: Type.Literal("session"),
+		sessionId: SessionIdSchema,
+		ruleId: OpaqueIdSchema,
+	}),
+]);
+export const RevokeRememberedPermissionRuleResultSchema = StrictObject({ deleted: Type.Literal(true) });
+const AutoCommandNetworkHostnameSchema = Type.Refine(
+	Type.String({
+		minLength: 1,
+		maxLength: 253,
+		pattern: "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
+	}),
+	(value) => value.split(".").every((label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/u.test(label)),
+	"must be an exact hostname",
+);
+export const AutoCommandNetworkTargetSchema = StrictObject({
+	hostname: AutoCommandNetworkHostnameSchema,
+	port: Type.Integer({ minimum: 1, maximum: 65_535 }),
 });
 export const AutoCommandRuleSchema = StrictObject({
 	command: Utf8String(256, { minLength: 1 }),
 	allowNetwork: Type.Boolean(),
+	/** Exact destinations; matching is enforced by the command analyzer. */
+	networkTargets: Type.Optional(Type.Array(AutoCommandNetworkTargetSchema, { maxItems: 32, uniqueItems: true })),
 });
+export const PermissionRuleSchema = StrictObject({
+	id: Utf8String(128, { minLength: 1 }),
+	kind: Type.Union([
+		Type.Literal("command"),
+		Type.Literal("tool"),
+		Type.Literal("script"),
+		Type.Literal("shell"),
+		Type.Literal("compatibility"),
+	]),
+	origin: Type.Union([Type.Literal("default"), Type.Literal("user")]),
+	name: Utf8String(256, { minLength: 1 }),
+	enabled: Type.Boolean(),
+	modes: Type.Array(Type.Union([Type.Literal("ask"), Type.Literal("auto")]), {
+		minItems: 1,
+		maxItems: 2,
+		uniqueItems: true,
+	}),
+	scope: Type.Union([
+		Type.Literal("workspace"),
+		Type.Literal("directories"),
+		Type.Literal("memory"),
+		Type.Literal("session"),
+		Type.Literal("declared"),
+		Type.Literal("all"),
+	]),
+	directories: Type.Array(PathSchema, { maxItems: 32, uniqueItems: true }),
+	command: Type.Optional(Utf8String(256, { minLength: 1 })),
+	toolName: Type.Optional(Utf8String(256, { minLength: 1 })),
+	allowNetwork: Type.Boolean(),
+	networkTargets: Type.Optional(Type.Array(AutoCommandNetworkTargetSchema, { maxItems: 32, uniqueItems: true })),
+});
+export const PermissionRuleViewSchema = StrictObject({
+	...PermissionRuleSchema.properties,
+	support: Type.Union([Type.Literal("supported"), Type.Literal("legacy-unsupported")]),
+	supportReason: Type.Optional(Utf8String(1024, { minLength: 1 })),
+});
+export type PermissionRule = Static<typeof PermissionRuleSchema>;
+export type PermissionRuleView = Static<typeof PermissionRuleViewSchema>;
+export const SandboxPlatformSchema = Type.Union([
+	Type.Literal("darwin"),
+	Type.Literal("linux"),
+	Type.Literal("win32"),
+	Type.Literal("other"),
+]);
+export const SandboxHealthModeSchema = Type.Union([Type.Literal("readiness"), Type.Literal("self-test")]);
+export const SandboxCheckStatusSchema = Type.Union([
+	Type.Literal("passed"),
+	Type.Literal("failed"),
+	Type.Literal("skipped"),
+]);
+export const SandboxCheckIdSchema = Type.Union([
+	Type.Literal("platform"),
+	Type.Literal("package"),
+	Type.Literal("dependencies"),
+	Type.Literal("sandbox-startup"),
+	Type.Literal("filesystem-permitted"),
+	Type.Literal("filesystem-denied"),
+	Type.Literal("network-denied"),
+]);
+export const SandboxCheckReasonSchema = Type.Union([
+	Type.Literal("not-applicable"),
+	Type.Literal("not-run"),
+	Type.Literal("readiness-failed"),
+	Type.Literal("unsupported-platform"),
+	Type.Literal("unsupported-architecture"),
+	Type.Literal("helper-missing"),
+	Type.Literal("helper-invalid"),
+	Type.Literal("dependency-unavailable"),
+	Type.Literal("probe-failed"),
+	Type.Literal("sandbox-start-failed"),
+	Type.Literal("sandbox-unavailable"),
+	Type.Literal("workspace-write-failed"),
+	Type.Literal("outside-read-not-denied"),
+	Type.Literal("network-probe-unavailable"),
+	Type.Literal("network-not-denied"),
+]);
+export const SandboxHealthCheckSchema = StrictObject({
+	id: SandboxCheckIdSchema,
+	status: SandboxCheckStatusSchema,
+	reason: Type.Optional(SandboxCheckReasonSchema),
+});
+export const SandboxRecoveryActionSchema = Type.Union([
+	Type.Literal("install-windows-sandbox"),
+	Type.Literal("check-app-update"),
+]);
+export const PermissionSandboxHealthParamsSchema = StrictObject({});
+export const PermissionSandboxHealthResultSchema = StrictObject({
+	status: SandboxHealthSchema,
+	code: Type.Union([
+		Type.Literal("ready"),
+		Type.Literal("unsupported"),
+		Type.Literal("dependencies-unavailable"),
+		Type.Literal("package-invalid"),
+		Type.Literal("probe-failed"),
+		Type.Literal("self-test-failed"),
+		Type.Literal("self-test-incomplete"),
+	]),
+	checkedAt: Type.Optional(Utf8String(64, { minLength: 1 })),
+	platform: Type.Optional(SandboxPlatformSchema),
+	mode: Type.Optional(SandboxHealthModeSchema),
+	checks: Type.Optional(Type.Array(SandboxHealthCheckSchema, { maxItems: 16 })),
+	recoveryActions: Type.Optional(Type.Array(SandboxRecoveryActionSchema, { maxItems: 4 })),
+});
+export const PermissionSandboxSelfTestParamsSchema = StrictObject({});
+export const PermissionSandboxSelfTestResultSchema = PermissionSandboxHealthResultSchema;
 export const PermissionAutoGetParamsSchema = StrictObject({});
-export const PermissionAutoUpdateParamsSchema = StrictObject({
-	requestId: UuidSchema,
-	rules: Type.Array(AutoCommandRuleSchema, { maxItems: 64 }),
-});
+export const PermissionAutoUpdateParamsSchema = Type.Refine(
+	StrictObject({
+		requestId: UuidSchema,
+		rules: Type.Optional(Type.Array(AutoCommandRuleSchema, { maxItems: 64 })),
+		permissionRules: Type.Optional(Type.Array(PermissionRuleSchema, { maxItems: 115 })),
+		reviewerEnabled: Type.Optional(Type.Boolean()),
+	}),
+	(value) =>
+		(value.rules !== undefined || value.permissionRules !== undefined || value.reviewerEnabled !== undefined) &&
+		!(value.rules !== undefined && value.permissionRules !== undefined),
+	"Auto settings update must change one rule list or the reviewer switch",
+);
 export const PermissionAutoSettingsViewSchema = StrictObject({
 	rules: Type.Array(AutoCommandRuleSchema, { maxItems: 64 }),
+	permissionRules: Type.Array(PermissionRuleViewSchema, { maxItems: 115 }),
+	permissionRuleDefaults: Type.Array(PermissionRuleViewSchema, { maxItems: 51 }),
 	suggestions: Type.Array(Utf8String(256, { minLength: 1 }), { maxItems: 64, uniqueItems: true }),
+	reviewerEnabled: Type.Boolean(),
 });
 
 export const SessionSetModelParamsSchema = StrictObject({
@@ -936,6 +1118,12 @@ export const ModelSettingsMutationSchema = Type.Union([
 		]),
 		credential: CredentialMutationSchema,
 	}),
+	StrictObject({
+		type: Type.Literal("set_permission_reviewer"),
+		config: Type.Union([PermissionReviewerConfigSchema, Type.Null()]),
+		/** Optional for legacy provider clients; dedicated connections need set or an existing key. */
+		credential: Type.Optional(CredentialMutationSchema),
+	}),
 ]);
 export const ModelSettingsGetParamsSchema = StrictObject({});
 export const ModelSettingsUpdateParamsSchema = StrictObject({
@@ -948,11 +1136,21 @@ export const ModelTestConnectionParamsSchema = StrictObject({
 	provider: NameSchema,
 	modelId: NameSchema,
 });
-export const AnyModelTestConnectionParamsSchema = ModelTestConnectionParamsSchema;
+export const PermissionReviewTestConnectionParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	kind: Type.Literal("permission-review"),
+});
+export const AnyModelTestConnectionParamsSchema = Type.Union([
+	ModelTestConnectionParamsSchema,
+	PermissionReviewTestConnectionParamsSchema,
+]);
 export const ModelTestConnectionResultSchema = StrictObject({
 	ok: Type.Boolean(),
 	message: PublicTextSchema,
 	latencyMs: Type.Integer({ minimum: 0, maximum: 300_000 }),
+	thinkingLevel: Type.Optional(ThinkingSelectionSchema),
+	inputTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+	outputTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
 });
 export const UsageGetParamsSchema = StrictObject({ rangeDays: UsageRangeDaysSchema });
 
@@ -1701,8 +1899,15 @@ export const ClientRequestMethods = {
 	"plan/startExecution": method(PlanStartExecutionParamsSchema, AcceptedOperationSchema),
 	"plan/cancel": method(PlanCancelParamsSchema, PlanCancelResultSchema),
 	"permission/rules/list": method(PermissionRulesListParamsSchema, PermissionRulesResultSchema),
+	"permission/rules/catalog": method(RememberedPermissionRulesParamsSchema, RememberedPermissionRulesResultSchema),
+	"permission/rules/revoke": method(
+		RevokeRememberedPermissionRuleParamsSchema,
+		RevokeRememberedPermissionRuleResultSchema,
+	),
 	"permission/rules/delete": method(PermissionRulesDeleteParamsSchema, PermissionRulesResultSchema),
 	"permission/rules/clear": method(PermissionRulesClearParamsSchema, PermissionRulesResultSchema),
+	"permission/sandbox/health": method(PermissionSandboxHealthParamsSchema, PermissionSandboxHealthResultSchema),
+	"permission/sandbox/selfTest": method(PermissionSandboxSelfTestParamsSchema, PermissionSandboxSelfTestResultSchema),
 	"permission/auto/get": method(PermissionAutoGetParamsSchema, PermissionAutoSettingsViewSchema),
 	"permission/auto/update": method(PermissionAutoUpdateParamsSchema, PermissionAutoSettingsViewSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
