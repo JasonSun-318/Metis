@@ -1,32 +1,39 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { ToolResultMessage } from "@metis/ai";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DeliverFileDetails } from "../src/core/deliver-file.ts";
-import { MAX_SESSION_DELIVERED_FILES } from "../src/core/session-attachments.ts";
+import { createSessionWorkDir, MAX_SESSION_DELIVERED_FILES } from "../src/core/session-attachments.ts";
 import { SessionDeliveredArtifacts } from "../src/core/session-delivered-artifacts.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
 const roots: string[] = [];
 const managers: SessionManager[] = [];
-
-function fixture(id = "session-delivered-artifacts") {
-	const root = mkdtempSync(join(tmpdir(), "metis-delivered-artifacts-"));
+function fixture() {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "metis-live-delivery-")));
 	roots.push(root);
 	const agentDir = join(root, "agent");
 	const cwd = join(root, "project");
-	mkdirSync(agentDir, { recursive: true });
-	mkdirSync(cwd, { recursive: true });
-	const manager = SessionManager.create(cwd, join(root, "sessions"), { id });
+	mkdirSync(agentDir);
+	mkdirSync(cwd);
+	const manager = SessionManager.create(cwd, join(root, "sessions"));
 	managers.push(manager);
 	return { root, agentDir, cwd, manager, artifacts: new SessionDeliveredArtifacts(agentDir, manager) };
 }
-
-function toolResult(toolCallId: string, details: DeliverFileDetails): ToolResultMessage<DeliverFileDetails> {
+function message(details: DeliverFileDetails): ToolResultMessage<DeliverFileDetails> {
 	return {
 		role: "toolResult",
-		toolCallId,
+		toolCallId: `deliver-${details.fileId}`,
 		toolName: "deliver_file",
 		content: [{ type: "text", text: "delivered" }],
 		details,
@@ -34,231 +41,160 @@ function toolResult(toolCallId: string, details: DeliverFileDetails): ToolResult
 		timestamp: Date.now(),
 	};
 }
-
-async function deliver(
-	fixtureValue: ReturnType<typeof fixture>,
-	options: { readonly name?: string; readonly signal?: AbortSignal } = {},
-) {
-	const source = join(fixtureValue.cwd, options.name ?? "report.txt");
-	writeFileSync(source, "hello deliver");
-	const toolCallId = `call-${Date.now()}-${Math.random()}`;
-	const result = await fixtureValue.artifacts
+async function deliver(value: ReturnType<typeof fixture>, path: string) {
+	const result = await value.artifacts
 		.createToolDefinition()
-		.execute(toolCallId, { path: source, message: "Please review" }, options.signal, undefined, {} as never);
-	const message = toolResult(toolCallId, result.details!);
-	const entryId = fixtureValue.manager.appendMessage(message);
-	fixtureValue.artifacts.commitToolResult(message);
-	return { details: result.details!, entryId, message };
+		.execute("deliver", { path }, undefined, undefined, {} as never);
+	const entryId = value.manager.appendMessage(message(result.details!));
+	return { details: result.details!, entryId };
 }
-
 afterEach(() => {
-	for (const manager of managers.splice(0, managers.length)) manager.close();
-	for (const root of roots.splice(0, roots.length)) rmSync(root, { recursive: true, force: true });
+	for (const manager of managers.splice(0)) manager.close();
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("SessionDeliveredArtifacts", () => {
-	it("describes ordinary delivery as a bounded file read", () => {
-		const value = fixture("session-delivered-ordinary");
-		const claim = value.artifacts
-			.createToolDefinition()
-			.permission.describe(
-				{ path: "report.md" },
-				{ actionId: "deliver-ordinary", cwd: value.cwd, workspaceRoots: [value.cwd] },
-			);
-		expect(claim.readPaths).toEqual(["report.md"]);
-		expect(claim.effects).toEqual([]);
-	});
-
-	it("keeps credential-shaped delivery sources sensitive", () => {
-		const value = fixture("session-delivered-sensitive");
-		const claim = value.artifacts
-			.createToolDefinition()
-			.permission.describe(
-				{ path: ".env" },
-				{ actionId: "deliver-sensitive", cwd: value.cwd, workspaceRoots: [value.cwd] },
-			);
-		expect(claim.effects).toEqual(["sensitive-read"]);
-	});
-
-	it("keeps staged files private until the successful tool result is journaled", async () => {
+	it("keeps the existing read and sensitive-file permission descriptors", () => {
 		const value = fixture();
-		const source = join(value.cwd, "report.txt");
-		writeFileSync(source, "hello deliver");
-		const toolCallId = "call-private-stage";
+		const tool = value.artifacts.createToolDefinition();
+		const context = { actionId: "delivery", cwd: value.cwd, workspaceRoots: [value.cwd] };
+		expect(tool.permission.describe({ path: "report.md" }, context)).toMatchObject({
+			readPaths: ["report.md"],
+			effects: [],
+		});
+		expect(tool.permission.describe({ path: ".env" }, context).effects).toEqual(["sensitive-read"]);
+	});
+	it("publishes a live reference only after journaling, without copying the file", async () => {
+		const value = fixture();
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "first");
 		const result = await value.artifacts
 			.createToolDefinition()
-			.execute(toolCallId, { path: source }, undefined, undefined, {} as never);
-
-		expect(value.artifacts.list()).toEqual([]);
+			.execute("one", { path }, undefined, undefined, {} as never);
 		expect(value.artifacts.resolve(result.details!.fileId)).toBeUndefined();
-
-		const message = toolResult(toolCallId, result.details!);
-		value.manager.appendMessage(message);
-		value.artifacts.commitToolResult(message);
-		expect(value.artifacts.list()).toEqual([
-			expect.objectContaining({
-				fileId: result.details!.fileId,
-				name: "report.txt",
-				availability: "available",
-			}),
-		]);
-		const resolved = value.artifacts.resolve(result.details!.fileId);
-		expect(resolved?.artifact.name).toBe("report.txt");
-		expect(readFileSync(resolved!.path, "utf8")).toBe("hello deliver");
+		value.manager.appendMessage(message(result.details!));
+		expect(value.artifacts.resolve(result.details!.fileId)?.path).toBe(path);
+		expect(result.details?.sourcePath).toBe(path);
+		expect(existsSync(join(value.agentDir, "attachments"))).toBe(false);
 	});
-
-	it("retains journal history and marks a missing file unavailable", async () => {
-		const value = fixture("session-missing-artifact");
-		const delivered = await deliver(value);
-		const resolved = value.artifacts.resolve(delivered.details.fileId);
-		rmSync(resolved!.path);
-
-		expect(value.artifacts.list()).toEqual([
-			expect.objectContaining({ fileId: delivered.details.fileId, availability: "unavailable" }),
-		]);
-		expect(value.artifacts.resolve(delivered.details.fileId)).toBeUndefined();
+	it("reuses identity across repeated deliveries and opens the newest original bytes", async () => {
+		const value = fixture();
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "first");
+		const first = await deliver(value, path);
+		for (let i = 0; i < MAX_SESSION_DELIVERED_FILES + 1; i++) {
+			writeFileSync(path, `updated version ${i}`);
+			expect((await deliver(value, path)).details.fileId).toBe(first.details.fileId);
+		}
+		expect(value.artifacts.list()).toHaveLength(1);
+		const resolved = value.artifacts.resolve(first.details.fileId)!;
+		expect(readFileSync(resolved.path, "utf8")).toBe(`updated version ${MAX_SESSION_DELIVERED_FILES}`);
+		expect(resolved.artifact.byteLength).toBe(readFileSync(path).length);
+		const reopened = SessionManager.openReadOnly(value.manager.getSessionFile()!);
+		const restored = new SessionDeliveredArtifacts(value.agentDir, reopened);
+		expect(restored.resolve(first.details.fileId)?.path).toBe(path);
 	});
-
-	it("keeps only the exact journal-derived storage name", async () => {
-		const value = fixture("session-exact-artifact-name");
-		const delivered = await deliver(value);
-		const resolved = value.artifacts.resolve(delivered.details.fileId)!;
-		const impostor = join(dirname(resolved.path), `${delivered.details.fileId}.evil`);
-		writeFileSync(impostor, "not the delivered file");
-
-		const reconciled = new SessionDeliveredArtifacts(value.agentDir, value.manager);
-		expect(existsSync(resolved.path)).toBe(true);
-		expect(existsSync(impostor)).toBe(false);
-		expect(reconciled.resolve(delivered.details.fileId)?.path).toBe(resolved.path);
+	it("keeps deleted or redirected history unavailable", async () => {
+		const value = fixture();
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "one");
+		const file = await deliver(value, path);
+		rmSync(path);
+		expect(value.artifacts.list()[0]?.availability).toBe("unavailable");
+		const other = join(value.root, "other.txt");
+		writeFileSync(other, "other");
+		symlinkSync(other, path);
+		expect(value.artifacts.resolve(file.details.fileId)).toBeUndefined();
 	});
-
-	it("removes an unjournaled stage on cancellation", async () => {
-		const value = fixture("session-cancelled-artifact");
-		const source = join(value.cwd, "cancelled.txt");
-		writeFileSync(source, "cancel me");
+	it("does not remove unrelated files in the original folder", async () => {
+		const value = fixture();
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "report");
+		await deliver(value, path);
+		const unrelated = join(value.cwd, "notes.txt");
+		writeFileSync(unrelated, "notes");
+		new SessionDeliveredArtifacts(value.agentDir, value.manager);
+		expect(readFileSync(unrelated, "utf8")).toBe("notes");
+	});
+	it("preserves the original on cancellation", async () => {
+		const value = fixture();
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "report");
 		let reads = 0;
 		const signal = {
 			get aborted() {
-				reads += 1;
-				return reads > 1;
+				return ++reads > 1;
 			},
 		} as AbortSignal;
-
 		await expect(
-			value.artifacts
-				.createToolDefinition()
-				.execute("call-cancelled", { path: source }, signal, undefined, {} as never),
-		).rejects.toThrow(/aborted/iu);
+			value.artifacts.createToolDefinition().execute("one", { path }, signal, undefined, {} as never),
+		).rejects.toThrow(/aborted/);
+		expect(readFileSync(path, "utf8")).toBe("report");
 		expect(value.artifacts.list()).toEqual([]);
-		const deliveredDir = join(value.agentDir, "attachments", value.manager.getSessionId(), "delivered");
-		expect(existsSync(deliveredDir) ? readFileNames(deliveredDir) : []).toEqual([]);
 	});
-
-	it("rejects source files outside the session workspace", async () => {
-		const value = fixture("session-outside-artifact");
-		const outside = join(value.root, "outside.txt");
-		writeFileSync(outside, "outside");
-
-		await expect(
-			value.artifacts
-				.createToolDefinition()
-				.execute("call-outside", { path: outside }, undefined, undefined, {} as never),
-		).rejects.toThrow(/outside the allowed workspace/iu);
+	it("accepts an authorized external path without forcing relocation", async () => {
+		const value = fixture();
+		const path = join(value.root, "outside.txt");
+		writeFileSync(path, "outside");
+		const file = await deliver(value, path);
+		expect(value.artifacts.resolve(file.details.fileId)?.path).toBe(path);
 	});
-
-	it("reconciles true orphans without charging them to the journal quota", async () => {
-		const value = fixture("session-orphan-artifact");
-		const source = join(value.cwd, "orphan.txt");
-		writeFileSync(source, "orphan");
-		const result = await value.artifacts
-			.createToolDefinition()
-			.execute("call-orphan", { path: source }, undefined, undefined, {} as never);
-		const deliveredDir = join(value.agentDir, "attachments", value.manager.getSessionId(), "delivered");
-		expect(readFileNames(deliveredDir)).toHaveLength(1);
-
-		const reconciled = new SessionDeliveredArtifacts(value.agentDir, value.manager);
-		expect(readFileNames(deliveredDir)).toEqual([]);
-		expect(reconciled.resolve(result.details!.fileId)).toBeUndefined();
-
-		const next = await reconciled
-			.createToolDefinition()
-			.execute("call-after-orphan", { path: source }, undefined, undefined, {} as never);
-		expect(next.details?.fileId).toMatch(/^[a-f0-9]{16}$/u);
-		reconciled.rollback("call-after-orphan");
-	});
-
-	it("counts active journal history rather than physical files for quota", async () => {
-		const value = fixture("session-artifact-quota");
-		for (let index = 0; index < MAX_SESSION_DELIVERED_FILES; index += 1) {
-			value.manager.appendMessage(
-				toolResult(`call-${index}`, {
-					fileId: index.toString(16).padStart(16, "0"),
-					name: `${index}.txt`,
-					byteLength: 1,
-					deliveredAt: new Date(0).toISOString(),
-				}),
-			);
-		}
-		const source = join(value.cwd, "blocked.txt");
-		writeFileSync(source, "blocked");
-
-		await expect(
-			value.artifacts
-				.createToolDefinition()
-				.execute("call-blocked", { path: source }, undefined, undefined, {} as never),
-		).rejects.toThrow(/at most 32 files/iu);
-	});
-
-	it("preserves files referenced by an inactive history branch during reconciliation", async () => {
-		const value = fixture("session-branched-artifact");
-		const rootEntryId = value.manager.appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "start" }],
-			timestamp: Date.now(),
-		});
-		const delivered = await deliver(value);
-		const path = value.artifacts.resolve(delivered.details.fileId)!.path;
-		value.manager.branch(rootEntryId);
-		value.manager.appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "alternate" }],
-			timestamp: Date.now(),
-		});
-
-		expect(value.artifacts.list()).toEqual([]);
-		new SessionDeliveredArtifacts(value.agentDir, value.manager);
+	it("rejects run-temporary files before cleanup can invalidate their cards", async () => {
+		const value = fixture();
+		const work = createSessionWorkDir(value.agentDir, value.manager.getSessionId());
+		const path = join(work, "report.txt");
+		writeFileSync(path, "temporary");
+		await expect(deliver(value, path)).rejects.toThrow(/METIS_WORK_DIR is temporary/);
 		expect(existsSync(path)).toBe(true);
 	});
-
-	it("copies the fork branch best-effort and leaves missing history unavailable", async () => {
-		const value = fixture("session-fork-source");
-		const delivered = await deliver(value);
-		const branch = value.manager.createBranchedSessionManager(delivered.entryId);
-		managers.push(branch);
-		value.artifacts.copyTo(branch);
-		const target = new SessionDeliveredArtifacts(value.agentDir, branch);
-		expect(target.list()).toEqual([
-			expect.objectContaining({ fileId: delivered.details.fileId, availability: "available" }),
-		]);
-
-		const missingBranch = value.manager.createBranchedSessionManager(delivered.entryId);
-		managers.push(missingBranch);
-		rmSync(value.artifacts.resolve(delivered.details.fileId)!.path);
-		expect(() => value.artifacts.copyTo(missingBranch)).not.toThrow();
-		const missingTarget = new SessionDeliveredArtifacts(value.agentDir, missingBranch);
-		expect(missingTarget.list()).toEqual([
-			expect.objectContaining({ fileId: delivered.details.fileId, availability: "unavailable" }),
-		]);
-
-		const blockedBranch = value.manager.createBranchedSessionManager(delivered.entryId);
-		managers.push(blockedBranch);
-		const blockedAttachmentDir = join(value.agentDir, "attachments", blockedBranch.getSessionId());
-		mkdirSync(blockedAttachmentDir, { recursive: true });
-		writeFileSync(join(blockedAttachmentDir, "delivered"), "not a directory");
-		expect(() => value.artifacts.copyTo(blockedBranch)).not.toThrow();
+	it("enforces the distinct-file quota", async () => {
+		const value = fixture();
+		for (let i = 0; i < MAX_SESSION_DELIVERED_FILES; i++) {
+			const path = join(value.cwd, `${i}.txt`);
+			writeFileSync(path, "file");
+			await deliver(value, path);
+		}
+		const next = join(value.cwd, "next.txt");
+		writeFileSync(next, "file");
+		await expect(deliver(value, next)).rejects.toThrow(/32 distinct files/);
+	});
+	it("carries live references into forks without copying and limits access to branch history", async () => {
+		const value = fixture();
+		const root = value.manager.appendMessage({ role: "user", content: "start", timestamp: 1 });
+		const path = join(value.cwd, "report.txt");
+		writeFileSync(path, "first");
+		const file = await deliver(value, path);
+		const fork = value.manager.createBranchedSessionManager(file.entryId);
+		managers.push(fork);
+		value.artifacts.copyTo(fork);
+		writeFileSync(path, "updated");
+		expect(new SessionDeliveredArtifacts(value.agentDir, fork).resolve(file.details.fileId)?.path).toBe(path);
+		value.manager.branch(root);
+		expect(value.artifacts.resolve(file.details.fileId)).toBeUndefined();
+		expect(existsSync(path)).toBe(true);
+	});
+	it("retains and forks legacy copied deliveries without migrating history", () => {
+		const value = fixture();
+		const details = {
+			fileId: "aaaaaaaaaaaaaaaa",
+			name: "old.txt",
+			byteLength: 3,
+			deliveredAt: new Date().toISOString(),
+		};
+		const dir = join(value.agentDir, "attachments", value.manager.getSessionId(), "delivered");
+		mkdirSync(dir, { recursive: true });
+		const old = join(dir, "aaaaaaaaaaaaaaaa.txt");
+		writeFileSync(old, "old");
+		writeFileSync(join(dir, "orphan.txt"), "orphan");
+		const entry = value.manager.appendMessage(message(details));
+		const artifacts = new SessionDeliveredArtifacts(value.agentDir, value.manager);
+		expect(artifacts.resolve(details.fileId)?.path).toBe(old);
+		expect(existsSync(join(dir, "orphan.txt"))).toBe(false);
+		const fork = value.manager.createBranchedSessionManager(entry);
+		managers.push(fork);
+		artifacts.copyTo(fork);
+		const resolved = new SessionDeliveredArtifacts(value.agentDir, fork).resolve(details.fileId)!;
+		expect(resolved.path).not.toBe(old);
+		expect(readFileSync(resolved.path, "utf8")).toBe("old");
 	});
 });
-
-function readFileNames(directory: string): string[] {
-	return readdirSync(directory).sort();
-}

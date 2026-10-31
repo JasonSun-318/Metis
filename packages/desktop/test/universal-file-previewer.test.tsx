@@ -267,7 +267,7 @@ describe("UniversalFilePreviewer", () => {
 		expect(container.querySelector("pre")!.textContent).toBe("new.txt");
 	});
 
-	it("reuses immutable delivered text when reopening the preview", async () => {
+	it("reads the latest delivered file when reopening the preview", async () => {
 		const readPreviewFile = vi.fn().mockResolvedValue({
 			ok: true,
 			name: "notes.txt",
@@ -283,9 +283,16 @@ describe("UniversalFilePreviewer", () => {
 		await act(async () =>
 			root.render(<UniversalFilePreviewer active={false} api={api} file={file} onError={onError} />),
 		);
+		readPreviewFile.mockResolvedValue({
+			ok: true,
+			name: "notes.txt",
+			byteLength: 7,
+			mediaType: "text/plain",
+			bytes: new TextEncoder().encode("updated"),
+		});
 		await act(async () => root.render(<UniversalFilePreviewer active api={api} file={file} onError={onError} />));
-		expect(readPreviewFile).toHaveBeenCalledTimes(1);
-		expect(container.querySelector("pre")!.textContent).toBe("hello");
+		expect(readPreviewFile).toHaveBeenCalledTimes(2);
+		expect(container.querySelector("pre")!.textContent).toBe("updated");
 	});
 
 	it("does not reference legacy dark-only theme aliases", () => {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,21 +45,21 @@ describe("readDeliveredPreviewBytes", () => {
 	});
 
 	it("returns raw bytes and rejects files over the preview cap", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "metis-preview-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "metis-preview-")));
 		roots.push(dir);
 		const fileId = "bbbbbbbbbbbbbbbb";
 		writeFileSync(join(dir, `${fileId}-note.pdf`), "%PDF-1.4 tiny");
-		const ok = await readDeliveredPreviewBytes(dir, fileId);
+		const ok = await readDeliveredPreviewBytes(join(dir, `${fileId}-note.pdf`), "note.pdf");
 		expect(ok.ok).toBe(true);
 		if (ok.ok) {
 			expect(Buffer.from(ok.bytes).toString("utf8")).toContain("%PDF-1.4");
-			expect(ok.name).toBe(`${fileId}-note.pdf`);
+			expect(ok.name).toBe("note.pdf");
 			expect(ok.mediaType).toBe("application/pdf");
 		}
 
 		const hugeId = "cccccccccccccccc";
 		writeFileSync(join(dir, `${hugeId}-huge.pdf`), Buffer.alloc(PREVIEW_MAX_BYTES + 1));
-		const tooBig = await readDeliveredPreviewBytes(dir, hugeId);
+		const tooBig = await readDeliveredPreviewBytes(join(dir, `${hugeId}-huge.pdf`), "huge.pdf");
 		expect(tooBig).toEqual({ ok: false, reason: "too-large" });
 	});
 });

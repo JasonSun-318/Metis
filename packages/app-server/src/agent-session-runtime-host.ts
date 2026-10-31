@@ -1622,7 +1622,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		try {
 			const resolved = this.session.deliveredArtifacts?.resolve(input.fileId);
 			if (!resolved) throw new Error("Delivered file was not found");
-			return await readDeliveredFileOnDisk(resolved);
+			return await readDeliveredFileOnDisk(resolved, input.metadataOnly);
 		} catch (error) {
 			if (error instanceof Error && error.message === "Delivered file was not found") {
 				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
@@ -2569,7 +2569,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		try {
 			const resolved = this.deliveredArtifacts.resolve(input.fileId);
 			if (!resolved) throw new Error("Delivered file was not found");
-			return await readDeliveredFileOnDisk(resolved);
+			return await readDeliveredFileOnDisk(resolved, input.metadataOnly);
 		} catch (error) {
 			if (error instanceof Error && error.message === "Delivered file was not found") {
 				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });

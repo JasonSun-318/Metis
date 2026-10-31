@@ -11,8 +11,8 @@ import {
 	realpathSync,
 	rmSync,
 } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
-import { canonicalizePath, canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
+import { basename, dirname, extname, join, relative } from "node:path";
+import { canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
 import {
 	formatSessionConversationQuoteDisplayText,
 	type SessionConversationQuote,
@@ -310,11 +310,6 @@ export function removeSessionAttachment(agentDir: string, sessionId: string, att
 	}
 }
 
-function isInsideRoot(root: string, target: string): boolean {
-	const rel = relative(root, target);
-	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel) && !rel.split(sep).includes(".."));
-}
-
 function ensureOwnedSessionDeliveredDir(agentDir: string, sessionId: string): string {
 	const attachmentDir = ensureAttachmentDirectory(agentDir, sessionId);
 	const delivered = join(attachmentDir, SESSION_DELIVERED_DIR_NAME);
@@ -341,100 +336,11 @@ export function getOwnedSessionDeliveredDir(agentDir: string, sessionId: string)
 	}
 }
 
-export interface StagedDeliveredFile {
-	readonly fileId: string;
-	readonly name: string;
-	readonly path: string;
-	readonly byteLength: number;
-}
-
 export function deliveredFileStorageName(fileId: string, name: string): string {
 	if (!/^[a-f0-9]{16}$/u.test(fileId)) throw new TypeError("Invalid delivered file id");
 	const extension = extname(name);
 	const suffix = /^\.[a-z0-9_-]{1,31}$/i.test(extension) ? extension : "";
 	return `${fileId}${suffix}`;
-}
-
-/** Collect filesystem roots the agent may deliver from for one session. */
-export function collectSessionDeliverableRoots(options: {
-	readonly cwd: string;
-	readonly agentDir: string;
-	readonly sessionId: string;
-	readonly additionalDirectories?: readonly string[];
-}): string[] {
-	const roots = new Set<string>();
-	roots.add(canonicalizePath(resolvePath(options.cwd)));
-	for (const directory of options.additionalDirectories ?? []) {
-		roots.add(canonicalizePath(resolvePath(directory)));
-	}
-	roots.add(canonicalizePath(getSessionAttachmentDir(options.agentDir, options.sessionId)));
-	const ownedAttachmentDir = getOwnedSessionAttachmentDir(options.agentDir, options.sessionId);
-	if (ownedAttachmentDir) roots.add(canonicalizePath(ownedAttachmentDir));
-	for (const workDir of getOwnedSessionWorkDirs(options.agentDir, options.sessionId)) {
-		roots.add(canonicalizePath(workDir));
-	}
-	return [...roots];
-}
-
-function assertDeliverableSourcePath(source: string, roots: readonly string[]): string {
-	const resolved = canonicalizePath(source);
-	const metadata = lstatSync(resolved);
-	if (metadata.isSymbolicLink() || !metadata.isFile()) {
-		throw new Error(`Deliverable path must be a regular file: ${source}`);
-	}
-	if (!roots.some((root) => isInsideRoot(root, resolved))) {
-		throw new Error(`Deliverable path is outside the allowed workspace: ${source}`);
-	}
-	return resolved;
-}
-
-/** Copy one agent-owned file into the session delivered-files directory for Desktop delivery. */
-export function stageDeliveredFile(options: {
-	readonly agentDir: string;
-	readonly sessionId: string;
-	readonly cwd: string;
-	readonly additionalDirectories?: readonly string[];
-	readonly sourcePath: string;
-	readonly name?: string;
-	readonly activeDeliveredFileCount: number;
-}): StagedDeliveredFile {
-	const deliveredDir = ensureOwnedSessionDeliveredDir(options.agentDir, options.sessionId);
-	if (options.activeDeliveredFileCount >= MAX_SESSION_DELIVERED_FILES) {
-		throw new Error(`A session can deliver at most ${MAX_SESSION_DELIVERED_FILES} files`);
-	}
-
-	const source = resolvePath(options.sourcePath, options.cwd, { trim: true });
-	const canonicalSource = assertDeliverableSourcePath(
-		source,
-		collectSessionDeliverableRoots({
-			cwd: options.cwd,
-			agentDir: options.agentDir,
-			sessionId: options.sessionId,
-			additionalDirectories: options.additionalDirectories,
-		}),
-	);
-	const sourceMetadata = lstatSync(canonicalSource);
-	if (sourceMetadata.size === 0) throw new Error(`Deliverable file is empty: ${options.sourcePath}`);
-	if (sourceMetadata.size > MAX_SESSION_ATTACHMENT_BYTES) {
-		throw new Error(`Deliverable file exceeds ${MAX_SESSION_ATTACHMENT_BYTES} bytes: ${options.sourcePath}`);
-	}
-
-	const name = attachmentName(options.name ?? canonicalSource);
-	const token = randomUUID().replaceAll("-", "").slice(0, 16);
-	const destination = join(deliveredDir, deliveredFileStorageName(token, name));
-	copyFileSync(canonicalSource, destination, fsConstants.COPYFILE_EXCL);
-	if (process.platform !== "win32") chmodSync(destination, 0o600);
-	const copied = lstatSync(destination);
-	if (copied.isSymbolicLink() || !copied.isFile() || copied.size !== sourceMetadata.size) {
-		rmSync(destination, { force: true });
-		throw new Error(`Deliverable file changed while it was being copied: ${options.sourcePath}`);
-	}
-	return {
-		fileId: token,
-		name,
-		path: realpathSync(destination),
-		byteLength: copied.size,
-	};
 }
 
 /** Resolve one staged delivered file by id within a Metis-owned session directory. */

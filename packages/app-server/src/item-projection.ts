@@ -355,7 +355,12 @@ export function projectDeliveredFileFromToolResult(
 	}
 	const details = parseDeliverFileDetails(record.details);
 	if (!details) return undefined;
-	return deliveredFiles.get(details.fileId) ?? { ...details, availability: "unavailable" };
+	const current = deliveredFiles.get(details.fileId);
+	return {
+		...details,
+		byteLength: current?.byteLength ?? details.byteLength,
+		availability: current?.availability ?? "unavailable",
+	};
 }
 
 export function projectPlanView(plan: StoredPlan): PlanView {

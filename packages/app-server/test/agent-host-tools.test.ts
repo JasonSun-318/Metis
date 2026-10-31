@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InteractionView, ServerRpcRequest } from "@metis/app-protocol";
@@ -163,7 +163,6 @@ describe("actor-bound host tools", () => {
 			timestamp: Date.now(),
 		};
 		manager.appendMessage(message);
-		artifacts.commitToolResult(message);
 		expect(result.details).toMatchObject({
 			rootSessionId: ROOT,
 			actorSessionId: CHILD,
@@ -171,7 +170,7 @@ describe("actor-bound host tools", () => {
 			taskId: "delivery-task",
 		});
 		const artifact = artifacts.resolve(result.details.fileId)!;
-		expect(artifact.path).toContain(CHILD);
+		expect(artifact.path).toBe(realpathSync(source));
 		expect(readFileSync(artifact.path, "utf8")).toBe("Child evidence");
 		expect(manager.getDurableJournalSnapshot()).toEqual(
 			expect.arrayContaining([

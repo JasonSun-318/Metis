@@ -33,7 +33,10 @@ const MIME_MAP: Record<string, string> = {
 // Base64 expands by 4/3; leave room for metadata and the RPC envelope.
 const MAX_INLINE_FILE_BYTES = Math.floor((MAX_ENVELOPE_UTF8_BYTES - 64 * 1024) / 4) * 3;
 
-export async function readDeliveredFile(options: ResolvedSessionDeliveredArtifact): Promise<{
+export async function readDeliveredFile(
+	options: ResolvedSessionDeliveredArtifact,
+	metadataOnly = false,
+): Promise<{
 	readonly fileId: string;
 	readonly name: string;
 	readonly byteLength: number;
@@ -41,6 +44,14 @@ export async function readDeliveredFile(options: ResolvedSessionDeliveredArtifac
 	readonly mediaType?: string;
 	readonly absolutePath: string;
 }> {
+	if (metadataOnly)
+		return {
+			fileId: options.artifact.fileId,
+			name: options.artifact.name,
+			byteLength: options.artifact.byteLength,
+			absolutePath: options.path,
+			data: "",
+		};
 	if (options.artifact.byteLength > MAX_INLINE_FILE_BYTES)
 		throw new Error("Delivered file is too large for an inline RPC response");
 	const file = await open(options.path, "r");

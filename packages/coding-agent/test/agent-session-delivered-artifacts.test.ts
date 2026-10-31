@@ -61,7 +61,7 @@ describe("AgentSession delivered artifact persistence", () => {
 		expect(observed).toContainEqual(expect.objectContaining({ type: "message_end", message }));
 	});
 
-	it("does not publish success and deletes the staged file when journal append fails", async () => {
+	it("does not publish success or delete the original when journal append fails", async () => {
 		const value = fixture();
 		const message = await stage(value);
 		const observed: AgentSessionEvent[] = [];
@@ -72,6 +72,7 @@ describe("AgentSession delivered artifact persistence", () => {
 
 		await expect(processMessageEnd(value, message)).rejects.toThrow("append failed");
 		expect(observed).not.toContainEqual(expect.objectContaining({ type: "message_end", message }));
+		expect(existsSync(join(value.tempDir, "deliver.txt"))).toBe(true);
 		const deliveredDir = join(
 			value.tempDir,
 			"agent",

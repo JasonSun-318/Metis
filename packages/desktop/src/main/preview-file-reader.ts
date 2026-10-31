@@ -1,6 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { open, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
 import { type DesktopPreviewFile, PREVIEW_MAX_BYTES } from "../shared/desktop-api.ts";
 
@@ -135,40 +134,45 @@ export async function readKnowledgePreviewBytes(
 	}
 }
 
-export function deliveredPreviewDirectories(sessionId: string): readonly string[] {
-	return [
-		process.env.METIS_AGENT_DIR ? join(process.env.METIS_AGENT_DIR, "attachments", sessionId, "delivered") : null,
-		join(homedir(), ".metis", "agent", "attachments", sessionId, "delivered"),
-		join(homedir(), ".metis", "attachments", sessionId, "delivered"),
-		join(homedir(), ".metis", "agent", "attachments", sessionId),
-		join(homedir(), ".metis", "attachments", sessionId),
-	].filter((directory): directory is string => directory !== null);
-}
-
-function toBytes(contents: Uint8Array): Uint8Array {
-	return new Uint8Array(contents.buffer, contents.byteOffset, contents.byteLength);
-}
-
-export async function readDeliveredPreviewBytes(directory: string, fileId: string): Promise<DesktopPreviewFile> {
-	let names: string[];
+/** The path is resolved from this session's delivery history by App Server, never supplied by the renderer. */
+export async function readDeliveredPreviewBytes(path: string, name: string): Promise<DesktopPreviewFile> {
+	const invalid = { ok: false as const, reason: "not-found" as const };
+	let handle: Awaited<ReturnType<typeof open>> | undefined;
 	try {
-		names = await readdir(directory);
+		if ((await realpath(path)) !== path) return invalid;
+		handle = await open(path, O_NOFOLLOW_FLAGS);
+		const before = await handle.stat();
+		if (!before.isFile()) return invalid;
+		if (before.size > PREVIEW_MAX_BYTES) return { ok: false, reason: "too-large" };
+		const bytes = new Uint8Array(before.size);
+		let offset = 0;
+		while (offset < bytes.length) {
+			const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+			if (bytesRead === 0) return invalid;
+			offset += bytesRead;
+		}
+		const after = await handle.stat();
+		const current = await stat(path);
+		if (
+			(await realpath(path)) !== path ||
+			current.dev !== before.dev ||
+			current.ino !== before.ino ||
+			after.size !== before.size ||
+			after.mtimeMs !== before.mtimeMs ||
+			after.ctimeMs !== before.ctimeMs
+		)
+			return invalid;
+		const ext = extname(name).slice(1).toLowerCase();
+		return {
+			ok: true,
+			name,
+			byteLength: bytes.length,
+			mediaType: MIME_BY_EXT[ext] || "application/octet-stream",
+			bytes,
+		};
 	} catch {
-		return { ok: false, reason: "not-found" };
+		return invalid;
+	} finally {
+		await handle?.close();
 	}
-	const match = names.find((name) => name.toLowerCase().startsWith(fileId.toLowerCase()));
-	if (!match) return { ok: false, reason: "not-found" };
-	const fullPath = join(directory, match);
-	const metadata = await stat(fullPath);
-	if (!metadata.isFile()) return { ok: false, reason: "not-found" };
-	if (metadata.size > PREVIEW_MAX_BYTES) return { ok: false, reason: "too-large" };
-	const bytes = await readFile(fullPath);
-	const ext = extname(fullPath).replace(/^\./u, "").toLowerCase();
-	return {
-		ok: true,
-		name: basename(fullPath),
-		byteLength: metadata.size,
-		mediaType: MIME_BY_EXT[ext] || "application/octet-stream",
-		bytes: toBytes(bytes),
-	};
 }

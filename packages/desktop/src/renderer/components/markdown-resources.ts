@@ -131,7 +131,7 @@ export async function readMarkdownResource(
 	const { api } = document;
 	const key = previewCacheKey(resource.input);
 	// Workspaces are live. Knowledge resolution supplies the current revision and validates registration.
-	let bytes = resource.input.source === "workspace" ? undefined : previewBytesCache.get(key);
+	let bytes = resource.input.source === "knowledge" ? previewBytesCache.get(key) : undefined;
 	if (!bytes) {
 		const result = await api.readPreviewFile(resource.input);
 		if (!result.ok)
@@ -153,6 +153,6 @@ export async function readMarkdownResource(
 		if (!media || (resource.kind === "pdf" ? media !== "application/pdf" : !media.startsWith("image/")))
 			throw new Error("Resource contents do not match a supported image or PDF");
 	}
-	if (resource.input.source !== "workspace") previewBytesCache.set(key, bytes);
+	if (resource.input.source === "knowledge") previewBytesCache.set(key, bytes);
 	return bytes;
 }

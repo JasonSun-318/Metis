@@ -2739,7 +2739,6 @@ export class AgentSession {
 		this._isAgentSettling = true;
 		this._isAgentRunActive = false;
 		try {
-			this.deliveredArtifacts?.rollbackAll();
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 		} finally {
@@ -2805,7 +2804,6 @@ export class AgentSession {
 				? event.message
 				: undefined;
 		const durableDelivery = deliveryMessage?.isError === false;
-		if (deliveryMessage && !durableDelivery) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 		if (event.type === "message_end" && event.message.role === "assistant" && this._canRetryMessage(event.message)) {
 			// This travels with the persisted failed attempt, so reconnect/history
 			// can distinguish recovery from a final failure without exposing errors.
@@ -2831,7 +2829,6 @@ export class AgentSession {
 		if (event.type === "message_end") {
 			if (this._eventPersistenceFailure !== undefined) {
 				this._discardUnpersistedAgentMessage(event.message);
-				if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 				throw this._eventPersistenceFailure;
 			}
 			let durableAssistantEvidence: RuntimeAssistantMessageEvidence | undefined;
@@ -2846,7 +2843,6 @@ export class AgentSession {
 					}
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);
-					if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 					throw new DurableMessageValidationError(error);
 				}
 			}
@@ -2898,11 +2894,9 @@ export class AgentSession {
 					);
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);
-					if (deliveryMessage) this.deliveredArtifacts?.rollback(deliveryMessage.toolCallId);
 					throw error;
 				}
 				if (durableDelivery) {
-					this.deliveredArtifacts?.commitToolResult(deliveryMessage);
 					this._emit(event);
 				}
 				if (
@@ -3230,7 +3224,6 @@ export class AgentSession {
 				} catch {
 					// Continue invalidating the session even if an abort hook throws.
 				}
-				this.deliveredArtifacts?.rollbackAll();
 				this._permissionRuntime.invalidate("session");
 				// Closing the session clears its exact session allows (the design keeps
 				// them across aborts and reviewer switches, but never across close).

@@ -133,7 +133,6 @@ describe("read-only child asset access", () => {
 			timestamp: Date.now(),
 		};
 		value.child.appendMessage(message);
-		artifacts.commitToolResult(message);
 		const resolved = artifacts.resolve(result.details.fileId)!;
 		const orphan = join(dirname(resolved.path), "unreferenced-sentinel.txt");
 		writeFileSync(orphan, "Do not clean up during a read");
@@ -165,8 +164,18 @@ describe("read-only child asset access", () => {
 		expect(readFileSync(orphan, "utf8")).toBe("Do not clean up during a read");
 		expect(readFileSync(value.record.path, "utf8")).toBe(before);
 		writeFileSync(resolved.path, "changed size");
-		await expect(readAgentDeliveredFile(value.ref, value.agentDir, input)).rejects.toMatchObject({
-			code: "NOT_FOUND",
-		});
+		const updated = await readAgentDeliveredFile(value.ref, value.agentDir, input);
+		expect(updated.byteLength).toBe(12);
+		expect(Buffer.from(updated.data, "base64").toString("utf8")).toBe("changed size");
+		await expect(
+			readAgentDeliveredFile(value.ref, value.agentDir, { ...input, metadataOnly: true }),
+		).resolves.toMatchObject({ absolutePath: realpathSync(path), byteLength: 12, data: "" });
+		await expect(
+			readAgentDeliveredFile(value.ref, value.agentDir, {
+				...input,
+				rootSessionId: "other-root",
+				metadataOnly: true,
+			}),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
 	});
 });

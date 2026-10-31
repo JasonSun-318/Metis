@@ -67,6 +67,7 @@ export type { DurablePromptInput } from "./core/runtime-recovery.ts";
 // Schedule data trash seam for hosts that need to inject a non-OS trash implementation.
 export { trashScheduledTaskData } from "./core/schedules/delete.ts";
 export { resolveDeliveredFilePath } from "./core/session-attachments.ts";
+export { resolveSessionDeliveredArtifact } from "./core/session-delivered-artifacts.ts";
 export { agentSummaryFromRecord } from "./core/subagents/manager.ts";
 export { queuedAdmissionRequestId, queuedAgentMessages } from "./core/subagents/queued-messages.ts";
 export { AgentStore } from "./core/subagents/store.ts";

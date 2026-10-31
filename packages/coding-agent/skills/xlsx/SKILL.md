@@ -10,10 +10,10 @@ This file adapts the official `excel` skill from the bundled OfficeCLI 1.0.140.
 - OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
 - For a financial model, scenarios, or projections, run `officecli load_skill financial-model` once. For a KPI, analytics, or executive dashboard, run `officecli load_skill data-dashboard` once. Treat the selected specialized skill as overriding the generic guidance below; the Metis integration rules in this section still take priority.
 - Use the exact absolute path from the `<attachment>` or `<attachments>` block.
-- Put every new deliverable under `$METIS_ATTACHMENTS_DIR`; create the directory first.
+- Save final deliverables at the user-requested path, or in the current workspace when no location was specified. Send the real path with `deliver_file`; it does not copy files. Do not move final files into an attachment or temporary directory merely to send them.
 - A simple read must print content to stdout with a targeted `view`, `get`, or `query`. Do not create a work directory, preview, HTML file, rendered sheet, extracted-media directory, or copied workbook for reading, Q&A, or summary.
 - Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered sheets, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
-- Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
+- Keep one working deliverable for the task and update that same path on follow-up revisions. Preserve an uploaded source by creating the working copy once when needed; do not create a new copy for every edit or delivery unless the user asks for separate versions.
 - Use the fewest sufficient operations and stop when the request is answered. Read only the ranges needed for the question; do not validate or render unless needed.
 - Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Preserve formulas separately from displayed values; never infer a computed value that OfficeCLI can return.

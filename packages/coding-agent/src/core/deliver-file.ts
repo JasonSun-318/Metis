@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { type Static, Type } from "typebox";
 
 export const MAX_DELIVER_FILE_MESSAGE_LENGTH = 512;
@@ -15,6 +16,8 @@ export type DeliverFileInput = Static<typeof DeliverFileParams>;
 
 export interface DeliverFileDetails {
 	readonly fileId: string;
+	/** Present for live references; absent in legacy copied deliveries. */
+	readonly sourcePath?: string;
 	readonly name: string;
 	readonly byteLength: number;
 	readonly message?: string;
@@ -40,6 +43,14 @@ export function parseDeliverFileDetails(details: unknown): DeliverFileDetails | 
 	) {
 		return undefined;
 	}
+	if (
+		record.sourcePath !== undefined &&
+		(typeof record.sourcePath !== "string" ||
+			record.sourcePath.length > 4096 ||
+			record.sourcePath.includes("\0") ||
+			!isAbsolute(record.sourcePath))
+	)
+		return undefined;
 	const messageText = record.message;
 	if (
 		messageText !== undefined &&
@@ -51,6 +62,7 @@ export function parseDeliverFileDetails(details: unknown): DeliverFileDetails | 
 	}
 	return {
 		fileId: record.fileId,
+		...(typeof record.sourcePath === "string" ? { sourcePath: record.sourcePath } : {}),
 		name: record.name.trim(),
 		byteLength: record.byteLength,
 		deliveredAt: record.deliveredAt,

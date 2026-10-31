@@ -9,7 +9,7 @@ import {
 	importSessionAttachments,
 	parseDeliverFileDetails,
 	removeSessionAttachment,
-	resolveDeliveredFilePath,
+	resolveSessionDeliveredArtifact,
 } from "@metis/coding-agent/host";
 import { resolveFileSelections } from "./file-selection-context.ts";
 import { opaqueId } from "./item-projection.ts";
@@ -41,7 +41,7 @@ export async function prepareAgentMessage(
 				if (message.role !== "toolResult" || message.toolName !== "deliver_file" || message.isError) continue;
 				const details = parseDeliverFileDetails(message.details);
 				if (details?.fileId !== fileId) continue;
-				const path = resolveDeliveredFilePath(context.agentDir, input.agentId, fileId, details.name);
+				const path = resolveSessionDeliveredArtifact(context.agentDir, input.agentId, details)?.path;
 				return path ? { name: details.name, path } : undefined;
 			}
 			return undefined;

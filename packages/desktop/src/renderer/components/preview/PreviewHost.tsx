@@ -114,11 +114,10 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			}),
 		[source, sessionId, rootSessionId, fileId, relativePath, libraryId, resourceRevision],
 	);
-	const liveText = file.source === "workspace" || file.source === "knowledge";
 	const loadedKey = useRef<string | null>(null);
 	const [revision, setRevision] = useState(0);
 	useEffect(() => {
-		if (!active || !liveText) return;
+		if (!active) return;
 		return api.subscribe?.((event) => {
 			if (file.source === "knowledge" && event.type === "knowledge-libraries") {
 				if (file.libraryId) previewBytesCache.deleteLibrary(file.libraryId);
@@ -136,7 +135,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			)
 				setRevision((value) => value + 1);
 		});
-	}, [active, api, file.sessionId, file.source, file.libraryId, liveText]);
+	}, [active, api, file.sessionId, file.source, file.libraryId]);
 
 	const handleOpenDefault = () => {
 		if (file.source === "delivered" && file.fileId) {
@@ -172,7 +171,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		}
 	};
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies(revision): Workspace completion events invalidate live preview bytes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(revision): Turn completion events refresh live preview bytes.
 	useEffect(() => {
 		if (!active || kind === "unsupported") {
 			setLoading(false);
@@ -189,20 +188,9 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			return;
 		}
 		const key = previewCacheKey(input);
-		const cached = liveText ? undefined : previewBytesCache.get(key);
-		if (cached) {
-			setData({
-				name: file.name,
-				byteLength: cached.byteLength,
-				mediaType: "application/octet-stream",
-				bytes: cached,
-			});
-			setLoading(false);
-			setError(null);
-			return;
-		}
+
 		let cancelled = false;
-		const refreshing = liveText && loadedKey.current === key;
+		const refreshing = loadedKey.current === key;
 		setLoading(!refreshing);
 		setError(null);
 		if (!refreshing) setData(null);
@@ -217,7 +205,6 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 					setLoading(false);
 					return;
 				}
-				if (!liveText) previewBytesCache.set(key, result.bytes);
 				loadedKey.current = key;
 				setData((previous) =>
 					refreshing &&
@@ -243,7 +230,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		return () => {
 			cancelled = true;
 		};
-	}, [active, api, file.name, input, kind, onError, t, liveText, revision]);
+	}, [active, api, file.name, input, kind, onError, t, revision]);
 
 	if (!active) {
 		return <div className="universal-previewer preview-inactive" hidden />;

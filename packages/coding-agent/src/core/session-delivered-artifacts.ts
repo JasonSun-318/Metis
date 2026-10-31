@@ -1,5 +1,7 @@
-import { lstatSync, rmSync } from "node:fs";
-import type { ToolResultMessage } from "@metis/ai";
+import { randomUUID } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
+import { basename, isAbsolute, relative, sep } from "node:path";
+import { resolvePath } from "../utils/paths.ts";
 import {
 	type DeliverFileDetails,
 	DeliverFileParams,
@@ -9,18 +11,18 @@ import {
 import type { ToolDefinition } from "./extensions/types.ts";
 import {
 	copySessionDeliveredFiles,
+	getOwnedSessionWorkDirs,
+	MAX_SESSION_ATTACHMENT_BYTES,
 	MAX_SESSION_DELIVERED_FILES,
 	removeUnreferencedSessionDeliveredFiles,
 	resolveDeliveredFilePath,
-	type StagedDeliveredFile,
-	stageDeliveredFile,
 } from "./session-attachments.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { fileReadPermissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
 type DeliveredArtifactsSession = Pick<
 	SessionManager,
-	"getAdditionalDirectories" | "getBranch" | "getCwd" | "getDurableJournalSnapshot" | "getSessionId"
+	"getBranch" | "getCwd" | "getDurableJournalSnapshot" | "getSessionId"
 >;
 
 export type DeliveredArtifactAvailability = "available" | "unavailable";
@@ -51,9 +53,28 @@ function deliveries(entries: readonly unknown[]): DeliverFileDetails[] {
 	});
 }
 
+/** Resolve a journal-authorized delivery, preserving legacy copies and reading current live-file metadata. */
+export function resolveSessionDeliveredArtifact(
+	agentDir: string,
+	sessionId: string,
+	details: DeliverFileDetails,
+): ResolvedSessionDeliveredArtifact | undefined {
+	const path = details.sourcePath ?? resolveDeliveredFilePath(agentDir, sessionId, details.fileId, details.name);
+	if (!path) return undefined;
+	try {
+		// Reject path redirection after delivery; ordinary in-place or atomic file edits remain valid.
+		if (details.sourcePath && realpathSync(path) !== path) return undefined;
+		const metadata = lstatSync(path);
+		if (!metadata.isFile() || metadata.size < 1 || metadata.size > MAX_SESSION_ATTACHMENT_BYTES) return undefined;
+		if (!details.sourcePath && metadata.size !== details.byteLength) return undefined;
+		return { path, artifact: { ...details, byteLength: metadata.size, availability: "available" } };
+	} catch {
+		return undefined;
+	}
+}
+
 /** Session-level consistency boundary for delivered-file history and physical availability. */
 export class SessionDeliveredArtifacts {
-	private readonly pending = new Map<string, StagedDeliveredFile>();
 	private readonly agentDir: string;
 	private readonly sessionManager: DeliveredArtifactsSession;
 
@@ -63,7 +84,7 @@ export class SessionDeliveredArtifacts {
 		removeUnreferencedSessionDeliveredFiles(
 			agentDir,
 			sessionManager.getSessionId(),
-			deliveries(sessionManager.getDurableJournalSnapshot()),
+			deliveries(sessionManager.getDurableJournalSnapshot()).filter((file) => !file.sourcePath),
 		);
 	}
 
@@ -72,123 +93,83 @@ export class SessionDeliveredArtifacts {
 			name: "deliver_file",
 			label: "Deliver file",
 			description:
-				"Push a finished file to the user in the Desktop app so they can open or locate it. Use after creating or updating a deliverable the user should receive. The file must already exist on disk and stay within the current workspace, Metis attachment directory, or session work directory.",
+				"Show an existing file in the conversation using its real path; no copy is made. After updating a file, send the same path again: all its cards open the latest contents. Save final files in the user-requested location or workspace, not METIS_WORK_DIR (which is deleted after the run). Existing file-read permissions still apply.",
 			promptSnippet: "Send a finished file to the user in the Desktop app",
 			parameters: DeliverFileParams,
 			permission: permissionDescriptor(({ path }, context) => fileReadPermissionClaim(path, context)),
 			executionMode: "sequential",
-			execute: async (toolCallId, input, signal) => {
+			execute: async (_toolCallId, input, signal) => {
 				if (signal?.aborted) throw new Error("Deliver file was aborted");
-				if (this.pending.has(toolCallId)) throw new Error(`Deliver file call is already pending: ${toolCallId}`);
 				const normalized = normalizeDeliverFileInput(input);
-				const staged = stageDeliveredFile({
-					agentDir: this.agentDir,
-					sessionId: this.sessionManager.getSessionId(),
-					cwd: this.sessionManager.getCwd(),
-					additionalDirectories: this.sessionManager.getAdditionalDirectories(),
-					sourcePath: normalized.path,
-					name: normalized.name,
-					activeDeliveredFileCount: deliveries(this.sessionManager.getBranch()).length,
-				});
-				this.pending.set(toolCallId, staged);
-				try {
-					if (signal?.aborted) throw new Error("Deliver file was aborted");
-					const details: DeliverFileDetails = {
-						fileId: staged.fileId,
-						name: staged.name,
-						byteLength: staged.byteLength,
-						deliveredAt: new Date().toISOString(),
-						...(normalized.message === undefined ? {} : { message: normalized.message }),
-					};
-					const lines = [
-						`Delivered "${staged.name}" to the user (${staged.byteLength} bytes).`,
-						normalized.message ? `Message: ${normalized.message}` : undefined,
-						"The user can open the file from the inline delivery card in the chat transcript.",
-					].filter((line): line is string => line !== undefined);
-					return { content: [{ type: "text", text: lines.join("\n") }], details };
-				} catch (error) {
-					this.rollback(toolCallId);
-					throw error;
+				const sourcePath = realpathSync(resolvePath(normalized.path, this.sessionManager.getCwd(), { trim: true }));
+				const metadata = lstatSync(sourcePath);
+				if (!metadata.isFile() || metadata.size === 0)
+					throw new Error("Deliverable must be a non-empty regular file");
+				if (metadata.size > MAX_SESSION_ATTACHMENT_BYTES) throw new Error("Deliverable file exceeds 128 MiB");
+				for (const workDir of getOwnedSessionWorkDirs(this.agentDir, this.sessionManager.getSessionId())) {
+					const inside = relative(workDir, sourcePath);
+					if (inside === "" || (!isAbsolute(inside) && inside !== ".." && !inside.startsWith(`..${sep}`))) {
+						throw new Error(
+							"Save the final file in the workspace or user-requested location before delivering it. METIS_WORK_DIR is temporary and is deleted after this run.",
+						);
+					}
 				}
+				const existing = this.list();
+				const previous = existing.find((file) => file.sourcePath === sourcePath);
+				if (!previous && existing.length >= MAX_SESSION_DELIVERED_FILES) {
+					throw new Error(`A session can deliver at most ${MAX_SESSION_DELIVERED_FILES} distinct files`);
+				}
+				const details: DeliverFileDetails = {
+					fileId: previous?.fileId ?? randomUUID().replaceAll("-", "").slice(0, 16),
+					sourcePath,
+					name: normalized.name ?? basename(sourcePath),
+					byteLength: metadata.size,
+					deliveredAt: new Date().toISOString(),
+					...(normalized.message === undefined ? {} : { message: normalized.message }),
+				};
+				if (signal?.aborted) throw new Error("Deliver file was aborted");
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Delivered "${details.name}" from ${sourcePath}. The conversation card opens this original file and reflects subsequent edits.`,
+						},
+					],
+					details,
+				};
 			},
 		};
 	}
 
 	list(): SessionDeliveredArtifact[] {
-		return deliveries(this.sessionManager.getBranch())
+		const files = new Map<string, DeliverFileDetails>();
+		for (const artifact of deliveries(this.sessionManager.getBranch())) files.set(artifact.fileId, artifact);
+		return [...files.values()]
 			.slice(-MAX_SESSION_DELIVERED_FILES)
-			.map((artifact) => ({
-				...artifact,
-				availability: this.resolveDetails(artifact) ? "available" : "unavailable",
-			}));
+			.map(
+				(artifact) =>
+					resolveSessionDeliveredArtifact(this.agentDir, this.sessionManager.getSessionId(), artifact)
+						?.artifact ?? { ...artifact, availability: "unavailable" },
+			);
 	}
 
 	resolve(fileId: string): ResolvedSessionDeliveredArtifact | undefined {
 		const branch = deliveries(this.sessionManager.getBranch());
 		for (let index = branch.length - 1; index >= 0; index -= 1) {
 			const details = branch[index]!;
-			if (details.fileId === fileId) return this.resolveDetails(details);
+			if (details.fileId === fileId)
+				return resolveSessionDeliveredArtifact(this.agentDir, this.sessionManager.getSessionId(), details);
 		}
 		return undefined;
 	}
 
-	private resolveDetails(details: DeliverFileDetails): ResolvedSessionDeliveredArtifact | undefined {
-		const path = resolveDeliveredFilePath(
-			this.agentDir,
-			this.sessionManager.getSessionId(),
-			details.fileId,
-			details.name,
-		);
-		if (!path) return undefined;
-		try {
-			if (lstatSync(path).size !== details.byteLength) return undefined;
-		} catch {
-			return undefined;
-		}
-		return { artifact: { ...details, availability: "available" }, path };
-	}
-
-	commitToolResult(message: ToolResultMessage): void {
-		if (message.toolName !== "deliver_file") return;
-		const staged = this.pending.get(message.toolCallId);
-		if (!staged) return;
-		const details = message.isError ? undefined : parseDeliverFileDetails(message.details);
-		if (
-			details?.fileId === staged.fileId &&
-			details.name === staged.name &&
-			details.byteLength === staged.byteLength
-		) {
-			this.pending.delete(message.toolCallId);
-			return;
-		}
-		this.rollback(message.toolCallId);
-	}
-
-	rollback(toolCallId: string): void {
-		const staged = this.pending.get(toolCallId);
-		if (!staged) return;
-		this.pending.delete(toolCallId);
-		try {
-			rmSync(staged.path, { force: true });
-		} catch {
-			// Reconciliation retries cleanup when this session is next opened.
-		}
-	}
-
-	rollbackAll(): void {
-		for (const toolCallId of [...this.pending.keys()]) this.rollback(toolCallId);
-	}
-
 	copyTo(target: SessionManager): void {
-		try {
-			copySessionDeliveredFiles({
-				agentDir: this.agentDir,
-				sourceSessionId: this.sessionManager.getSessionId(),
-				targetSessionId: target.getSessionId(),
-				artifacts: deliveries(target.getBranch()),
-			});
-		} catch {
-			// Fork history remains usable when one or all physical files cannot be copied.
-		}
+		// Only legacy deliveries own copies; live references are carried by the forked journal.
+		copySessionDeliveredFiles({
+			agentDir: this.agentDir,
+			sourceSessionId: this.sessionManager.getSessionId(),
+			targetSessionId: target.getSessionId(),
+			artifacts: deliveries(target.getBranch()).filter((file) => !file.sourcePath),
+		});
 	}
 }

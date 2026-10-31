@@ -41,6 +41,22 @@ describe("readDeliveredFile", () => {
 		).rejects.toThrow("too large");
 		expect(fs.open).not.toHaveBeenCalled();
 		expect(fs.readFile).not.toHaveBeenCalled();
+		await expect(
+			readDeliveredFile(
+				{
+					path,
+					artifact: {
+						fileId: "aaaaaaaaaaaaaaaa",
+						name: "large.pdf",
+						byteLength,
+						deliveredAt: "2026-08-30T00:00:00.000Z",
+						availability: "available",
+					},
+				},
+				true,
+			),
+		).resolves.toEqual({ fileId: "aaaaaaaaaaaaaaaa", name: "large.pdf", byteLength, absolutePath: path, data: "" });
+		expect(fs.open).not.toHaveBeenCalled();
 	});
 
 	it("reads an authorized delivered artifact and preserves its journal name", async () => {

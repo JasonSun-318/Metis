@@ -1,9 +1,8 @@
-import { lstatSync } from "node:fs";
 import { type ClientParams, type ClientResult, MAX_READ_IMAGE_DATA_UTF8_BYTES } from "@metis/app-protocol";
 import {
 	AgentStore,
 	parseDeliverFileDetails,
-	resolveDeliveredFilePath,
+	resolveSessionDeliveredArtifact,
 	SessionManager,
 } from "@metis/coding-agent/host";
 import { openDeliveredFile } from "./open-delivered-file.ts";
@@ -65,15 +64,8 @@ function resolveAgentDelivery(ref: SessionRef, agentDir: string, input: ClientPa
 			continue;
 		const details = parseDeliverFileDetails(entry.message.details);
 		if (!details || details.fileId !== input.fileId) continue;
-		const path = resolveDeliveredFilePath(agentDir, input.sessionId, details.fileId, details.name);
-		if (path) {
-			try {
-				if (lstatSync(path).size === details.byteLength)
-					return { path, artifact: { ...details, availability: "available" as const } };
-			} catch {
-				/* An unavailable file must not trigger cleanup or recovery during a read. */
-			}
-		}
+		const resolved = resolveSessionDeliveredArtifact(agentDir, input.sessionId, details);
+		if (resolved) return resolved;
 		break;
 	}
 	throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
@@ -86,7 +78,7 @@ export async function readAgentDeliveredFile(
 ): Promise<ClientResult<"session/readDeliveredFile">> {
 	const resolved = resolveAgentDelivery(ref, agentDir, input);
 	try {
-		return await readDeliveredFile(resolved);
+		return await readDeliveredFile(resolved, input.metadataOnly);
 	} catch {
 		throw new AppServerError("OPERATION_FAILED", { sessionId: input.sessionId });
 	}
