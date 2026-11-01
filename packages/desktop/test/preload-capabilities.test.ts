@@ -52,13 +52,14 @@ it("grants only native File paths and waits for the grant before creating a proj
 });
 
 it("validates theme senders before reading or changing preferences", async () => {
-	const { registerThemeHandlers } = await import("../src/main/theme-manager.ts");
+	const { registerThemeHandlers, WINDOWS_TITLE_BAR_HEIGHT } = await import("../src/main/theme-manager.ts");
 	const handle = vi.fn();
 	const setBackgroundColor = vi.fn();
+	const setTitleBarOverlay = vi.fn();
 	const trusted = {};
 	registerThemeHandlers(
 		{ handle } as never,
-		() => ({ isDestroyed: () => false, setBackgroundColor }) as never,
+		() => ({ isDestroyed: () => false, setBackgroundColor, setTitleBarOverlay }) as never,
 		(event) => {
 			if (event !== trusted) throw new Error("Untrusted desktop IPC sender");
 		},
@@ -70,6 +71,17 @@ it("validates theme senders before reading or changing preferences", async () =>
 	expect(setBackgroundColor).not.toHaveBeenCalled();
 	handler(trusted, "light");
 	expect(setBackgroundColor).toHaveBeenCalledWith("#faf9f6");
+	// Windows chrome also mirrors the scheme in the title bar overlay; other
+	// platforms must never attempt the Windows-only call.
+	if (process.platform === "win32") {
+		expect(setTitleBarOverlay).toHaveBeenCalledWith({
+			color: "#faf9f6",
+			symbolColor: "#202020",
+			height: WINDOWS_TITLE_BAR_HEIGHT,
+		});
+	} else {
+		expect(setTitleBarOverlay).not.toHaveBeenCalled();
+	}
 });
 
 it("chooses a browser import directory by source id and never forwards a renderer path", async () => {

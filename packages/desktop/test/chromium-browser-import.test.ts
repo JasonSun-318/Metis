@@ -101,7 +101,7 @@ describe("ChromiumBrowserImporter", () => {
 		await mkdir(edge, { recursive: true });
 		await writeFile(join(edge, "Local State"), JSON.stringify({ profile: { info_cache: {} } }), "utf8");
 		await mkdir(brave, { recursive: true });
-		await writeFile(join(brave, "Local State"), "", { mode: 0o000 });
+		await writeFile(join(brave, "Local State"), JSON.stringify({ profile: { info_cache: {} } }), "utf8");
 		await writeProfileRoot(chromium);
 		const isRunning = vi.fn(async () => false);
 		const importer = new ChromiumBrowserImporter({
@@ -123,11 +123,58 @@ describe("ChromiumBrowserImporter", () => {
 			diagnostic: { stage: "profiles", code: "ENOENT" },
 		});
 		expect(sources.find((source) => source.sourceId === "brave")).toMatchObject({
-			status: "permission-denied",
-			diagnostic: { stage: "local-state" },
+			status: "no-profiles",
+			diagnostic: { stage: "profiles", code: "ENOENT" },
 		});
 		expect(JSON.stringify(sources)).not.toMatch(/cookie|password|secret/iu);
 		expect(isRunning).toHaveBeenCalledOnce();
+	});
+
+	it("reports a permission-denied Local State with diagnostics instead of swallowing discovery errors", async () => {
+		const dataDirectory = await mkdtemp(join(tmpdir(), "metis-browser-denied-"));
+		temporaryDirectories.push(dataDirectory);
+		const brave = join(dataDirectory, "BraveSoftware/Brave-Browser");
+		await mkdir(brave, { recursive: true });
+		const lockedPath = join(brave, "Local State");
+		await writeFile(lockedPath, "{}", "utf8");
+		// probeRoot canonicalizes the root before opening, so match both spellings.
+		const lockedReal = await realpath(lockedPath);
+		// chmod-based fixtures are not portable (Windows ignores the mode); inject
+		// the exact EACCES fault on the one path under test instead.
+		vi.doMock("node:fs/promises", async (importOriginal) => {
+			const actual = await importOriginal<typeof import("node:fs/promises")>();
+			return {
+				...actual,
+				open: async (path: unknown, flags?: unknown, mode?: unknown) => {
+					if (path === lockedPath || path === lockedReal) {
+						throw Object.assign(new Error("EACCES: permission denied, open"), { code: "EACCES" });
+					}
+					return actual.open(path as Parameters<typeof actual.open>[0], flags as never, mode as never);
+				},
+			};
+		});
+		try {
+			// The class is statically imported above; reset the registry so the
+			// dynamic import re-evaluates it against the mocked fs module.
+			vi.resetModules();
+			const { ChromiumBrowserImporter: FaultedImporter } = await import("../src/main/chromium-browser-import.ts");
+			const importer = new FaultedImporter({
+				platform: "darwin",
+				dataDirectory,
+				roots: { brave },
+				isRunning: vi.fn(async () => false),
+				readSafeStoragePassword: vi.fn(async () => "unused"),
+			});
+			const sources = await importer.listSources();
+			expect(sources.find((source) => source.sourceId === "brave")).toMatchObject({
+				status: "permission-denied",
+				diagnostic: { stage: "local-state", code: "EACCES" },
+			});
+			expect(JSON.stringify(sources)).not.toMatch(/cookie|password|secret/iu);
+		} finally {
+			vi.doUnmock("node:fs/promises");
+			vi.resetModules();
+		}
 	});
 
 	it("distinguishes a missing default root from a metadata failure", async () => {
