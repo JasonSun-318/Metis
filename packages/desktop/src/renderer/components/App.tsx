@@ -13,6 +13,7 @@ import type {
 } from "@metis/app-protocol";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import metisIcon from "../../../assets/metis-icon.svg";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
@@ -886,8 +887,8 @@ export function App({ api, store }: AppProps) {
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 	const homeProjects = useMemo(
-		() => buildSessionTree(state, mode, projectPreferences).projects,
-		[mode, projectPreferences, state],
+		() => buildSessionTree(sidebarState, mode, projectPreferences).projects,
+		[mode, projectPreferences, sidebarState],
 	);
 	const recentCodeProjects = useMemo(
 		() => (mode === "code" ? recentProjectsFromGroups(homeProjects) : []),
@@ -1729,6 +1730,88 @@ export function App({ api, store }: AppProps) {
 		</>
 	) : null;
 
+	// Windows stacks two titlebar rows: the native 32px overlay keeps only the
+	// app mark, then a 40px row spans the window for navigation, session tabs
+	// and tool tabs. The row starts where the workspace does so the tab cells
+	// stay above their panes; macOS keeps the single in-workspace row below.
+	const winTitlebarSidebarOffset = isCollapsed ? 0 : sessionSidebarWidth;
+	const titlebar = (
+		<header
+			className={`workspace-titlebar${api.platform === "win32" ? " windows-titlebar-row" : ""}${api.platform === "win32" && isCollapsed ? " is-sidebar-collapsed" : ""}`}
+			data-active-session-id={visibleActiveSession?.sessionId}
+			style={
+				api.platform === "win32"
+					? ({ "--windows-sidebar-offset": `${winTitlebarSidebarOffset}px` } as CSSProperties)
+					: undefined
+			}
+		>
+			{api.platform === "win32" ? (
+				<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
+					<button
+						aria-label={t(
+							sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
+						)}
+						aria-pressed={sessionsSidebarOpen && !sidebarClosing}
+						className="sessions-sidebar-toggle-fixed"
+						onClick={toggleSessionsSidebar}
+						type="button"
+					>
+						<SidebarSimple aria-hidden="true" size={16} />
+					</button>
+					<button
+						aria-label={t("Go back")}
+						disabled={navigationBusy || navigationBack.length === 0}
+						onClick={navigateBack}
+						type="button"
+					>
+						<ArrowLeft aria-hidden="true" size={16} />
+					</button>
+					<button
+						aria-label={t("Go forward")}
+						disabled={navigationBusy || navigationForward.length === 0}
+						onClick={navigateForward}
+						type="button"
+					>
+						<ArrowRight aria-hidden="true" size={16} />
+					</button>
+				</nav>
+			) : (
+				<button
+					aria-label={t(
+						sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
+					)}
+					aria-pressed={sessionsSidebarOpen && !sidebarClosing}
+					className="sessions-sidebar-toggle-fixed"
+					onClick={toggleSessionsSidebar}
+					type="button"
+				>
+					<SidebarSimple aria-hidden="true" size={17} />
+				</button>
+			)}
+			<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} style={{ right: toolsTitlebarReserved }} />
+			{toolsSidebarAvailable && (
+				<div
+					className={`workspace-titlebar-tools${toolsSidebarOpen ? " is-open" : ""}${toolsSidebarClosing ? " is-closing" : ""}`}
+				>
+					<div
+						className="workspace-titlebar-tools-slot"
+						ref={setTitlebarToolsSlot}
+						style={toolsSidebarOpen ? { width: toolsSidebarWidth } : undefined}
+					/>
+					<button
+						aria-label={t(toolsSidebarOpen && !toolsSidebarClosing ? "Hide tools sidebar" : "Show tools sidebar")}
+						aria-pressed={toolsSidebarOpen && !toolsSidebarClosing}
+						className="details-sidebar-toggle"
+						onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
+						type="button"
+					>
+						<SidebarSimple aria-hidden="true" size={17} />
+					</button>
+				</div>
+			)}
+		</header>
+	);
+
 	return (
 		<FileSelectionProvider enabled={Boolean(serverReady && !visibleInteraction)} onSubmit={submitFileSelection}>
 			<ConversationScopeProvider
@@ -1736,35 +1819,10 @@ export function App({ api, store }: AppProps) {
 				enabled={Boolean(serverReady && !visibleInteraction)}
 			>
 				{api.platform === "win32" && (
-					<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
-						<button
-							aria-label={t(
-								sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
-							)}
-							aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-							className="sessions-sidebar-toggle-fixed"
-							onClick={toggleSessionsSidebar}
-							type="button"
-						>
-							<SidebarSimple aria-hidden="true" size={16} />
-						</button>
-						<button
-							aria-label={t("Go back")}
-							disabled={navigationBusy || navigationBack.length === 0}
-							onClick={navigateBack}
-							type="button"
-						>
-							<ArrowLeft aria-hidden="true" size={16} />
-						</button>
-						<button
-							aria-label={t("Go forward")}
-							disabled={navigationBusy || navigationForward.length === 0}
-							onClick={navigateForward}
-							type="button"
-						>
-							<ArrowRight aria-hidden="true" size={16} />
-						</button>
-					</nav>
+					<div aria-hidden="true" className="windows-titlebar-brand">
+						<img alt="" className="windows-titlebar-brand-mark" src={metisIcon} />
+						<span className="windows-titlebar-brand-name">Metis</span>
+					</div>
 				)}
 				<div
 					aria-hidden={settingsOpen || undefined}
@@ -1796,51 +1854,9 @@ export function App({ api, store }: AppProps) {
 							workspace={sidebarWorkspace}
 						/>
 					)}
+					{api.platform === "win32" ? titlebar : null}
 					<main className="workspace">
-						<header className="workspace-titlebar" data-active-session-id={visibleActiveSession?.sessionId}>
-							{api.platform !== "win32" && (
-								<button
-									aria-label={t(
-										sessionsSidebarOpen && !sidebarClosing
-											? "Hide sessions sidebar"
-											: "Show sessions sidebar",
-									)}
-									aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-									className="sessions-sidebar-toggle-fixed"
-									onClick={toggleSessionsSidebar}
-									type="button"
-								>
-									<SidebarSimple aria-hidden="true" size={17} />
-								</button>
-							)}
-							<div
-								className="workspace-titlebar-tabs"
-								ref={setTitlebarTabsSlot}
-								style={{ right: toolsTitlebarReserved }}
-							/>
-							{toolsSidebarAvailable && (
-								<div
-									className={`workspace-titlebar-tools${toolsSidebarOpen ? " is-open" : ""}${toolsSidebarClosing ? " is-closing" : ""}`}
-								>
-									<div
-										className="workspace-titlebar-tools-slot"
-										ref={setTitlebarToolsSlot}
-										style={toolsSidebarOpen ? { width: toolsSidebarWidth } : undefined}
-									/>
-									<button
-										aria-label={t(
-											toolsSidebarOpen && !toolsSidebarClosing ? "Hide tools sidebar" : "Show tools sidebar",
-										)}
-										aria-pressed={toolsSidebarOpen && !toolsSidebarClosing}
-										className="details-sidebar-toggle"
-										onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
-										type="button"
-									>
-										<SidebarSimple aria-hidden="true" size={17} />
-									</button>
-								</div>
-							)}
-						</header>
+						{api.platform !== "win32" ? titlebar : null}
 						<div className="system-notice-stack">
 							{state.supervisor.state === "failed" && (
 								<SystemNotice

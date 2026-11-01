@@ -43,13 +43,35 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(css).not.toContain("sidebar-titlebar-controls");
 	});
 
-	it("uses a compact Windows navigation bar and moves the mode switch to the sidebar top", () => {
-		expect(rule(':root[data-platform="win32"] #root').paddingTop).toBe("32px");
+	it("uses two Windows titlebar rows and moves the mode switch to the sidebar top", () => {
+		expect(rule(':root[data-platform="win32"] #root').paddingTop).toBe("calc(32px + var(--titlebar-height))");
 		expect(rule(':root[data-platform="win32"] body::before').height).toBe("32px");
+
+		// Row one is the native overlay and holds only the app mark.
+		const brand = rule(".windows-titlebar-brand");
+		expect(brand.position).toBe("fixed");
+		expect(brand.top).toBe("0px");
+		expect(brand.height).toBe("32px");
+		expect(css).toMatch(/\.windows-titlebar-brand\s*\{[^}]*-webkit-app-region:\s*drag/u);
+
+		// Row two spans the window and hosts navigation, tabs and tool tabs.
+		const row = rule(':root[data-platform="win32"] .workspace-titlebar.windows-titlebar-row');
+		expect(row.position).toBe("fixed");
+		expect(row.top).toBe("32px");
+		expect(row.left).toBe("0px");
+		expect(row.right).toBe("0px");
+		expect(rule(".windows-titlebar-navigation").position).toBe("absolute");
 		expect(rule(".windows-titlebar-navigation").top).toBe("0px");
-		expect(rule(".windows-titlebar-navigation").height).toBe("32px");
 		expect(rule(".windows-titlebar-navigation button").width).toBe("28px");
 		expect(rule(".windows-titlebar-navigation button").height).toBe("28px");
+		expect(rule(':root[data-platform="win32"] .windows-titlebar-row .workspace-titlebar-tabs').left).toBe(
+			"var(--windows-sidebar-offset, 0px)",
+		);
+		expect(
+			rule(
+				':root[data-platform="win32"] .windows-titlebar-row.is-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar',
+			).paddingLeft,
+		).toBe("104px");
 		expect(rule(':root[data-platform="win32"] .window-drag-region').height).toBe("6px");
 		const sidebar = rule(':root[data-platform="win32"] .session-sidebar');
 		expect(sidebar.marginTop).toBe("0px");

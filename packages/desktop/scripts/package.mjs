@@ -23,7 +23,10 @@ if (!args.some((argument) => argument === "--arch" || argument.startsWith("--arc
 const require = createRequire(import.meta.url);
 if (command === "make" && process.platform === "win32") {
 	// Repository setup skips lifecycle scripts, so electron-winstaller does not
-	// create the architecture-selected names that Squirrel invokes.
+	// create the architecture-selected names that Squirrel invokes. Squirrel runs
+	// 7z.exe on the build host while compressing the installer payload, so this
+	// copy must follow the host architecture even when --arch packages a
+	// different target; Squirrel itself is arch-agnostic about the payload.
 	const vendor = join(dirname(require.resolve("electron-winstaller/package.json")), "vendor");
 	for (const extension of ["exe", "dll"]) {
 		copyFileSync(join(vendor, `7z-${nativeArch()}.${extension}`), join(vendor, `7z.${extension}`));

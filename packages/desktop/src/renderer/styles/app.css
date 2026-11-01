@@ -35,7 +35,7 @@ textarea { resize: none; }
 .app-error-boundary button { margin-top: 18px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); padding: 8px 13px; }
 
 .app-shell { display: grid; width: 100%; height: 100%; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); transition: grid-template-columns 200ms cubic-bezier(.16, 1, .3, 1); }
-:root[data-platform="win32"] #root { padding-top: 32px; }
+:root[data-platform="win32"] #root { padding-top: calc(32px + var(--titlebar-height)); }
 :root[data-platform="win32"] body::before { content: ""; position: fixed; z-index: 10030; top: 0; right: 0; left: 0; height: 32px; border-bottom: 1px solid var(--border-weak); background: var(--app-bg); -webkit-app-region: drag; }
 .app-shell.sessions-sidebar-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
 .session-sidebar { position: relative; grid-column: 1; display: flex; min-height: 0; flex-direction: column; overflow: hidden; border: 0; border-right: 1px solid var(--border); border-radius: 0; margin: 0; background: var(--session-sidebar-bg); padding: 0 6px 0 8px; letter-spacing: -0.01em; width: var(--sidebar-width); min-width: var(--sidebar-width); animation: session-sidebar-slide-in 200ms cubic-bezier(.16, 1, .3, 1); }
@@ -244,8 +244,23 @@ textarea { resize: none; }
 .details-sidebar-toggle { position: absolute; z-index: 2; top: var(--titlebar-control-center-y); right: 8px; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); transform: translateY(-50%); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease; -webkit-app-region: no-drag; }
 .details-sidebar-toggle:hover { background: var(--surface-04); color: var(--text); }
 .details-sidebar-toggle svg { transform: scaleX(-1); }
-.windows-titlebar-navigation { position: fixed; z-index: 10040; top: 0; left: 8px; display: flex; height: 32px; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
-.windows-titlebar-navigation button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-14); -webkit-app-region: no-drag; }
+/* Windows stacks two titlebar rows: the native 32px overlay keeps only the
+   app mark; a 40px in-app row spans the window for navigation, session tabs
+   and tool tabs. Its segments line up with the sidebar, panes and tools
+   column below. */
+.windows-titlebar-brand { position: fixed; z-index: 10031; top: 0; left: 0; display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 150px 0 14px; color: var(--text); pointer-events: none; -webkit-app-region: drag; }
+.windows-titlebar-brand-mark { width: 18px; height: 18px; flex: none; border-radius: 4px; }
+.windows-titlebar-brand-name { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+:root[data-platform="win32"] .workspace-titlebar.windows-titlebar-row { position: fixed; z-index: 1; top: 32px; right: 0; left: 0; width: auto; background: var(--conversation-bg); }
+:root[data-platform="win32"] .windows-titlebar-row::before { content: ""; position: absolute; top: 0; right: auto; bottom: 0; left: 0; width: var(--windows-sidebar-offset, 0px); border-right: 1px solid var(--border); background: var(--session-sidebar-bg); pointer-events: none; transition: width 200ms cubic-bezier(.16, 1, .3, 1); }
+:root[data-platform="win32"] .windows-titlebar-row .workspace-titlebar-tabs { left: var(--windows-sidebar-offset, 0px); transition: right 200ms cubic-bezier(.16, 1, .3, 1), left 200ms cubic-bezier(.16, 1, .3, 1); }
+/* With the sidebar collapsed the header sits outside main.workspace, so the
+   first strip clears the three navigation buttons itself. */
+:root[data-platform="win32"] .windows-titlebar-row.is-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar { padding-left: 104px; }
+:root[data-platform="win32"] .windows-titlebar-row .details-sidebar-toggle svg { width: 16px; height: 16px; }
+.windows-titlebar-navigation { position: absolute; z-index: 60; top: 0; bottom: 0; left: 8px; display: flex; height: auto; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+:root[data-platform="win32"] .windows-titlebar-navigation .sessions-sidebar-toggle-fixed { position: static; }
+.windows-titlebar-navigation button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button:hover:not(:disabled) { color: var(--text); }
 .windows-titlebar-navigation button:disabled { opacity: .3; }
 .session-workspace-root { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
@@ -582,9 +597,9 @@ textarea { resize: none; }
 .review-commits strong { color: var(--text); font-size: 11.5px; font-weight: 500; }
 .review-commits small { color: var(--muted); font-size: 11px; }
 .review-content { position: relative; min-width: 0; min-height: 0; overflow: auto; grid-column: 2; background: var(--app-bg); scrollbar-color: var(--surface-12) transparent; scrollbar-width: thin; }
-.review-files { min-width: 0; padding-bottom: 20px; }
+.review-files { position: relative; min-width: 0; }
 .review-collapse-note { margin: 0; border-bottom: 1px solid var(--border); color: var(--text-08); padding: 8px 12px; font-size: 11.5px; line-height: 1.4; }
-.review-file { scroll-margin-top: 0; border-bottom: 1px solid var(--border); }
+.review-file { position: absolute; top: 0; right: 0; left: 0; border-bottom: 1px solid var(--border); }
 .review-file-header { display: grid; width: 100%; min-height: 36px; align-items: center; gap: 6px; grid-template-columns: 14px 14px minmax(0, 1fr) auto; background: var(--surface-04); color: var(--text); padding: 0 11px; text-align: left; font-size: 12px; }
 .review-file-header:hover, .review-file-header:focus-visible { background: var(--surface-05); color: var(--text); }
 .review-file-header > span:not(.review-change-counts) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -776,6 +791,7 @@ textarea { resize: none; }
 .new-task-starter-copy strong { font-size: 12px; line-height: 1.4; font-weight: 450; }
 .new-task-starter-copy > span { color: var(--text-18); font-size: 12px; line-height: 1.5; }
 .new-task-starter:hover:not(:disabled), .new-task-more-trigger:hover:not(:disabled) { background: var(--home-hover); border-color: var(--border-strong); color: var(--text); }
+:is(.new-task-starter, .new-task-more-trigger):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .new-task-starter:disabled, .new-task-more-trigger:disabled { cursor: default; opacity: .55; }
 .new-task-additional-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin-top: 16px; border-top: 1px solid var(--home-border); padding-top: 12px; }
 .new-task-starter-extra { min-height: 62px; align-items: flex-start; border-color: transparent; padding: 9px 8px; }

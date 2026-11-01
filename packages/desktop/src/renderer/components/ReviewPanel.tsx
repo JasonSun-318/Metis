@@ -1,5 +1,6 @@
 import { PatchDiff, type WorkerInitializationRenderOptions, WorkerPoolContextProvider } from "@pierre/diffs/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
 	DesktopWorkspaceReviewCommit,
@@ -24,7 +25,11 @@ const DIFF_OPTIONS: NonNullable<React.ComponentProps<typeof PatchDiff>["options"
 const WORKER_POOL_OPTIONS = {
 	poolSize: 4,
 	totalASTLRUCacheSize: 48,
-	workerFactory: () => new Worker(new URL("../workers/diff-worker.ts", import.meta.url), { type: "module" }),
+	workerFactory: () =>
+		new Worker(new URL("../workers/diff-worker.ts", import.meta.url), {
+			name: "review-diff-worker",
+			type: "module",
+		}),
 };
 
 const HIGHLIGHTER_OPTIONS: Record<"dark" | "light", WorkerInitializationRenderOptions> = {
@@ -39,6 +44,15 @@ const HIGHLIGHTER_OPTIONS: Record<"dark" | "light", WorkerInitializationRenderOp
 		langs: ["bash", "css", "html", "javascript", "json", "markdown", "python", "tsx", "typescript", "yaml"],
 	},
 };
+
+// Collapsed rows are a 36px header plus its 1px separator. Expanded rows are measured after mount.
+const FILE_ROW_ESTIMATED_HEIGHT = 37;
+const FILE_ROW_OVERSCAN = 4;
+const FILE_LIST_BOTTOM_PADDING = 20;
+// Without a laid-out scroll element (for example in jsdom) the virtualizer reports no rows; render a small
+// first window so the review stays inspectable instead of going blank.
+const MAX_UNMEASURED_ROWS = 30;
+const EMPTY_FILES: readonly DesktopWorkspaceReviewFile[] = [];
 
 type PatchState =
 	| { readonly kind: "loading" }
@@ -310,10 +324,49 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 	const patchesRef = useRef(patches);
 	const patchRequestsRef = useRef(new Map<string, symbol>());
 	const refreshRequestRef = useRef(false);
-	const fileRefs = useRef(new Map<string, HTMLElement>());
+	const scrollRef = useRef<HTMLElement | null>(null);
+	const filesRef = useRef<HTMLDivElement | null>(null);
+	const [listOffset, setListOffset] = useState(0);
 	expandedRef.current = expanded;
 	patchesRef.current = patches;
 	const displayedRevision = snapshot?.kind === "review" ? snapshot.revision : revision;
+	const files = snapshot?.kind === "review" ? snapshot.files : EMPTY_FILES;
+	const virtualizer = useVirtualizer({
+		count: files.length,
+		estimateSize: () => FILE_ROW_ESTIMATED_HEIGHT,
+		getItemKey: (index) => files[index]?.relativePath ?? index,
+		getScrollElement: () => scrollRef.current,
+		overscan: FILE_ROW_OVERSCAN,
+		paddingEnd: FILE_LIST_BOTTOM_PADDING,
+		scrollMargin: listOffset,
+	});
+
+	// The collapse note and focus notice precede the list inside the scrolling pane, so the list's
+	// offset becomes the virtualizer's scroll margin. The content pane resizes when details open or the
+	// panel is resized, which can rewrap those lines, so its size is observed as well.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(focusNotice): The notice changes the content above the list, so the offset must be re-measured.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(snapshot): The list only renders after a review snapshot arrives, so its offset must be measured then.
+	useLayoutEffect(() => {
+		const scrollElement = scrollRef.current;
+		if (!visible || !scrollElement || !filesRef.current) return;
+		const update = () => {
+			if (!filesRef.current) return;
+			const offset = filesRef.current.offsetTop;
+			setListOffset((current) => (current === offset ? current : offset));
+		};
+		update();
+		const observer = new ResizeObserver(update);
+		observer.observe(scrollElement);
+		return () => observer.disconnect();
+	}, [focusNotice, snapshot, visible]);
+
+	const scrollToFileIndex = useCallback(
+		(index: number) => {
+			if (index < 0) return;
+			virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
+		},
+		[virtualizer],
+	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(refreshVersion): Refresh requests reload the review and invalidate cached patches.
 	useEffect(() => {
@@ -332,6 +385,9 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 				}
 				setSnapshot(value);
 				setExpanded(new Set());
+				// Row heights are cached by path; a replacement review collapses every row, so stale
+				// expanded heights must not offset files that are not currently mounted.
+				virtualizer.measure();
 				setLoading(false);
 			},
 			() => {
@@ -343,7 +399,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 		return () => {
 			current = false;
 		};
-	}, [api, refreshVersion, revision, sessionId]);
+	}, [api, refreshVersion, revision, sessionId, virtualizer]);
 
 	const loadPatch = useCallback(
 		(file: DesktopWorkspaceReviewFile, retry = false) => {
@@ -397,18 +453,16 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 		consumedFocus.current = focusRequest.id;
 		setFocusNotice("");
 		if (!focusRequest.path) return;
-		const file = snapshot.files.find((entry) => entry.relativePath === focusRequest.path);
-		if (!file) {
+		const index = snapshot.files.findIndex((entry) => entry.relativePath === focusRequest.path);
+		if (index < 0) {
 			setFocusNotice(t("This file is not in the current review"));
 			return;
 		}
+		const file = snapshot.files[index]!;
 		setExpanded((current) => new Set(current).add(file.relativePath));
 		loadPatch(file);
-		const frame = requestAnimationFrame(() =>
-			fileRefs.current.get(file.relativePath)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-		);
-		return () => cancelAnimationFrame(frame);
-	}, [focusRequest, loading, snapshot, visible, loadPatch, t]);
+		scrollToFileIndex(index);
+	}, [focusRequest, loading, snapshot, visible, loadPatch, scrollToFileIndex, t]);
 
 	const toggleFile = (file: DesktopWorkspaceReviewFile, forceOpen = false) => {
 		const isExpanded = expanded.has(file.relativePath);
@@ -437,10 +491,10 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 
 	const selectFile = (path: string) => {
 		if (snapshot?.kind !== "review") return;
-		const file = snapshot.files.find((candidate) => candidate.relativePath === path);
-		if (!file) return;
-		toggleFile(file, true);
-		requestAnimationFrame(() => fileRefs.current.get(path)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+		const index = snapshot.files.findIndex((candidate) => candidate.relativePath === path);
+		if (index < 0) return;
+		toggleFile(snapshot.files[index]!, true);
+		scrollToFileIndex(index);
 	};
 
 	const refresh = () => {
@@ -457,6 +511,14 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 		snapshot?.kind === "review"
 			? `${snapshot.branch} → ${snapshot.repositoryRoot.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? snapshot.repositoryRoot}`
 			: t("Review");
+	const virtualRows = virtualizer.getVirtualItems();
+	const renderedRows: readonly { readonly index: number; readonly start: number }[] =
+		virtualRows.length > 0
+			? virtualRows
+			: files.slice(0, MAX_UNMEASURED_ROWS).map((_, index) => ({
+					index,
+					start: listOffset + index * FILE_ROW_ESTIMATED_HEIGHT,
+				}));
 
 	return (
 		<section
@@ -501,7 +563,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 						snapshot={snapshot}
 					/>
 				)}
-				<main className="review-content">
+				<main className="review-content" ref={scrollRef}>
 					{focusNotice && <output className="code-diff-notice">{focusNotice}</output>}
 					{!visible ? null : !snapshot && loading ? (
 						<p className="review-empty">{t("Loading review…")}</p>
@@ -522,21 +584,22 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 							key={theme}
 							poolOptions={WORKER_POOL_OPTIONS}
 						>
-							<div className="review-files">
-								<p className="review-collapse-note">
-									{t("Files are collapsed for large diffs. Select a file to expand it.")}
-								</p>
-								{snapshot.files.map((file) => {
+							<p className="review-collapse-note">
+								{t("Files are collapsed for large diffs. Select a file to expand it.")}
+							</p>
+							<div className="review-files" ref={filesRef} style={{ height: `${virtualizer.getTotalSize()}px` }}>
+								{renderedRows.map((row) => {
+									const file = files[row.index];
+									if (!file) return null;
 									const isExpanded = expanded.has(file.relativePath);
 									const key = reviewPatchKey(snapshot.revision, file.relativePath);
 									return (
 										<article
 											className="review-file"
+											data-index={row.index}
 											key={file.relativePath}
-											ref={(node) => {
-												if (node) fileRefs.current.set(file.relativePath, node);
-												else fileRefs.current.delete(file.relativePath);
-											}}
+											ref={virtualizer.measureElement}
+											style={{ transform: `translateY(${row.start - listOffset}px)` }}
 										>
 											<button
 												aria-expanded={isExpanded}

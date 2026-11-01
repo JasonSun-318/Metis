@@ -165,11 +165,11 @@ async function openNotifications(container: HTMLElement): Promise<void> {
 }
 
 function activeWorkspace(container: HTMLElement): HTMLElement {
-	// The top row's tab strips are portaled into the titlebar, so tab strip
-	// queries scope to the whole workspace column.
-	const instance = container.querySelector<HTMLElement>("main.workspace");
-	if (!instance) throw new Error("Missing visible workspace");
-	return instance;
+	// The top row's tab strips are portaled into the titlebar. On Windows that
+	// row sits outside main.workspace and spans the window, so queries need the
+	// whole app rather than the workspace column.
+	if (!container.querySelector("main.workspace")) throw new Error("Missing visible workspace");
+	return container;
 }
 
 async function openToolStartPage(container: HTMLElement): Promise<HTMLElement> {
@@ -5336,6 +5336,66 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Go forward").click());
 		await flush();
 		expect(container.querySelector(".plugins-catalog-page")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("stacks the Windows titlebar into an app-mark row and a workspace row", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const brand = container.querySelector<HTMLElement>(".windows-titlebar-brand")!;
+		expect(brand.textContent).toContain("Metis");
+		expect(brand.closest(".app-shell")).toBeNull();
+
+		const row = container.querySelector<HTMLElement>(".workspace-titlebar.windows-titlebar-row")!;
+		expect(row).not.toBeNull();
+		expect(row.closest("main.workspace")).toBeNull();
+		expect(row.querySelector(".windows-titlebar-navigation .sessions-sidebar-toggle-fixed")).not.toBeNull();
+		expect(row.querySelector('[aria-label="Go back"]')).not.toBeNull();
+		expect(row.querySelector('[aria-label="Go forward"]')).not.toBeNull();
+		expect(row.querySelector(".workspace-titlebar-tabs [role='tablist']")).not.toBeNull();
+		expect(row.style.getPropertyValue("--windows-sidebar-offset")).not.toBe("0px");
+
+		await act(async () => button(container, "Hide sessions sidebar").click());
+		expect(row.classList.contains("is-sidebar-collapsed")).toBe(true);
+		expect(row.style.getPropertyValue("--windows-sidebar-offset")).toBe("0px");
+		await act(async () => button(container, "Show sessions sidebar").click());
+		expect(row.classList.contains("is-sidebar-collapsed")).toBe(false);
+
+		const toolsToggle = row.querySelector<HTMLButtonElement>(".details-sidebar-toggle")!;
+		expect(toolsToggle).not.toBeNull();
+		expect(row.querySelector(".tool-sidebar-tabbar")).toBeNull();
+		await act(async () => toolsToggle.click());
+		expect(row.querySelector(".tool-sidebar-tabbar")).not.toBeNull();
+		await act(async () => toolsToggle.click());
+		expect(row.querySelector(".tool-sidebar-tabbar")).toBeNull();
+		expect(row.querySelector(".details-sidebar-toggle")).toBe(toolsToggle);
+		await act(async () => root.unmount());
+	});
+
+	it("keeps the macOS titlebar inside the workspace without Windows rows", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		(api as { platform: string }).platform = "darwin";
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		expect(container.querySelector(".windows-titlebar-brand")).toBeNull();
+		expect(container.querySelector(".windows-titlebar-row")).toBeNull();
+		const header = container.querySelector<HTMLElement>("main.workspace > .workspace-titlebar")!;
+		expect(header).not.toBeNull();
+		expect(header.querySelector(".sessions-sidebar-toggle-fixed")).not.toBeNull();
+		expect(header.querySelector(".windows-titlebar-navigation")).toBeNull();
 		await act(async () => root.unmount());
 	});
 

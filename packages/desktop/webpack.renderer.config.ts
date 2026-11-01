@@ -12,7 +12,7 @@ const config: Configuration = {
 	module: {
 		rules: [
 			// The package omits its worker entry from sideEffects, so production tree shaking would emit an empty worker.
-			{ test: /@pierre\/diffs\/dist\/worker\/worker\.js$/u, sideEffects: true },
+			{ test: /@pierre[\\/]diffs[\\/]dist[\\/]worker[\\/]worker\.js$/u, sideEffects: true },
 			{
 				test: /\.tsx?$/u,
 				exclude: /node_modules/u,

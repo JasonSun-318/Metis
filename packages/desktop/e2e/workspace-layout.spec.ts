@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -164,12 +164,12 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 	// Static geometry is measured after the deliberately translated entry/exit chrome settles.
 	await page.waitForFunction(() => !document.querySelector('.tool-tabs-scroll[data-tab-motion-animating="true"]'));
 	const platform = await page.locator("html").getAttribute("data-platform");
-	if (platform === "win32") return;
-	const expectedCenter = platform === "darwin" && !fullscreen ? 23 : 19.5;
+	const expectedCenter = platform === "win32" ? 51.5 : platform === "darwin" && !fullscreen ? 23 : 19.5;
 	const controls = await page.locator(".workspace-titlebar").evaluate((titlebar) => {
 		const selectors = [
 			".sessions-sidebar-toggle-fixed", ".details-sidebar-toggle", ".tool-tab", ".tool-tab-group-label",
 			".session-add-trigger", ".tool-add-trigger", ".tool-tab-select > svg", ".tool-tab-close",
+			".windows-titlebar-navigation button",
 		];
 		return Array.from(titlebar.querySelectorAll<HTMLElement>(selectors.join(",")))
 			.filter((element) => element.getClientRects().length > 0)
@@ -448,12 +448,35 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		await expectTitlebarControlsAligned(page);
 		await page.locator(".details-sidebar-toggle").click();
 		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toBeVisible();
+		if (process.platform === "win32") {
+			await expect(page.locator(".windows-titlebar-brand")).toHaveCSS("height", "32px");
+			const row = await page.locator(".workspace-titlebar").boundingBox();
+			expect(row?.y).toBe(32);
+			expect(row?.height).toBe(40);
+			await expectPaneHeadersAligned(page);
+			const setWindowState = (state: 3 | 9) => {
+				const script = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class LayoutWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c); }'; $p=Get-Process -Id ${workspace.app.pid}; $null=[LayoutWindow]::ShowWindow($p.MainWindowHandle,${state})`;
+				execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { windowsHide: true });
+			};
+			setWindowState(3);
+			await expectTitlebarControlsAligned(page);
+			await expectPaneHeadersAligned(page);
+			await page.screenshot({ path: testInfo.outputPath("windows-titlebar-maximized.png"), animations: "disabled" });
+			setWindowState(9);
+			await page.setViewportSize({ width: 900, height: 700 });
+			await expectTitlebarControlsAligned(page);
+			await expectPaneHeadersAligned(page);
+			await page.screenshot({ path: testInfo.outputPath("windows-titlebar-narrow.png"), animations: "disabled" });
+			await page.setViewportSize({ width: 1280, height: 840 });
+		}
 		await expectTitlebarControlsAligned(page);
 		await expect(page.locator(".tool-tab-indicator")).toBeHidden();
 		await page.setViewportSize({ width: 900, height: 700 });
 		await expectTitlebarControlsAligned(page);
 		expect((await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y).toBe(panelTop);
-		const bell = page.locator(".release-notes-trigger");
+		const account = page.locator(".account-menu-trigger");
+		await account.click();
+		const bell = page.getByRole("menuitem", { name: "Notifications", exact: true });
 		await bell.click();
 		const notes = page.getByRole("dialog", { name: "What's new", exact: true });
 		await expect(notes).toBeVisible();
@@ -469,7 +492,7 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		await page.screenshot({ path: testInfo.outputPath("release-notes-unclipped.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
 		await expect(notes).toHaveCount(0);
-		await expect(bell).toBeFocused();
+		await expect(account).toBeFocused();
 		await page.getByRole("button", { name: "New task", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "New task", exact: true }).locator('svg[data-mode="code"]')).toBeVisible();
 		await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(20, 20, 20)");

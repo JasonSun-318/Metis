@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
-import { access, lstat, readFile } from "node:fs/promises";
+import { access, lstat, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
-import { checkSkillRuntime } from "../../../scripts/check-skill-runtime.mjs";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
 const repoRoot = path.resolve(desktopRoot, "../..");
@@ -25,10 +24,38 @@ function nativeArch() {
 	return process.arch;
 }
 
-const expectedArch = nativeArch();
+// ARM64 Windows executes x64 and x86 binaries under emulation, so the runtime
+// smoke tests below pass even for a wrong-architecture package; check the PE
+// header instead.
+const peMachineByArch = { arm64: 0xaa64, x64: 0x8664 };
+async function assertPeMachine(file, arch) {
+	const handle = await open(file, "r");
+	try {
+		const header = Buffer.alloc(64);
+		await handle.read(header, 0, 4, 0x3c);
+		const peHeaderOffset = header.readUInt32LE(0);
+		await handle.read(header, 0, 2, peHeaderOffset + 4);
+		if (header.readUInt16LE(0) !== peMachineByArch[arch]) {
+			throw new Error(`Packaged binary is not a ${arch} PE image: ${file}`);
+		}
+	} finally {
+		await handle.close();
+	}
+}
+
+// --arch=<arm64|x64> verifies a package built for a different architecture than
+// the host (for example an arm64 package built from an x64 Node in Parallels);
+// without it the host architecture is detected as before.
+const archFlag = process.argv.slice(2).find((argument) => argument.startsWith("--arch="));
+const explicitArch = archFlag?.slice("--arch=".length).toLowerCase();
+if (explicitArch !== undefined && explicitArch !== "arm64" && explicitArch !== "x64") {
+	throw new Error(`Unsupported package architecture: ${explicitArch}`);
+}
+const expectedArch = explicitArch ?? nativeArch();
 // An explicit package root also supports verifying an isolated local build.
-const packageRoot = process.argv[2]
-	? path.resolve(process.argv[2])
+const positionalArgs = process.argv.slice(2).filter((argument) => !argument.startsWith("--arch="));
+const packageRoot = positionalArgs[0]
+	? path.resolve(positionalArgs[0])
 	: path.join(desktopRoot, "out", `Metis-${process.platform}-${expectedArch}`);
 const resourcesRoot =
 	process.platform === "darwin"
@@ -59,6 +86,9 @@ if (process.platform === "darwin" || process.platform === "win32") {
 }
 
 const appAsar = path.join(resourcesRoot, "app.asar");
+// Imported lazily: check-skill-runtime resolves modules inside the built
+// coding-agent workspace, which may not exist while only arg validation runs.
+const { checkSkillRuntime } = await import("../../../scripts/check-skill-runtime.mjs");
 await checkSkillRuntime({ packageDir: path.join(appAsar, ".webpack/app-server/node_modules/@metis/coding-agent") });
 const executable =
 	process.platform === "darwin"
@@ -98,6 +128,7 @@ if (process.platform === "darwin") {
 		throw new Error(`Packaged macOS signature is invalid: ${verification.stderr.trim()}`);
 	}
 }
+if (process.platform === "win32") await assertPeMachine(executable, expectedArch);
 
 const fuses = await getCurrentFuseWire(executable);
 for (const [fuse, expected] of [
@@ -117,6 +148,12 @@ for (const [fuse, expected] of [
 // listPackage returns OS-native separators on Windows; the expected paths below
 // always use forward slashes, so normalize the listing before matching.
 const packagedPaths = new Set(listPackage(appAsar).map((path) => path.replaceAll("\\", "/")));
+const rendererScripts = [...packagedPaths].filter((entry) => entry.startsWith("/.webpack/renderer/") && entry.endsWith(".js"));
+for (const entry of rendererScripts) {
+	const source = extractFile(appAsar, entry.slice(1).replaceAll("/", path.sep)).toString("utf8");
+	if (source.trim().length === 0) throw new Error(`Packaged renderer script was removed by production optimization: ${entry}`);
+}
+console.log(`Verified ${rendererScripts.length} nonempty renderer scripts, including worker entries`);
 for (const packagedPath of packagedPaths) {
 	if (packagedPath.includes("/@metis/coding-agent/dist/vendor/python/") || packagedPath.includes("/@metis/coding-agent/dist/skills/pdf/")) {
 		throw new Error(`Removed PDF skill/runtime remains in package: ${packagedPath}`);
@@ -228,6 +265,9 @@ for (const required of [
 	if (!packagedPaths.has(required)) throw new Error(`Packaged terminal runtime is missing: ${required}`);
 }
 await access(path.join(resourcesRoot, "app.asar.unpacked", nodePtyNative));
+if (process.platform === "win32") {
+	await assertPeMachine(path.join(resourcesRoot, "app.asar.unpacked", nodePtyNative), expectedArch);
+}
 if (process.platform === "darwin") {
 	const helper = path.join(
 			resourcesRoot,
@@ -244,6 +284,7 @@ if (process.platform === "darwin" || process.platform === "win32") {
 	if (!packagedPaths.has(ripgrepPath)) throw new Error(`Packaged ripgrep is missing: ${ripgrepPath}`);
 	const unpackedRipgrep = path.join(resourcesRoot, "app.asar.unpacked", ripgrepPath);
 	await access(unpackedRipgrep);
+	if (process.platform === "win32") await assertPeMachine(unpackedRipgrep, expectedArch);
 	if (process.platform !== "win32" && ((await lstat(unpackedRipgrep)).mode & 0o111) === 0) {
 		throw new Error("Packaged ripgrep is not executable");
 	}

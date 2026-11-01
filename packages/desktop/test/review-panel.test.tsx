@@ -126,11 +126,13 @@ describe("ReviewPanel", () => {
 			);
 		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
 		await flush();
-		const target = container.querySelectorAll<HTMLElement>(".review-file")[1]!;
-		target.scrollIntoView = vi.fn();
+		const scroll = container.querySelector<HTMLElement>(".review-content")!;
+		const scrollTo = vi.fn((options: ScrollToOptions) => {
+			scroll.scrollTop = options.top ?? 0;
+		});
+		Object.defineProperty(scroll, "scrollTo", { configurable: true, value: scrollTo });
 		await render("first", "packages/src/nested.ts");
-		await act(async () => new Promise(requestAnimationFrame));
-		expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+		expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
 		await flush();
 		expect(api.getWorkspaceReview).toHaveBeenCalledExactlyOnceWith({ sessionId, revision: "working-tree" });
 		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledExactlyOnceWith({
