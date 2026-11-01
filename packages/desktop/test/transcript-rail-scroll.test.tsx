@@ -87,6 +87,13 @@ const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototy
 const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
 
 beforeEach(async () => {
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	// virtual-core uses the owning window, which jsdom keeps separate from
+	// Vitest's global timer bindings. Share the same controlled clock.
+	const setWindowTimeout = globalThis.setTimeout;
+	const clearWindowTimeout = globalThis.clearTimeout;
+	vi.spyOn(window, "setTimeout").mockImplementation(setWindowTimeout);
+	vi.spyOn(window, "clearTimeout").mockImplementation(clearWindowTimeout);
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	await setLocale("en");
 	frames = new Map();
@@ -150,12 +157,17 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+	// Flush virtual-core's trailing scroll debounce before jsdom is destroyed.
+	await act(async () => {
+		await vi.runOnlyPendingTimersAsync();
+	});
 	for (const root of roots) await act(async () => root.unmount());
 	roots = [];
 	document.body.replaceChildren();
 	ControlledResizeObserver.instances.length = 0;
 	frames.clear();
 	vi.restoreAllMocks();
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	for (const [target, key, descriptor] of [
 		[HTMLElement.prototype, "scrollTo", originalScrollTo],
