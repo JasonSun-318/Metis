@@ -307,17 +307,22 @@ describe("agent runtime e2e", () => {
 			chunk(leafResponse!, {}, "tool_calls");
 			leafResponse!.end("data: [DONE]\n\n");
 			leafResponse = undefined;
+			// Leaf completion includes its tool result, model response, and the
+			// coordinator's receipt turn before both durable statuses can settle.
 			await expect
-				.poll(async () => {
-					const response = await connection.handle({
-						jsonrpc: "2.0",
-						id: "agents-done",
-						method: "agent/list",
-						params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
-					});
-					if (!("result" in response) || !("agents" in response.result)) return [];
-					return response.result.agents.map((agent) => agent.status);
-				})
+				.poll(
+					async () => {
+						const response = await connection.handle({
+							jsonrpc: "2.0",
+							id: "agents-done",
+							method: "agent/list",
+							params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
+						});
+						if (!("result" in response) || !("agents" in response.result)) return [];
+						return response.result.agents.map((agent) => agent.status);
+					},
+					{ timeout: 15_000 },
+				)
 				.toEqual(["done", "done"]);
 			expect(permissionApprovals).toBe(0);
 			expect(existsSync(reviewerWritePath)).toBe(false);
