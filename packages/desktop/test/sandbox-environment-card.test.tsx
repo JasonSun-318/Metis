@@ -174,6 +174,38 @@ describe("SandboxEnvironmentCard", () => {
 		expect(container.textContent).not.toMatch(/\bFull\b/);
 	});
 
+	it("shows one startup failure and summarizes dependent checks that did not run", async () => {
+		const api = apiStub({
+			runPermissionSandboxSelfTest: vi.fn().mockResolvedValue(
+				readinessReport({
+					status: "misconfigured",
+					code: "self-test-failed",
+					platform: "win32",
+					mode: "self-test",
+					checks: [
+						{ id: "sandbox-startup", status: "failed", reason: "sandbox-start-failed" },
+						{ id: "filesystem-permitted", status: "skipped", reason: "sandbox-unavailable" },
+						{ id: "filesystem-denied", status: "skipped", reason: "sandbox-unavailable" },
+						{ id: "network-denied", status: "skipped", reason: "sandbox-unavailable" },
+					],
+					recoveryActions: ["install-windows-sandbox", "check-app-update"],
+				}),
+			),
+		});
+		const { container, mount: start } = mount(api);
+		await start();
+		await act(async () => button(container, "Run sandbox self-test")!.click());
+		await flush();
+
+		expect(container.querySelectorAll(".sandbox-environment-issue")).toHaveLength(1);
+		expect(container.textContent).toContain("The sandbox could not start.");
+		expect(container.querySelector(".sandbox-environment-notice")?.textContent).toBe(
+			"Remaining checks were not run. Resolve the issue above and check again.",
+		);
+		expect(button(container, "Repair Windows sandbox")).not.toBeNull();
+		expect(button(container, "Retry")).toBeNull();
+	});
+
 	it("does not claim the self-test passed when checks were skipped", async () => {
 		const api = apiStub({
 			runPermissionSandboxSelfTest: vi.fn().mockResolvedValue({

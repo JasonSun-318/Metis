@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { basename, extname, join } from "node:path";
 import {
 	app,
@@ -46,7 +47,15 @@ declare const METIS_UPDATE_BASE_URL: string | null;
 registerAppScheme();
 const explicitUserData = app.commandLine.hasSwitch("user-data-dir");
 if (!explicitUserData) app.setPath("userData", join(app.getPath("appData"), "Metis"));
-if (process.platform === "win32") app.setAppUserModelId("com.squirrel.Metis.Metis");
+if (process.platform === "win32") {
+	// Electron registers a Start Menu shortcut by application name. Isolated
+	// profiles must not replace the installed app's notification activation path.
+	const profile = explicitUserData
+		? createHash("sha256").update(app.getPath("userData")).digest("hex").slice(0, 12)
+		: undefined;
+	app.setName(profile ? `Metis (${profile})` : "Metis");
+	app.setAppUserModelId(profile ? `ai.metis.desktop.profile.${profile}` : "com.squirrel.Metis.Metis");
+}
 
 let mainWindow: BrowserWindow | null = null;
 let allowQuit = false;
@@ -205,19 +214,7 @@ async function launch(): Promise<void> {
 				release();
 				suppressNextFocusAcknowledgement = true;
 				broker.requestRendererOpenSession(sessionId, mode);
-				void (async () => {
-					if (!mainWindow || mainWindow.isDestroyed()) await openMainWindow();
-					if (!mainWindow || mainWindow.isDestroyed()) {
-						reportWindowReopenFailure(
-							"from notification",
-							new Error("window was closed or destroyed during reopen"),
-						);
-						return;
-					}
-					if (mainWindow.isMinimized()) mainWindow.restore();
-					mainWindow.show();
-					mainWindow.focus();
-				})().catch((error) => reportWindowReopenFailure("from notification", error));
+				void restoreMainWindow().catch((error) => reportWindowReopenFailure("from notification", error));
 			});
 			notification.on("close", release);
 			notification.on("failed", release);
@@ -318,8 +315,23 @@ async function launch(): Promise<void> {
 		await loadMainWindow(window);
 	}
 
+	async function restoreMainWindow(): Promise<void> {
+		if (!mainWindow || mainWindow.isDestroyed()) await openMainWindow();
+		if (!mainWindow || mainWindow.isDestroyed()) throw new Error("window was closed or destroyed during reopen");
+		if (mainWindow.isMinimized()) mainWindow.restore();
+		mainWindow.show();
+		mainWindow.focus();
+	}
+
+	if (process.platform === "win32") {
+		app.on("second-instance", () => {
+			void restoreMainWindow().catch((error) => reportWindowReopenFailure("from second instance", error));
+		});
+	}
+
 	await supervisor.start().catch(() => supervisor.view());
-	await openMainWindow();
+	// A second launch may already have opened the window while the runtime started.
+	if (!mainWindow || mainWindow.isDestroyed()) await openMainWindow();
 	updater.start();
 
 	app.on("activate", () => {
@@ -352,7 +364,7 @@ async function launch(): Promise<void> {
 	});
 }
 
-if (squirrelStartup) app.quit();
+if (squirrelStartup || (process.platform === "win32" && !app.requestSingleInstanceLock())) app.quit();
 else
 	void launch().catch(() => {
 		console.error("Metis desktop failed to start.");

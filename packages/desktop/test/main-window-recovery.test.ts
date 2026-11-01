@@ -7,6 +7,7 @@ const state = vi.hoisted(() => {
 	const windows: FakeWindow[] = [];
 	const notifications: FakeNotification[] = [];
 	const diagnosticAppend = vi.fn<(source: string, chunk: string) => Promise<void>>(async () => undefined);
+	const supervisorStart = vi.fn<() => Promise<void>>(async () => undefined);
 	const completionTracker = {
 		update: vi.fn(),
 		view: vi.fn(),
@@ -22,6 +23,7 @@ const state = vi.hoisted(() => {
 
 	class FakeWindow {
 		destroyed = false;
+		minimized = false;
 		readonly listeners = new Map<string, Handler>();
 		readonly webContents = { on: vi.fn(), send: vi.fn() };
 		readonly on = vi.fn((event: string, listener: Handler) => {
@@ -30,7 +32,8 @@ const state = vi.hoisted(() => {
 		});
 		readonly isDestroyed = () => this.destroyed;
 		readonly isFullScreen = () => false;
-		readonly isMinimized = () => false;
+		readonly isMinimized = () => this.minimized;
+		readonly isFocused = () => false;
 		readonly restore = vi.fn();
 		readonly show = vi.fn();
 		readonly focus = vi.fn();
@@ -60,9 +63,11 @@ const state = vi.hoisted(() => {
 	}
 
 	const app = {
-		commandLine: { hasSwitch: () => false },
+		commandLine: { hasSwitch: vi.fn(() => false) },
 		setPath: vi.fn(),
+		setName: vi.fn(),
 		setAppUserModelId: vi.fn(),
+		requestSingleInstanceLock: vi.fn(() => true),
 		getPath: (name: string) => `/tmp/metis-desktop-test/${name}`,
 		getAppPath: () => "/tmp/metis-desktop-test/app",
 		isPackaged: false,
@@ -98,6 +103,7 @@ const state = vi.hoisted(() => {
 		},
 		completionTracker,
 		diagnosticAppend,
+		supervisorStart,
 		FakeNotification,
 		FakeWindow,
 		notifications,
@@ -128,7 +134,7 @@ vi.mock("../src/main/app-protocol-scheme.ts", () => ({
 }));
 vi.mock("../src/main/app-server-supervisor.ts", () => ({
 	AppServerSupervisor: class {
-		readonly start = vi.fn(async () => ({ state: "ready", serverEpoch: null, restartAttempt: 0, failure: null }));
+		readonly start = state.supervisorStart;
 		readonly view = vi.fn(() => ({ state: "ready", serverEpoch: null, restartAttempt: 0, failure: null }));
 		readonly shutdown = vi.fn(async () => undefined);
 	},
@@ -232,7 +238,13 @@ async function captureUnhandledRejections(run: () => Promise<void>): Promise<voi
 	}
 }
 
+const originalPlatform = process.platform;
+let signalListeners: Map<NodeJS.Signals, Set<NodeJS.SignalsListener>>;
+
 beforeEach(() => {
+	signalListeners = new Map(
+		(["SIGINT", "SIGTERM"] as const).map((signal) => [signal, new Set(process.listeners(signal))]),
+	);
 	vi.resetModules();
 	state.appHandlers.clear();
 	state.windows.length = 0;
@@ -240,16 +252,91 @@ beforeEach(() => {
 	state.completionOptions.value = undefined;
 	state.brokerOptions.value = undefined;
 	state.diagnosticAppend.mockReset().mockResolvedValue(undefined);
+	state.supervisorStart.mockReset().mockResolvedValue(undefined);
 	state.windowState.load.mockReset().mockResolvedValue(undefined);
+	state.app.commandLine.hasSwitch.mockReset().mockReturnValue(false);
+	state.app.requestSingleInstanceLock.mockReset().mockReturnValue(true);
+	state.app.whenReady.mockClear();
+	state.app.quit.mockClear();
+	state.app.setName.mockClear();
+	state.app.setAppUserModelId.mockClear();
 	for (const tracker of Object.values(state.completionTracker)) tracker.mockReset();
 });
 
 afterEach(() => {
+	for (const [signal, original] of signalListeners) {
+		for (const listener of process.listeners(signal)) {
+			if (!original.has(listener)) process.removeListener(signal, listener);
+		}
+	}
+	Object.defineProperty(process, "platform", { value: originalPlatform });
 	delete (globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY;
 	delete (globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL;
 });
 
 describe("main window recovery", () => {
+	it("quits a second Windows process before starting its runtime", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		state.app.requestSingleInstanceLock.mockReturnValue(false);
+		(globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY = "http://localhost/index.html";
+		(globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL = null;
+		await import("../src/main/main.ts");
+		expect(state.app.requestSingleInstanceLock).toHaveBeenCalledOnce();
+		expect(state.app.quit).toHaveBeenCalledOnce();
+		expect(state.app.whenReady).not.toHaveBeenCalled();
+		expect(state.windows).toHaveLength(0);
+	});
+
+	it("restores the existing Windows window for a repeated launch", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		await importLaunch();
+		state.windows[0].minimized = true;
+		state.appHandlers.get("second-instance")?.();
+		await vi.waitFor(() => expect(state.windows[0].focus).toHaveBeenCalledOnce());
+		expect(state.windows).toHaveLength(1);
+		expect(state.windows[0].restore).toHaveBeenCalledOnce();
+		expect(state.windows[0].show).toHaveBeenCalledOnce();
+	});
+
+	it("keeps Windows test-profile notification registration separate from the installed app", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		state.app.commandLine.hasSwitch.mockReturnValue(true);
+		await importLaunch();
+		expect(state.app.setAppUserModelId).toHaveBeenCalledWith(
+			expect.stringMatching(/^ai\.metis\.desktop\.profile\.[a-f0-9]{12}$/u),
+		);
+		expect(state.app.setName).toHaveBeenCalledWith(expect.stringMatching(/^Metis \([a-f0-9]{12}\)$/u));
+	});
+
+	it("keeps one Windows window when repeated launches arrive during runtime startup", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		let finishStartup!: () => void;
+		state.supervisorStart.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishStartup = resolve;
+				}),
+		);
+		(globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY = "http://localhost/index.html";
+		(globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL = null;
+		await import("../src/main/main.ts");
+		await vi.waitFor(() => expect(state.appHandlers.has("second-instance")).toBe(true));
+		expect(state.windows).toHaveLength(0);
+		state.appHandlers.get("second-instance")?.();
+		state.appHandlers.get("second-instance")?.();
+		expect(state.windows).toHaveLength(1);
+		finishStartup();
+		await vi.waitFor(() => expect(state.appHandlers.has("activate")).toBe(true));
+		expect(state.windows).toHaveLength(1);
+	});
+
+	it("uses the installed Metis name and Squirrel notification identity for its normal profile", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		await importLaunch();
+		expect(state.app.setName).toHaveBeenCalledWith("Metis");
+		expect(state.app.setAppUserModelId).toHaveBeenCalledWith("com.squirrel.Metis.Metis");
+	});
+
 	it("reports a Dock activate reopen failure and leaves no unhandled rejection", async () => {
 		await importLaunch();
 		state.windows[0].emit("closed");

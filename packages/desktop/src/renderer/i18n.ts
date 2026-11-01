@@ -2510,6 +2510,8 @@ const zhCN = {
 	"The diagnostic probe failed.": "诊断探测失败。",
 	"The sandbox could not start.": "沙箱无法启动。",
 	"The sandbox is unavailable.": "沙箱不可用。",
+	"Remaining checks were not run. Resolve the issue above and check again.":
+		"后续检查未执行，请先解决上述问题，再重新检查。",
 	"Writing inside the temporary workspace failed.": "无法写入临时工作区。",
 	"Reading outside the temporary workspace was not blocked.": "读取临时工作区外部未被阻止。",
 	"No local network probe was available.": "没有可用的本地网络探测。",

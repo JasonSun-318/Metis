@@ -41,8 +41,6 @@ function reasonLabel(t: (key: string) => string, reason: string | undefined): st
 			return t("The diagnostic probe failed.");
 		case "sandbox-start-failed":
 			return t("The sandbox could not start.");
-		case "sandbox-unavailable":
-			return t("The sandbox is unavailable.");
 		case "workspace-write-failed":
 			return t("Writing inside the temporary workspace failed.");
 		case "outside-read-not-denied":
@@ -180,7 +178,10 @@ export function SandboxEnvironmentCard({
 		(check) =>
 			check.status === "failed" ||
 			(check.status === "skipped" &&
-				!["not-applicable", "not-run", "readiness-failed"].includes(check.reason ?? "")),
+				!["not-applicable", "not-run", "readiness-failed", "sandbox-unavailable"].includes(check.reason ?? "")),
+	);
+	const dependentChecksSkipped = report?.checks?.some(
+		(check) => check.status === "skipped" && ["readiness-failed", "sandbox-unavailable"].includes(check.reason ?? ""),
 	);
 	const recoveryActions = report?.recoveryActions ?? [];
 	const verified =
@@ -266,7 +267,12 @@ export function SandboxEnvironmentCard({
 					})}
 				</ul>
 			) : null}
-			{!selfTesting && needsAttention && issues.length === 0 ? (
+			{!selfTesting && dependentChecksSkipped ? (
+				<p className="sandbox-environment-notice">
+					{t("Remaining checks were not run. Resolve the issue above and check again.")}
+				</p>
+			) : null}
+			{!selfTesting && needsAttention && issues.length === 0 && !dependentChecksSkipped ? (
 				<p className="sandbox-environment-notice">{t("The sandbox is unavailable.")}</p>
 			) : null}
 			{error ? (

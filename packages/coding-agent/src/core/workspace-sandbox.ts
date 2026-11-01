@@ -97,6 +97,8 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 		"Path",
 		"HOME",
 		"USERPROFILE",
+		"LOCALAPPDATA",
+		"APPDATA",
 		"LANG",
 		"LC_ALL",
 		"LC_CTYPE",
@@ -124,9 +126,9 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 	return environment;
 }
 
-function controlTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+function controlTimeout<T>(promise: Promise<T>, message: string, timeoutMs = CONTROL_TIMEOUT_MS): Promise<T> {
 	return new Promise((resolve, reject) => {
-		const handle = setTimeout(() => reject(new WorkspaceSandboxError("SANDBOX_CLOSED", message)), CONTROL_TIMEOUT_MS);
+		const handle = setTimeout(() => reject(new WorkspaceSandboxError("SANDBOX_CLOSED", message)), timeoutMs);
 		promise.then(
 			(value) => {
 				clearTimeout(handle);
@@ -295,7 +297,12 @@ class SandboxBroker {
 				...(shellPath ? { shellPath } : {}),
 				...(input.workspaceReadOnly === true ? { workspaceReadOnly: true } : {}),
 			});
-			await controlTimeout(broker.readyPromise, "Sandbox initialization timed out");
+			// Windows performs native egress checks before readiness; installed startup can exceed five seconds.
+			await controlTimeout(
+				broker.readyPromise,
+				"Sandbox initialization timed out",
+				process.platform === "win32" ? 30_000 : CONTROL_TIMEOUT_MS,
+			);
 			return broker;
 		} catch (error) {
 			broker.detachHostAbort();

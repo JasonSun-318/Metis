@@ -2,8 +2,48 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchPermissionApp } from "./fixtures/permission-app.ts";
+import { messageText } from "./packaged-app-harness.ts";
 
 test.describe.configure({ timeout: 180_000 });
+
+test("packaged settings completes the sandbox self-test", async () => {
+	const app = await launchPermissionApp({ preset: "auto", tools: () => undefined });
+	try {
+		await app.openSettings("Permissions");
+		const card = app.page.locator(".sandbox-environment-card");
+		await card.getByRole("button", { name: "Run sandbox self-test", exact: true }).click();
+		await expect(card.locator(".sandbox-environment-status")).toHaveText("Available", { timeout: 60_000 });
+		await expect(card.locator(".sandbox-environment-issue")).toHaveCount(0);
+		await card.screenshot({ path: test.info().outputPath("sandbox-selftest.png") });
+	} finally {
+		await app.close();
+	}
+});
+
+test("packaged sandbox executes an actual shell command", async () => {
+	const marker = "case-perf-shell-command";
+	const app = await launchPermissionApp({
+		preset: "auto",
+		tools: (text) => text.includes(marker)
+			? { name: "bash", arguments: { command: "echo sandbox-command-ok" } }
+			: undefined,
+	});
+	try {
+		await app.submit(marker);
+		await expect.poll(async () =>
+			(await app.approval.count()) > 0 || (await app.page.getByText(`done:${marker}`, { exact: true }).count()) > 0,
+			{ timeout: 45_000 },
+		).toBe(true);
+		if (await app.approval.count()) await app.allowOnce();
+		await app.waitDone(marker);
+		const primary = app.provider.calls.filter((call) => call.kind === "primary").at(-1);
+		const messages = JSON.parse(primary?.payload ?? "{}").messages as Array<{ role: string; content: unknown }>;
+		const result = messages.filter((message) => message.role === "tool").at(-1);
+		expect(messageText(result?.content)).toMatch(/(?:^|\r?\n)sandbox-command-ok(?:\r?\n|$)/u);
+	} finally {
+		await app.close();
+	}
+});
 
 test("packaged sandbox health allows a workspace write and denies a protected-root write", async () => {
 	const app = await launchPermissionApp({

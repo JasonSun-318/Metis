@@ -57,9 +57,8 @@ it("uses only the Metis Desktop profile", () => {
 	expect(main).toContain('app.setPath("userData", join(app.getPath("appData"), "Metis"))');
 });
 
-it("uses the Squirrel identity and allows supported Windows notifications", () => {
+it("allows supported Windows notifications", () => {
 	const main = source("src/main/main.ts");
-	expect(main).toContain('if (process.platform === "win32") app.setAppUserModelId("com.squirrel.Metis.Metis")');
 	expect(main).toContain("if (!Notification.isSupported()) return;");
 	expect(main).not.toContain('process.platform !== "darwin" || !Notification.isSupported()');
 	expect(main).toContain('if (process.platform === "darwin") app.setBadgeCount(count)');

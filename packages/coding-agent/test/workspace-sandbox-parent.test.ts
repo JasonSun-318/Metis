@@ -15,6 +15,8 @@ vi.mock("../src/utils/child-process.ts", async (importOriginal) => ({
 
 import { createWorkspaceSandbox, WorkspaceSandboxError } from "../src/core/workspace-sandbox.ts";
 
+const originalPlatform = process.platform;
+
 type FakeBroker = ChildProcess & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough };
 
 function fakeBroker(onRequest: (request: Record<string, unknown>, child: FakeBroker) => void): FakeBroker {
@@ -50,12 +52,41 @@ describe("workspace sandbox parent fail-closed behavior", () => {
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.unstubAllEnvs();
+		Object.defineProperty(process, "platform", { value: originalPlatform });
 		mocks.spawnProcess.mockReset();
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
 	it("does not spawn a broker merely by importing the host module", () => {
 		expect(mocks.spawnProcess).not.toHaveBeenCalled();
+	});
+
+	it("preserves Windows profile directories without forwarding unrelated secrets", async () => {
+		vi.stubEnv("LOCALAPPDATA", "C:\\Users\\tester\\AppData\\Local");
+		vi.stubEnv("APPDATA", "C:\\Users\\tester\\AppData\\Roaming");
+		vi.stubEnv("METIS_SANDBOX_TEST_SECRET", "must-not-reach-broker");
+		let commandEnvironment: unknown;
+		mocks.spawnProcess.mockReturnValue(
+			fakeBroker((request, child) => {
+				if (request.type === "init") respond(child, { type: "ready" });
+				if (request.type === "exec") {
+					commandEnvironment = request.env;
+					respond(child, { type: "result", id: request.id, exitCode: 0 });
+				}
+			}),
+		);
+		const root = cwd();
+		const sandbox = await createWorkspaceSandbox({ cwd: root, workspaceRoots: [root] });
+		await sandbox.operations.exec("echo ready", root, { onData: () => {} });
+		for (const environment of [mocks.spawnProcess.mock.calls[0][2].env, commandEnvironment]) {
+			expect(environment).toMatchObject({
+				LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local",
+				APPDATA: "C:\\Users\\tester\\AppData\\Roaming",
+			});
+			expect(environment).not.toHaveProperty("METIS_SANDBOX_TEST_SECRET");
+		}
+		sandbox.forceDispose();
 	});
 
 	it("sends the complete immutable filesystem and network profile before readiness", async () => {
@@ -113,15 +144,53 @@ describe("workspace sandbox parent fail-closed behavior", () => {
 		});
 	});
 
-	it("times out initialization without falling back to local execution", async () => {
+	it("allows Windows initialization to finish after the ordinary control deadline", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		vi.useFakeTimers();
+		mocks.spawnProcess.mockReturnValue(
+			fakeBroker((request, child) => {
+				if (request.type === "init") setTimeout(() => respond(child, { type: "ready" }), 8_600);
+			}),
+		);
+		const root = cwd();
+		const pending = createWorkspaceSandbox({ cwd: root, workspaceRoots: [root] }).then(
+			(sandbox) => ({ sandbox }),
+			(error: unknown) => ({ error }),
+		);
+		await vi.advanceTimersByTimeAsync(8_600);
+		const result = await pending;
+		expect(result).toHaveProperty("sandbox.operations.exec");
+		if ("sandbox" in result) result.sandbox.forceDispose();
+	});
+
+	it.each([
+		{ platform: "linux", timeout: 5_000 },
+		{ platform: "win32", timeout: 30_000 },
+	])("bounds $platform initialization without falling back to local execution", async ({ platform, timeout }) => {
+		Object.defineProperty(process, "platform", { value: platform });
 		vi.useFakeTimers();
 		mocks.spawnProcess.mockReturnValue(fakeBroker(() => {}));
 		const root = cwd();
 		const pending = createWorkspaceSandbox({ cwd: root, workspaceRoots: [root] });
 		const assertion = expect(pending).rejects.toBeInstanceOf(WorkspaceSandboxError);
-		await vi.advanceTimersByTimeAsync(5_000);
+		await vi.advanceTimersByTimeAsync(timeout);
 		await assertion;
 		expect(mocks.spawnProcess).toHaveBeenCalledOnce();
+	});
+
+	it("keeps Windows shutdown bounded by the ordinary control deadline", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		vi.useFakeTimers();
+		mocks.spawnProcess.mockReturnValue(
+			fakeBroker((request, child) => {
+				if (request.type === "init") respond(child, { type: "ready" });
+			}),
+		);
+		const root = cwd();
+		const sandbox = await createWorkspaceSandbox({ cwd: root, workspaceRoots: [root] });
+		const assertion = expect(sandbox.dispose()).rejects.toThrow("Sandbox shutdown timed out");
+		await vi.advanceTimersByTimeAsync(5_000);
+		await assertion;
 	});
 
 	it("closes after a duplicate result id instead of accepting another command", async () => {
