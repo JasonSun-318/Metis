@@ -136,6 +136,10 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		await expect(checkButton).toBeVisible({ timeout: 15_000 });
 		await expect(checkButton).toBeEnabled();
 
+		const previousUpdateState = await page.evaluate(() =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getUpdateState(),
+		);
+
 		// Observe the complete busy transition, including checks faster than polling.
 		await checkButton.evaluate((button) => {
 			const observer = new MutationObserver((records) => {
@@ -164,12 +168,21 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 			contentType: "application/json",
 		});
 
-		// Production acceptance requires a successful remote check. Failure and
-		// unsupported-build feedback are covered separately in chat-shell tests.
+		// Exercise real IPC without treating CDN reachability as an application
+		// invariant: offline checks must preserve state and recover the menu too.
 		expect(["available", "unavailable"]).toContain(updateState.status);
 		const toast = page.locator(".system-notice");
 		await expect(page.locator(".sidebar-update-notice, .sidebar-update-button")).toHaveCount(0);
-		if (updateState.status === "available") {
+		if ((await toast.count()) > 0 && (await toast.getAttribute("data-tone")) === "error") {
+			await expect(toast).toHaveAttribute("role", "alert");
+			await expect(toast).toHaveText(
+				/^(检查更新失败检查更新失败，请检查网络后重试。|Update check failedCould not check for updates\. Check your connection and try again\.)$/u,
+			);
+			expect(updateState).toEqual(previousUpdateState);
+			if ((await accountTrigger.getAttribute("aria-expanded")) !== "true") await accountTrigger.click();
+			await expect(checkButton).toBeEnabled();
+			await expect(checkButton).toHaveAttribute("aria-busy", "false");
+		} else if (updateState.status === "available") {
 			if ((await accountTrigger.getAttribute("aria-expanded")) !== "true") await accountTrigger.click();
 			await expect(checkButton).toBeVisible();
 			await expect(checkButton).toContainText(updateState.version);
@@ -184,7 +197,7 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 			await expect(toast).toHaveText(/^(已是最新版本|Metis is up to date)$/u);
 		}
 		console.log(
-			"[E2E] Successful remote check:",
+			"[E2E] Real IPC update check outcome:",
 			updateState.status,
 			updateState.status === "unavailable" ? await toast.textContent() : updateState.status,
 		);
