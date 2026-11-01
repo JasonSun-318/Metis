@@ -191,6 +191,9 @@ export function createSandboxRuntimeConfig(
 	callerHome: string = homedir(),
 ): SandboxRuntimeConfig {
 	const denyRead = deniedReadRoots(platform);
+	// Root deny-read mounts hide the installation; re-bind only the verified
+	// static helper into the read-only namespace so Linux can execute it.
+	const seccompApplyPath = process.platform === "linux" ? bundledSandboxHelperPath("seccomp") : undefined;
 	const runtimeReads =
 		platform === "win32"
 			? input.runtimeReads.filter((path) => isInsideWindowsHome(callerHome, path))
@@ -210,6 +213,7 @@ export function createSandboxRuntimeConfig(
 			...runtimeReads,
 			...shellRead,
 			...systemAliasReadPaths(platform),
+			...(seccompApplyPath ? [seccompApplyPath] : []),
 		]),
 	];
 	const denyWrite = [
@@ -236,7 +240,7 @@ export function createSandboxRuntimeConfig(
 		},
 		// The upstream default can resolve inside app.asar; native helpers must
 		// execute from the verified unpacked path on every Linux runtime.
-		...(process.platform === "linux" ? { seccomp: { applyPath: bundledSandboxHelperPath("seccomp") } } : {}),
+		...(seccompApplyPath ? { seccomp: { applyPath: seccompApplyPath } } : {}),
 		// srt-win is staged for every Windows runtime (bundled in the desktop
 		// package via dist/vendor/sandbox-runtime), so enable it on all of them.
 		...(process.platform === "win32" ? { windows: { srtWin: { path: bundledSandboxHelperPath("srt-win") } } } : {}),

@@ -67,6 +67,8 @@ describe("workspace sandbox broker policy", () => {
 		expect(config.seccomp).toEqual(
 			platform === "linux" ? { applyPath: "/mocked/sandbox-helper/seccomp" } : undefined,
 		);
+		if (platform === "linux") expect(config.filesystem.allowRead).toContain("/mocked/sandbox-helper/seccomp");
+		else expect(config.filesystem.allowRead).not.toContain("/mocked/sandbox-helper/seccomp");
 		expect(config.windows).toEqual(
 			platform === "win32" ? { srtWin: { path: "/mocked/sandbox-helper/srt-win" } } : undefined,
 		);
