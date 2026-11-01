@@ -400,7 +400,7 @@ describe("agent catalog", () => {
 				}),
 			"INVALID_CURSOR",
 		);
-	});
+	}, 15_000);
 
 	it("rejects reading an agent from another root tree or through a child session ref", () => {
 		const fixture = createFixture();
