@@ -344,6 +344,40 @@ async function reopenHarness(harness: Harness): Promise<Harness> {
 }
 
 describe("SubagentManager", () => {
+	it("recovers and unloads cold agents without rescanning the tree for each journal", async () => {
+		const harness = setup();
+		for (let index = 0; index < 4; index++) {
+			const child = await harness.manager.spawn(ROOT_ID, {
+				name: `Cold worker ${index}`,
+				task: "Inspect",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(index + 1));
+			await finishTask(harness, child.agentId, child.taskId);
+		}
+		await harness.manager.unload("parent_unloaded");
+		const scans = vi.spyOn(AgentStore.prototype, "listTree");
+		const recovered = new SubagentManager({
+			parentSessionManager: harness.parentManager,
+			agentDir: join(harness.root, "agent"),
+			getWorkspaceRoots: () => harness.parentManager.getWorkspaceRoots(),
+			createChildRuntime: async () => {
+				throw new Error("Cold completed agents must not start a model");
+			},
+		});
+		try {
+			recovered.attachActor(harness.parent);
+			// Construction, permission inheritance, and mailbox recovery each scan once.
+			expect(scans).toHaveBeenCalledTimes(3);
+			scans.mockClear();
+			await recovered.unload("parent_unloaded");
+			expect(scans).toHaveBeenCalledTimes(1);
+		} finally {
+			scans.mockRestore();
+			await recovered.unload("parent_unloaded");
+		}
+	});
+
 	it.each(["New assignment", "Repeat assignment"])(
 		"creates fresh follow-ups after cold restarts: %s",
 		async (text) => {

@@ -1369,7 +1369,7 @@ export class SubagentManager implements SubagentManagerApi {
 					await hot.completion;
 					if (hot.lifecycleError) errors.push(hot.lifecycleError);
 				}
-				for (const task of this.store.listTasks(record.agentId)) {
+				for (const task of this.store.reload(record).tasks) {
 					if (task.status !== "queued" && task.status !== "running") continue;
 					this.appendTaskState(record.agentId, { taskId: task.taskId, status: "stopped", reason });
 				}
@@ -2247,7 +2247,7 @@ export class SubagentManager implements SubagentManagerApi {
 				for (const input of record.inputs)
 					if (!session.hasAgentMailboxEvent(`agent:${record.agentId}:${input.messageId}:intervention:${parentId}`))
 						this.publishIntervention(record, input, false, parentId);
-				for (const entry of this.journal(record.agentId))
+				for (const entry of this.journal(record.agentId, record))
 					if (
 						entry.type === "agent_run_control" &&
 						entry.agentId === record.agentId &&
@@ -2265,12 +2265,12 @@ export class SubagentManager implements SubagentManagerApi {
 		return this.assertDescendant(actor.sessionId, agentId);
 	}
 
-	private journal(agentId: string): readonly FileEntry[] {
+	private journal(agentId: string, record?: AgentDiskRecord): readonly FileEntry[] {
 		if (agentId === this.rootSessionId) return this.parentSessionManager.getDurableJournalSnapshot();
 		return (
 			(
 				this.hot.get(agentId)?.runtime.session.sessionManager ?? this.writers.get(agentId)
-			)?.getDurableJournalSnapshot() ?? this.store.readJournal(agentId)
+			)?.getDurableJournalSnapshot() ?? this.store.readJournal(agentId, record)
 		);
 	}
 
