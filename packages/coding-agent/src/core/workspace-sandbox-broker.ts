@@ -234,9 +234,9 @@ export function createSandboxRuntimeConfig(
 			strictAllowlist: false,
 			allowLocalBinding: false,
 		},
-		...(isBunBinary && process.platform === "linux"
-			? { seccomp: { applyPath: bundledSandboxHelperPath("seccomp") } }
-			: {}),
+		// The upstream default can resolve inside app.asar; native helpers must
+		// execute from the verified unpacked path on every Linux runtime.
+		...(process.platform === "linux" ? { seccomp: { applyPath: bundledSandboxHelperPath("seccomp") } } : {}),
 		// srt-win is staged for every Windows runtime (bundled in the desktop
 		// package via dist/vendor/sandbox-runtime), so enable it on all of them.
 		...(process.platform === "win32" ? { windows: { srtWin: { path: bundledSandboxHelperPath("srt-win") } } } : {}),

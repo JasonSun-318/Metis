@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSandboxRuntimeConfig, exactNetworkGrantAllows } from "../src/core/workspace-sandbox-broker.ts";
 import { pathsIntersect } from "../src/utils/paths.ts";
 
+// Verify the configuration without requiring a host-specific executable on disk.
+vi.mock("../src/core/workspace-sandbox-health.ts", () => ({
+	bundledSandboxHelperPath: (kind: "seccomp" | "srt-win") => `/mocked/sandbox-helper/${kind}`,
+}));
+
 describe("workspace sandbox broker policy", () => {
+	const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+	afterEach(() => {
+		Object.defineProperty(process, "platform", originalPlatform!);
+	});
+
 	it("allows only an exact canonical host and port", () => {
 		const endpoints = [{ hostname: "api.example.com", port: 443 }];
 		expect(exactNetworkGrantAllows(endpoints, { host: "API.EXAMPLE.COM.", port: 443 })).toBe(true);
@@ -39,6 +50,26 @@ describe("workspace sandbox broker policy", () => {
 			}
 		}
 		expect(config.network).toMatchObject({ allowedDomains: [], deniedDomains: [], strictAllowlist: false });
+	});
+
+	it.each(["darwin", "linux", "win32"])("configures the executable helpers for %s", (platform) => {
+		Object.defineProperty(process, "platform", { value: platform, configurable: true });
+		const config = createSandboxRuntimeConfig({
+			workspaceRoots: ["/work"],
+			readOnlyRoots: [],
+			writeRoots: ["/work/out"],
+			protectedRoots: [],
+			writeProtectedRoots: [],
+			temporaryDir: "/tmp/metis-sandbox",
+			runtimeReads: ["/bin"],
+		});
+
+		expect(config.seccomp).toEqual(
+			platform === "linux" ? { applyPath: "/mocked/sandbox-helper/seccomp" } : undefined,
+		);
+		expect(config.windows).toEqual(
+			platform === "win32" ? { srtWin: { path: "/mocked/sandbox-helper/srt-win" } } : undefined,
+		);
 	});
 
 	it("relies on the isolated Windows account for system reads and grants only user-owned runtime paths", () => {
