@@ -33,6 +33,15 @@ async function readRules(app: Awaited<ReturnType<typeof launchPermissionApp>>) {
 	});
 }
 
+/** Last tool-result text the fake provider saw; surfaces the real tool output when a side effect is missing. */
+function lastToolResult(app: Awaited<ReturnType<typeof launchPermissionApp>>): string {
+	const payload = JSON.parse(
+		[...app.provider.calls].reverse().find((call) => call.kind === "primary")?.payload ?? "{}",
+	) as { messages?: readonly { role?: string; content?: unknown }[] };
+	const tool = [...(payload.messages ?? [])].reverse().find((message) => message.role === "tool");
+	return typeof tool?.content === "string" ? tool.content : JSON.stringify(tool?.content ?? null);
+}
+
 test("global commands remain compact and preserve non-command permissions", async ({}, testInfo) => {
 	const app = await launchPermissionApp({ preset: "auto", tools });
 	try {
@@ -229,7 +238,17 @@ for (const preset of ["ask", "auto"] as const) {
 			await app.submit("case-officecli-default");
 			await app.waitDone("case-officecli-default");
 			await expect(app.approval).toHaveCount(0);
-			expect(readFileSync(path.join(app.projectDir, "office-permission.docx")).subarray(0, 2).toString()).toBe("PK");
+			// On failure the ENOENT alone hides why officecli did not write the
+			// file; rethrow with the sandboxed command's real tool result instead.
+			let docx: Buffer;
+			try {
+				docx = readFileSync(path.join(app.projectDir, "office-permission.docx"));
+			} catch (error) {
+				throw new Error(`office-permission.docx was not created; last tool result: ${lastToolResult(app)}`, {
+					cause: error,
+				});
+			}
+			expect(docx.subarray(0, 2).toString()).toBe("PK");
 			await expect(app.page.locator(".tool-permission-source")).toHaveCount(0);
 			expect(app.provider.reviewCount).toBe(0);
 		} finally {
