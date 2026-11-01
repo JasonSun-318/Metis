@@ -144,6 +144,21 @@ async function loadShellAnalysis(): Promise<void> {
 			python: await loadLanguage("tree-sitter-python.wasm"),
 			javascript: await loadLanguage("tree-sitter-javascript.wasm"),
 		};
+		// Exercise fixed, trusted syntax before an untrusted command starts its 100ms
+		// budget. The first WASM invocation can otherwise turn a cold-start cost into
+		// an incomplete claim that changes between authorization snapshots.
+		for (const language of Object.values(languages)) {
+			const parser = new runtime.Parser();
+			let tree: Tree | null = null;
+			try {
+				parser.setLanguage(language);
+				tree = parser.parse("true");
+				if (!tree || tree.rootNode.hasError) throw new Error("trusted grammar initialization failed");
+			} finally {
+				tree?.delete();
+				parser.delete();
+			}
+		}
 		loaded = { runtime, languages };
 		status = { ready: true };
 	} catch (error) {

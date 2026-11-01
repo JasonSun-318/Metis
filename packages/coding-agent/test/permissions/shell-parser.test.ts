@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -215,6 +216,43 @@ describe("trusted shell parser", () => {
 });
 
 describe("shell parser trust boundary", () => {
+	it("initializes cold grammar execution before budgeting an untrusted command", async () => {
+		const requireRuntime = createRequire(
+			join(import.meta.dirname, "../../dist/vendor/shell-analysis/tree-sitter.js"),
+		);
+		const runtime = requireRuntime("./tree-sitter.js") as typeof import("@vscode/tree-sitter-wasm");
+		const originalParse = runtime.Parser.prototype.parse;
+		let now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+		const parse = vi.spyOn(runtime.Parser.prototype, "parse").mockImplementationOnce(function (
+			this: InstanceType<typeof runtime.Parser>,
+			...args
+		) {
+			// Model the first WASM invocation consuming the command's entire budget.
+			now += 1_000;
+			return originalParse.apply(this, args);
+		});
+		vi.resetModules();
+		try {
+			const parser = await import("../../src/core/permissions/shell-parser.ts");
+			await parser.initializeShellAnalysis();
+			expect(parser.getShellParserStatus().ready).toBe(true);
+			const { analyzeShellCommand } = await import("../../src/core/permissions/shell-analysis.ts");
+			expect(
+				analyzeShellCommand({
+					command: "echo sandbox-command-ok",
+					cwd: process.cwd(),
+					workspaceRoots: [process.cwd()],
+					shellPath: "/bin/bash",
+				}),
+			).toMatchObject({ complete: true, disposition: "safe", writePaths: [] });
+		} finally {
+			parse.mockRestore();
+			clock.mockRestore();
+			vi.resetModules();
+		}
+	});
+
 	it("reports missing assets without trusting a workspace fallback", async () => {
 		const temporaryPackageDir = mkdtempSync(join(tmpdir(), "metis-missing-parser-"));
 		vi.resetModules();
