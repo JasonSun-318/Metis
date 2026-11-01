@@ -25,13 +25,6 @@ on:
           - macos-26
           - windows-2025
           - ubuntu-26.04
-      e2e_scope:
-        description: Packaged E2E scope for manual diagnosis
-        type: choice
-        default: all
-        options:
-          - all
-          - followup
 
 permissions:
   contents: read
@@ -122,20 +115,12 @@ jobs:
         run: xvfb-run -a npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
 
       - name: Run packaged E2E (macOS and Windows)
-        if: runner.os != 'Linux' && inputs.e2e_scope != 'followup'
+        if: runner.os != 'Linux'
         run: npm run test:e2e --workspace @metis/desktop
 
       - name: Run packaged E2E (Linux)
-        if: runner.os == 'Linux' && inputs.e2e_scope != 'followup'
+        if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:e2e --workspace @metis/desktop
-
-      - name: Run follow-up packaged E2E (macOS and Windows)
-        if: runner.os != 'Linux' && inputs.e2e_scope == 'followup'
-        run: npm run test:e2e --workspace @metis/desktop -- --grep 'two thousand notes|split placeholders|manual update check|creates hook via UI|OfficeCLI keeps|packaged browser control'
-
-      - name: Run follow-up packaged E2E (Linux)
-        if: runner.os == 'Linux' && inputs.e2e_scope == 'followup'
-        run: xvfb-run -a npm run test:e2e --workspace @metis/desktop -- --grep 'two thousand notes|split placeholders|manual update check|creates hook via UI|OfficeCLI keeps|packaged browser control'
 
       - name: Upload E2E failure diagnostics
         if: failure()
