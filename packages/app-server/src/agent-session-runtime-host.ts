@@ -599,11 +599,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	private refreshAgentReceipts(agentId: string): Promise<void> {
+		if (this.closed || this.closePromise) return Promise.resolve();
 		this.pendingAgentReceiptRefreshes.add(agentId);
 		if (!this.agentReceiptRefreshTask) {
 			this.agentReceiptRefreshTask = Promise.resolve()
 				.then(async () => {
-					while (!this.closed && this.pendingAgentReceiptRefreshes.size) {
+					while (!this.closed && !this.closePromise && this.pendingAgentReceiptRefreshes.size) {
 						const next = this.pendingAgentReceiptRefreshes.values().next().value!;
 						this.pendingAgentReceiptRefreshes.delete(next);
 						await this.readAgentReceipts(next);
@@ -622,7 +623,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const epoch = this.agentReceiptEpoch;
 		try {
 			const journal = await manager.readJournal(this.sessionId, agentId);
-			if (this.closed || manager !== this.runtime.subagentManager) return;
+			if (this.closed || this.closePromise || manager !== this.runtime.subagentManager) return;
 			if (epoch !== this.agentReceiptEpoch) {
 				this.pendingAgentReceiptRefreshes.add(agentId);
 				return;

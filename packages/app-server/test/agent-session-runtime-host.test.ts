@@ -114,6 +114,76 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		},
 	);
 
+	it.each(["queued", "reading"] as const)("stops %s receipt refreshes before disposing the runtime", async (phase) => {
+		const root = mkdtempSync(join(tmpdir(), "metis-receipt-close-"));
+		temporaryRoots.push(root);
+		const cwd = join(root, "project");
+		const agentDir = join(root, "agent");
+		mkdirSync(cwd);
+		mkdirSync(agentDir);
+		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
+			id: SESSION_ID,
+			mode: "code",
+			permissionPreset: "full",
+		});
+		const path = manager.getSessionFile()!;
+		manager.close();
+		const ref: SessionRef = {
+			path,
+			relativePath: basename(path),
+			summary: {
+				sessionId: SESSION_ID,
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd,
+				createdAt: "2026-11-01T00:00:00.000Z",
+				updatedAt: "2026-11-01T00:00:00.000Z",
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		};
+		const opened = await new AgentSessionRuntimeHost({ agentDir }).open(ref);
+		const internal = opened as unknown as {
+			runtime: { subagentManager: { readJournal(): Promise<unknown[]> } };
+			refreshAgentReceipts(agentId: string): Promise<void>;
+		};
+		let readStarted!: () => void;
+		let finishRead!: () => void;
+		const started = new Promise<void>((resolve) => {
+			readStarted = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			finishRead = resolve;
+		});
+		const read = vi.spyOn(internal.runtime.subagentManager, "readJournal").mockImplementation(async () => {
+			readStarted();
+			await gate;
+			return [];
+		});
+		const events: DomainEvent[] = [];
+		opened.subscribe((event) => events.push(event));
+		const refreshed = internal.refreshAgentReceipts("child").then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		try {
+			if (phase === "reading") await started;
+			const closing = opened.close();
+			finishRead();
+			expect(await refreshed).toBeUndefined();
+			await closing;
+			expect(read).toHaveBeenCalledTimes(phase === "reading" ? 1 : 0);
+			expect(events.filter((event) => event.type === "interaction/notify")).toEqual([]);
+		} finally {
+			finishRead();
+			await refreshed;
+			await opened.close();
+		}
+	});
+
 	it("projects the same provider approval ID into live events and reconnect snapshots", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-review-identity-"));
 		temporaryRoots.push(root);
