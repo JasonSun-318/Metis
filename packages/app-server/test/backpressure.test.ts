@@ -47,6 +47,50 @@ function notifications(messages: readonly OutboundEnvelope[]): ServerRpcNotifica
 }
 
 describe("OutboundQueue backpressure", () => {
+	it.each(["commit", "abort"] as const)(
+		"does not spin while a snapshot holds the first event (%s)",
+		async (release) => {
+			const scheduled: (() => void)[] = [];
+			const scheduler = vi
+				.spyOn(globalThis, "queueMicrotask")
+				.mockImplementation((callback) => scheduled.push(callback));
+			const queue = new OutboundQueue({ serverEpoch: EPOCH });
+			const sent: OutboundEnvelope[] = [];
+			try {
+				queue.setSender((message) => {
+					sent.push(message);
+				});
+				const stage = queue.createStage();
+				stage.enqueue(1, delta("held"));
+				queue.enqueue(2, { type: "server/state", state: "ready" });
+				expect(scheduled).toHaveLength(1);
+				scheduled.shift()!();
+				await Promise.resolve();
+				expect(sent).toHaveLength(0);
+				expect(scheduled).toHaveLength(0);
+
+				if (release === "commit") stage.commit(0);
+				else stage.abort();
+				expect(scheduled).toHaveLength(1);
+				scheduled.shift()!();
+				await Promise.resolve();
+				expect(notifications(sent)[0]?.params).toMatchObject({
+					fromCursor: release === "commit" ? 1 : 2,
+					toCursor: 2,
+					events:
+						release === "commit"
+							? [delta("held"), { type: "server/state", state: "ready" }]
+							: [{ type: "server/state", state: "ready" }],
+				});
+				expect(queue.acknowledge(EPOCH, 2)).toBe(2);
+				expect(scheduled).toHaveLength(0);
+			} finally {
+				queue.close();
+				scheduler.mockRestore();
+			}
+		},
+	);
+
 	it("does not misclassify an invalid internal event as connection overload", () => {
 		const queue = new OutboundQueue({ serverEpoch: EPOCH });
 		const invalid = {

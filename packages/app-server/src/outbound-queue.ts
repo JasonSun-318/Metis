@@ -396,7 +396,14 @@ export class OutboundQueue {
 			this.notifyTerminal("delivery_failed");
 		} finally {
 			this.pumping = false;
-			if (!this.closed && !this.terminalNotified && (this.terminal || this.records.some((record) => !record.sent))) {
+			const next = this.records.find((record) => !record.sent);
+			// Snapshot commit/abort schedules delivery when a held head is released.
+			// Retrying that head in microtasks would starve the I/O completing the snapshot.
+			if (
+				!this.closed &&
+				!this.terminalNotified &&
+				(this.terminal || (next !== undefined && next.hold === undefined))
+			) {
 				this.schedulePump();
 			}
 		}
