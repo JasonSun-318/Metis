@@ -3252,7 +3252,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(page.getByRole("tab")).toHaveCount(4);
 		await editor.fill("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(1);
-		await editor.press("Meta+s");
+		await editor.press("ControlOrMeta+s");
 		await expect(page.locator(".file-preview-notice")).toHaveText("File saved");
 		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(0);
@@ -3280,7 +3280,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await scratchEditor.fill("export const managed = true;\n");
 		await expect(scratchEditor.locator("span", { hasText: /^export$/u })).toHaveCSS("color", "rgb(255, 123, 114)");
 		await expect(page.locator('.file-tree-row [title="scratch.ts"] .file-kind-icon.is-typescript')).toBeVisible();
-		await scratchEditor.press("Meta+f");
+		await scratchEditor.press("ControlOrMeta+f");
 		await expect(page.locator(".cm-search")).toBeVisible();
 		await panel.screenshot({ path: path.join(qaDir, "code-editor-find.png") });
 		await scratchEditor.press("Escape");
@@ -3295,7 +3295,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		expect(existsSync(path.join(projectDir, "scratch.ts"))).toBe(false);
 		expect(existsSync(path.join(projectDir, "managed.ts"))).toBe(true);
 
-		await scratchEditor.press("Meta+s");
+		await scratchEditor.press("ControlOrMeta+s");
 		await expect(page.locator(".file-preview-notice")).toHaveText("File saved");
 		await expect.poll(() => readFile(path.join(projectDir, "managed.ts"), "utf8"))
 			.toBe("export const managed = true;\n");
@@ -3351,7 +3351,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await writeFile(path.join(projectDir, "README.md"), "# External change\n");
 		await editor.fill("# Stale Metis draft\n");
 		await panel.screenshot({ path: path.join(qaDir, "dirty-editor-900x924.png") });
-		await editor.press("Meta+s");
+		await editor.press("ControlOrMeta+s");
 		await expect(page.getByRole("alert")).toContainText("Workspace file changed on disk");
 		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# External change\n");
 		await expect.poll(() => codeEditorText(editor)).toBe("# Stale Metis draft\n");
