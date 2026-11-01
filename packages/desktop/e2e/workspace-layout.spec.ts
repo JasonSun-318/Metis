@@ -215,12 +215,13 @@ async function expectPaneHeadersAligned(page: Page): Promise<void> {
 
 async function dragPaneDivider(page: Page, axis: "column" | "row", delta: number): Promise<void> {
 	const divider = page.locator(`.session-workspace-panes .workspace-pane-resizer--${axis}[role="separator"]`).first();
+	await divider.hover();
 	const box = await divider.boundingBox();
 	if (!box) throw new Error(`Missing ${axis} divider bounds`);
 	const x = box.x + box.width / 2;
 	const y = box.y + box.height / 2;
-	await page.mouse.move(x, y);
 	await page.mouse.down();
+	await expect(page.locator(".session-workspace-root")).toHaveClass(new RegExp(`is-pane-resizing--${axis}`));
 	await page.mouse.move(x + (axis === "column" ? delta : 0), y + (axis === "row" ? delta : 0), { steps: 8 });
 	await page.mouse.up();
 }

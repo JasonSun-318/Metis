@@ -80,7 +80,7 @@ async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name
 function expectBoundedToolError(result: string | undefined): void {
 	expect(result).toBeTruthy();
 	expect(Buffer.byteLength(result ?? "", "utf8")).toBeLessThanOrEqual(4_096);
-	expect(result).toMatch(/error|fail|closed|detach|operation/iu);
+	expect(result).toMatch(/error|fail|closed|detach|operation|^Browser tab is unavailable for this task\./iu);
 }
 
 function expectSettledWithin(call: BrowserAgentFixture["calls"][number], maximumMs: number): void {

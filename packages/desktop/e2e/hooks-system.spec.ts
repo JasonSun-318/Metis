@@ -85,6 +85,18 @@ test.describe("Desktop Declarative Hooks System", () => {
 			await page.locator("button.plugins-new-btn").click();
 			await expect(page.getByRole("heading", { name: "New Hook" })).toBeVisible();
 			const dialog = page.getByRole("dialog");
+			// The dialog entrance animation (modal-card-in, 200ms) briefly scales
+			// the dialog, while MenuSelect anchors its popover to the trigger rect
+			// at open time and never recomputes. Wait for the entrance to settle
+			// so popovers measure against the final layout on slower machines.
+			await expect
+				.poll(() =>
+					dialog.evaluate((node) => {
+						const style = getComputedStyle(node);
+						return style.opacity === "1" && (style.transform === "none" || style.transform === "matrix(1, 0, 0, 1, 0, 0)");
+					}),
+				)
+				.toBe(true);
 			await expect(page.getByRole("button", { name: "Protocol", exact: true })).toHaveCount(0);
 			for (const scenario of [
 				{ width: 1200, height: 800, theme: "dark" },
