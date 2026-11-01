@@ -15,6 +15,16 @@ on:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Platform to verify manually
+        type: choice
+        default: all
+        options:
+          - all
+          - macos-26
+          - windows-2025
+          - ubuntu-26.04
 
 permissions:
   contents: read
@@ -24,7 +34,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, windows-2025, ubuntu-26.04]
+        # Push/PR keeps all platforms; manual follow-ups can target one failure.
+        os: ${{ fromJSON(inputs.runner && inputs.runner != 'all' && format('["{0}"]', inputs.runner) || '["macos-26","windows-2025","ubuntu-26.04"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
