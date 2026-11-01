@@ -62,6 +62,23 @@ describe("readDeliveredPreviewBytes", () => {
 		const tooBig = await readDeliveredPreviewBytes(join(dir, `${hugeId}-huge.pdf`), "huge.pdf");
 		expect(tooBig).toEqual({ ok: false, reason: "too-large" });
 	});
+	it("rejects delivery paths through symlinks or Windows junctions", async () => {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "metis-delivery-link-")));
+		roots.push(dir);
+		const target = join(dir, "target");
+		mkdirSync(target);
+		writeFileSync(join(target, "note.pdf"), "%PDF-1.4 secret");
+		const alias = join(dir, "alias");
+		symlinkSync(target, alias, process.platform === "win32" ? "junction" : "dir");
+		expect(await readDeliveredPreviewBytes(join(alias, "note.pdf"), "note.pdf")).toEqual({
+			ok: false,
+			reason: "not-found",
+		});
+		expect(await readDeliveredPreviewBytes(`${target}/../target/note.pdf`, "note.pdf")).toEqual({
+			ok: false,
+			reason: "not-found",
+		});
+	});
 });
 
 describe("readKnowledgePreviewBytes", () => {

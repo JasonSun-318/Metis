@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { realpath as realpathCallback } from "node:fs";
+import { realpath as realpathNative } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { promisify } from "node:util";
 import {
 	type ClientParams,
 	type ClientResult,
@@ -73,6 +75,9 @@ import { readDeliveredPreviewBytes, readKnowledgePreviewBytes } from "./preview-
 import { validateProjectFolderInput } from "./project-folder.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
+
+// Registered roots use the same canonical spelling as realpathSync in App Server.
+const realpath = process.platform === "win32" ? promisify(realpathCallback) : realpathNative;
 
 interface BrokerSupervisor {
 	view(): SupervisorView;

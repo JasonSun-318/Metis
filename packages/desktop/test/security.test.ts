@@ -716,7 +716,7 @@ describe("desktop trust boundaries", () => {
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		try {
-			const original = `${realpathSync(directory)}/result.txt`;
+			const original = join(realpathSync(directory), "result.txt");
 			writeFileSync(original, "Verified");
 			supervisor.request.mockImplementationOnce(async (request) => ({
 				jsonrpc: "2.0",
