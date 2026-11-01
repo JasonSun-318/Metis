@@ -11,7 +11,8 @@
 	overflow: visible;
 	padding: 0;
 	position: relative;
-	z-index: 1;
+	/* Pane tab bars use 50; keep the divider hit area above their edges. */
+	z-index: 51;
 }
 
 .workspace-pane-resizer--column {
