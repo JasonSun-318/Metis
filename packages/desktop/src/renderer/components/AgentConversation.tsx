@@ -279,7 +279,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 					ariaLabel={t("Agent conversation")}
 					appearance={mode}
 					submittedMessageId={
-						receipt?.state === "failed" || receipt?.state === "cancelled" ? undefined : receipt?.messageId
+						receipt?.state === "accepted" || receipt?.state === "delivered" ? receipt.messageId : undefined
 					}
 					activeTurnId={activeTurnId}
 					activeRunId={agent?.currentTask?.taskId}

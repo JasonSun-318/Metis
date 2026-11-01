@@ -345,8 +345,15 @@ for (const kind of ["ask_user", "session_permission_approval"] as const) {
 			await expect(rows(page, "a").getByRole("button", { name: label })).toBeDisabled();
 			await expect(rows(page, "b").getByRole("button", { name: label })).toBeEnabled();
 		}
-		await expect(composer(page, "a")).toHaveAttribute("contenteditable", "false");
-		await expect(composer(page, "b")).toHaveAttribute("contenteditable", "true");
+		// A pending request keeps the draft editable but blocks submission through
+		// the awaiting-interaction gate instead of freezing the editor.
+		await expect(pane(page, "a").locator(".composer")).toHaveClass(/is-awaiting-interaction/);
+		await expect(pane(page, "b").locator(".composer")).not.toHaveClass(/is-awaiting-interaction/);
+		await expect(composer(page, "a")).toHaveAttribute(
+			"data-placeholder",
+			kind === "ask_user" ? "Answer the questions above to continue." : "Approve or reject the action above to continue.",
+		);
+		await composer(page, "a").press("Enter");
 		await rows(page, "a")
 			.locator("button")
 			.evaluateAll((buttons) => {
@@ -358,6 +365,7 @@ for (const kind of ["ask_user", "session_permission_approval"] as const) {
 		expect(calls.messages).toHaveLength(0);
 		await page.evaluate(() => window.__agentQueueFixture.block("a", null));
 		await expect(rows(page, "a").getByRole("button", { name: "Guide with queued message" })).toBeEnabled();
+		await expect(pane(page, "a").locator(".composer")).not.toHaveClass(/is-awaiting-interaction/);
 		await expect(composer(page, "a")).toHaveText("Keep pending-request draft");
 		expect(errors).toEqual([]);
 	});
