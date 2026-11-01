@@ -151,7 +151,7 @@ describe("knowledge force layout", () => {
 		layout.stop();
 	});
 
-	it("keeps a large sparse library finite through the initial warmup", () => {
+	it("keeps a large sparse library finite and settles within bounded ticks", () => {
 		const layout = new KnowledgeGraphLayout();
 		const notes = Array.from({ length: 2000 }, (_, index) => ({ path: `${index}.md`, title: `${index}`, links: [] }));
 		layout.update({
@@ -159,7 +159,7 @@ describe("knowledge force layout", () => {
 			edges: notes.slice(1).map((note, index) => ({ source: notes[index]!.path, target: note.path })),
 			warnings: [],
 		});
-		layout.step(60);
+		expect(layout.step(180)).toBe(false);
 		expect(layout.nodes).toHaveLength(2000);
 		expect(layout.nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y))).toBe(true);
 		expect(layout.edges).toHaveLength(1999);

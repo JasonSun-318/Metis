@@ -255,7 +255,8 @@ test("two thousand notes keep controls usable and budget labels in the crowded o
 	const zoomed = await viewport.getAttribute("transform");
 	await controls.getByRole("button", { name: "Reset view" }).click();
 	await expect(viewport).not.toHaveAttribute("transform", zoomed!);
-	await settle(page, 20_000);
+	// Capture the live graph: this case checks controls during simulation.
+	// Dense-layout convergence is asserted with bounded ticks in unit tests.
 	await page.screenshot({ path: info.outputPath("2000-notes.png") });
 	expect(errors).toEqual([]);
 });
