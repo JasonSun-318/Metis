@@ -347,6 +347,9 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	attachActor(session: AgentSession): () => void {
+		// Interrupt rebuilds a child's session before its final disposal. During
+		// parent unload, that replacement must not register another actor.
+		if (this.unloaded) return () => undefined;
 		const sessionId = session.sessionManager.getSessionId();
 		if (this.actors.has(sessionId)) {
 			throw new Error(`Agent actor is already attached: ${sessionId}`);
@@ -1364,8 +1367,10 @@ export class SubagentManager implements SubagentManagerApi {
 				await this.starting.get(record.agentId)?.ready;
 				const hot = this.hot.get(record.agentId);
 				if (hot) {
-					hot.stopReason = reason;
-					await hot.runtime.interrupt({ requestId: this.requestId("unload", record.agentId) });
+					if (hot.accepting) {
+						hot.stopReason = reason;
+						await hot.runtime.interrupt({ requestId: this.requestId("unload", record.agentId) });
+					}
 					await hot.completion;
 					if (hot.lifecycleError) errors.push(hot.lifecycleError);
 				}

@@ -1,10 +1,10 @@
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION, type ServerRpcRequest } from "@metis/app-protocol";
-import { getSessionAgentDir, SessionManager } from "@metis/coding-agent/host";
+import { AgentStore, getDefaultSessionDir, getSessionAgentDir, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
@@ -72,302 +72,335 @@ describe("agent runtime e2e", () => {
 		for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
-	it("streams a nested child through the real app server and completes the user lifecycle", async () => {
-		let rootSpawned = false;
-		let coordinatorSpawned = false;
-		let leafToolRequested = false;
-		let leafResponse: ServerResponse | undefined;
-		let reviewerWritePath = "";
-		const provider = createServer(async (request, response) => {
-			let raw = "";
-			for await (const part of request) raw += part.toString();
-			const body = JSON.parse(raw) as { messages?: unknown[] };
-			const messages = (body.messages ?? []) as Array<{ role?: string; content?: unknown }>;
-			const latestUser = [...messages].reverse().find((message) => message.role === "user")?.content;
-			const userText = JSON.stringify(latestUser ?? "");
-			const isCoordinator = userText.includes("Coordinate a nested review");
-			const isLeaf = userText.includes("Inspect the nested boundary");
+	it.each(["complete", "shutdown-running"] as const)(
+		"nested lifecycle: %s",
+		async (scenario) => {
+			let rootSpawned = false;
+			let coordinatorSpawned = false;
+			let leafToolRequested = false;
+			let leafResponse: ServerResponse | undefined;
+			let reviewerWritePath = "";
+			const provider = createServer(async (request, response) => {
+				let raw = "";
+				for await (const part of request) raw += part.toString();
+				const body = JSON.parse(raw) as { messages?: unknown[] };
+				const messages = (body.messages ?? []) as Array<{ role?: string; content?: unknown }>;
+				const latestUser = [...messages].reverse().find((message) => message.role === "user")?.content;
+				const userText = JSON.stringify(latestUser ?? "");
+				const isCoordinator = userText.includes("Coordinate a nested review");
+				const isLeaf = userText.includes("Inspect the nested boundary");
 
-			if (isLeaf && !leafToolRequested) {
-				leafToolRequested = true;
-				leafResponse = response;
-				beginStream(response);
-				chunk(response, { role: "assistant", content: "leaf-live" });
-				chunk(response, {
-					tool_calls: [
-						{
-							index: 0,
-							id: "call-reviewer-write",
-							type: "function",
-							function: {
-								name: "bash",
-								arguments: JSON.stringify({ command: `printf blocked > ${reviewerWritePath}` }),
-							},
-						},
-					],
-				});
-				return;
-			}
-			if (isLeaf) {
-				finishText(response, "Reviewer write attempt was contained.");
-				return;
-			}
-			if (isCoordinator && !coordinatorSpawned) {
-				coordinatorSpawned = true;
-				finishToolCall(response, "call-leaf", "spawn_agent", {
-					name: "Leaf",
-					task: "Inspect the nested boundary",
-					agentType: "reviewer",
-				});
-				return;
-			}
-			if (isCoordinator) {
-				finishText(response, "Coordinator delegated the nested check.");
-				return;
-			}
-			if (!rootSpawned) {
-				rootSpawned = true;
-				finishToolCall(response, "call-coordinator", "spawn_agent", {
-					name: "Coordinator",
-					task: "Coordinate a nested review",
-					agentType: "worker",
-				});
-				return;
-			}
-			finishText(response, "Root accepted the asynchronous handoff.");
-		});
-		const providerPort = await listen(provider);
-		const root = mkdtempSync(join(tmpdir(), "app-server-agent-e2e-"));
-		temporaryRoots.push(root);
-		const agentDir = join(root, "agent");
-		const projectDir = join(root, "project");
-		const sessionsRoot = join(agentDir, "sessions");
-		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(projectDir, { recursive: true });
-		reviewerWritePath = join(projectDir, "reviewer-write.txt");
-		writeFileSync(
-			join(agentDir, "models.json"),
-			JSON.stringify({
-				providers: {
-					local: {
-						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-						apiKey: "test-key",
-						api: "openai-completions",
-						models: [
+				if (isLeaf && !leafToolRequested) {
+					leafToolRequested = true;
+					leafResponse = response;
+					beginStream(response);
+					chunk(response, { role: "assistant", content: "leaf-live" });
+					chunk(response, {
+						tool_calls: [
 							{
-								id: "agent-e2e",
-								name: "Agent E2E",
-								contextWindow: 32_000,
-								maxTokens: 1_024,
-								reasoning: false,
+								index: 0,
+								id: "call-reviewer-write",
+								type: "function",
+								function: {
+									name: "bash",
+									arguments: JSON.stringify({ command: `printf blocked > ${reviewerWritePath}` }),
+								},
 							},
 						],
+					});
+					return;
+				}
+				if (isLeaf) {
+					finishText(response, "Reviewer write attempt was contained.");
+					return;
+				}
+				if (isCoordinator && !coordinatorSpawned) {
+					coordinatorSpawned = true;
+					finishToolCall(response, "call-leaf", "spawn_agent", {
+						name: "Leaf",
+						task: "Inspect the nested boundary",
+						agentType: "reviewer",
+					});
+					return;
+				}
+				if (isCoordinator) {
+					finishText(response, "Coordinator delegated the nested check.");
+					return;
+				}
+				if (!rootSpawned) {
+					rootSpawned = true;
+					finishToolCall(response, "call-coordinator", "spawn_agent", {
+						name: "Coordinator",
+						task: "Coordinate a nested review",
+						agentType: "worker",
+					});
+					return;
+				}
+				finishText(response, "Root accepted the asynchronous handoff.");
+			});
+			const providerPort = await listen(provider);
+			const root = mkdtempSync(join(tmpdir(), "app-server-agent-e2e-"));
+			temporaryRoots.push(root);
+			const agentDir = join(root, "agent");
+			const projectDir = join(root, "project");
+			const sessionsRoot = join(agentDir, "sessions");
+			mkdirSync(agentDir, { recursive: true });
+			mkdirSync(projectDir, { recursive: true });
+			reviewerWritePath = join(projectDir, "reviewer-write.txt");
+			writeFileSync(
+				join(agentDir, "models.json"),
+				JSON.stringify({
+					providers: {
+						local: {
+							baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+							apiKey: "test-key",
+							api: "openai-completions",
+							models: [
+								{
+									id: "agent-e2e",
+									name: "Agent E2E",
+									contextWindow: 32_000,
+									maxTokens: 1_024,
+									reasoning: false,
+								},
+							],
+						},
 					},
-				},
-			}),
-		);
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ defaultProvider: "local", defaultModel: "agent-e2e", retry: { enabled: false } }),
-		);
-
-		const server = await AppServer.create({
-			agentDir,
-			sessionsRoot,
-			titleGenerator: { generate: async () => undefined },
-		});
-		const connection = server.connect();
-		const outbound: ConnectionOutboundEnvelope[] = [];
-		let permissionApprovals = 0;
-		connection.onMessage((message) => {
-			outbound.push(message);
-			if (!("method" in message) || message.method !== "interaction/request") return;
-			const request = message as ServerRpcRequest<"interaction/request">;
-			const interaction = request.params.interaction;
-			if (interaction.kind !== "session_permission_approval") return;
-			permissionApprovals += 1;
-			connection.handleServerResponse({
-				jsonrpc: "2.0",
-				id: request.id,
-				result: {
-					interactionId: interaction.interactionId,
-					kind: "session_permission_approval",
-					choice: "allow-once",
-				},
-			});
-		});
-		const events = () =>
-			outbound.flatMap((message) =>
-				"method" in message && message.method === "connection/events" ? message.params.events : [],
+				}),
 			);
-		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
-			rmSync(path, { force: true });
-			return { ok: true, method: "unlink" };
-		});
-		try {
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "initialize",
-				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
-			});
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "create",
-				method: "session/create",
-				params: { requestId: SESSION_ID, cwd: projectDir, permissionPreset: "full" },
-			});
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "open",
-				method: "session/open",
-				params: { sessionId: SESSION_ID },
-			});
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "subscribe",
-				method: "session/subscribe",
-				params: { sessionId: SESSION_ID },
-			});
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "turn",
-				method: "turn/start",
-				params: { sessionId: SESSION_ID, requestId: TURN_ID, text: "Delegate a nested review." },
-			});
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ defaultProvider: "local", defaultModel: "agent-e2e", retry: { enabled: false } }),
+			);
 
-			await expect.poll(() => leafResponse !== undefined, { timeout: 10_000 }).toBe(true);
-			let agents: Array<{
-				agentId: string;
-				name: string;
-				parentSessionId: string;
-				depth: number;
-				status: string;
-			}> = [];
-			await expect
-				.poll(async () => {
-					const response = await connection.handle({
-						jsonrpc: "2.0",
-						id: "agents-running",
-						method: "agent/list",
-						params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
-					});
-					if (!("result" in response) || !("agents" in response.result)) return response;
-					agents = response.result.agents;
-					return agents.map((agent) => ({ name: agent.name, depth: agent.depth, status: agent.status }));
-				})
-				.toEqual(
-					expect.arrayContaining([
-						expect.objectContaining({ name: "Coordinator", depth: 1 }),
-						expect.objectContaining({ name: "Leaf", depth: 2, status: "running" }),
-					]),
+			const server = await AppServer.create({
+				agentDir,
+				sessionsRoot,
+				titleGenerator: { generate: async () => undefined },
+			});
+			const connection = server.connect();
+			const outbound: ConnectionOutboundEnvelope[] = [];
+			let permissionApprovals = 0;
+			connection.onMessage((message) => {
+				outbound.push(message);
+				if (!("method" in message) || message.method !== "interaction/request") return;
+				const request = message as ServerRpcRequest<"interaction/request">;
+				const interaction = request.params.interaction;
+				if (interaction.kind !== "session_permission_approval") return;
+				permissionApprovals += 1;
+				connection.handleServerResponse({
+					jsonrpc: "2.0",
+					id: request.id,
+					result: {
+						interactionId: interaction.interactionId,
+						kind: "session_permission_approval",
+						choice: "allow-once",
+					},
+				});
+			});
+			const events = () =>
+				outbound.flatMap((message) =>
+					"method" in message && message.method === "connection/events" ? message.params.events : [],
 				);
-			const coordinator = agents.find((agent) => agent.name === "Coordinator")!;
-			const leaf = agents.find((agent) => agent.name === "Leaf")!;
-			expect(leaf.parentSessionId).toBe(coordinator.agentId);
-			await expect
-				.poll(() => events().some((event) => event.type === "agent/item/delta" && event.agentId === leaf.agentId))
-				.toBe(true);
-
-			const liveRead = await connection.handle({
-				jsonrpc: "2.0",
-				id: "read-live",
-				method: "agent/readItems",
-				params: { sessionId: SESSION_ID, agentId: leaf.agentId, limit: 100 },
+			const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+				rmSync(path, { force: true });
+				return { ok: true, method: "unlink" };
 			});
-			expect(JSON.stringify(liveRead)).toContain("leaf-live");
+			try {
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "initialize",
+					method: "initialize",
+					params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+				});
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "create",
+					method: "session/create",
+					params: { requestId: SESSION_ID, cwd: projectDir, permissionPreset: "full" },
+				});
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "open",
+					method: "session/open",
+					params: { sessionId: SESSION_ID },
+				});
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "subscribe",
+					method: "session/subscribe",
+					params: { sessionId: SESSION_ID },
+				});
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "turn",
+					method: "turn/start",
+					params: { sessionId: SESSION_ID, requestId: TURN_ID, text: "Delegate a nested review." },
+				});
 
-			// A settled parent remains independently idle in the UI, while its live
-			// descendants still protect the shared runtime from idle-only changes.
-			await expect
-				.poll(async () => {
-					const response = await connection.handle({
-						jsonrpc: "2.0",
-						id: "root-idle-with-live-child",
-						method: "session/open",
-						params: { sessionId: SESSION_ID },
-					});
-					if (!("result" in response) || !("session" in response.result)) return undefined;
-					const session = response.result.session;
-					return session && "state" in session ? session.state : undefined;
-				})
-				.toBe("idle");
-			const modeChange = await connection.handle({
-				jsonrpc: "2.0",
-				id: "mode-change-with-live-child",
-				method: "session/setCollaborationMode",
-				params: {
-					sessionId: SESSION_ID,
-					requestId: "00000000-0000-4000-8000-000000000299",
-					collaborationMode: "plan",
-				},
-			});
-			expect(modeChange).toMatchObject({ error: { code: -32004 } });
-
-			chunk(leafResponse!, {}, "tool_calls");
-			leafResponse!.end("data: [DONE]\n\n");
-			leafResponse = undefined;
-			// Leaf completion includes its tool result, model response, and the
-			// coordinator's receipt turn before both durable statuses can settle.
-			await expect
-				.poll(
-					async () => {
+				await expect.poll(() => leafResponse !== undefined, { timeout: 10_000 }).toBe(true);
+				let agents: Array<{
+					agentId: string;
+					name: string;
+					parentSessionId: string;
+					depth: number;
+					status: string;
+				}> = [];
+				await expect
+					.poll(async () => {
 						const response = await connection.handle({
 							jsonrpc: "2.0",
-							id: "agents-done",
+							id: "agents-running",
 							method: "agent/list",
 							params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
 						});
-						if (!("result" in response) || !("agents" in response.result)) return [];
-						return response.result.agents.map((agent) => agent.status);
-					},
-					{ timeout: 15_000 },
-				)
-				.toEqual(["done", "done"]);
-			expect(permissionApprovals).toBe(0);
-			expect(existsSync(reviewerWritePath)).toBe(false);
+						if (!("result" in response) || !("agents" in response.result)) return response;
+						agents = response.result.agents;
+						return agents.map((agent) => ({ name: agent.name, depth: agent.depth, status: agent.status }));
+					})
+					.toEqual(
+						expect.arrayContaining([
+							expect.objectContaining({ name: "Coordinator", depth: 1 }),
+							expect.objectContaining({ name: "Leaf", depth: 2, status: "running" }),
+						]),
+					);
+				const coordinator = agents.find((agent) => agent.name === "Coordinator")!;
+				const leaf = agents.find((agent) => agent.name === "Leaf")!;
+				expect(leaf.parentSessionId).toBe(coordinator.agentId);
+				await expect
+					.poll(() =>
+						events().some((event) => event.type === "agent/item/delta" && event.agentId === leaf.agentId),
+					)
+					.toBe(true);
 
-			const archived = await connection.handle({
-				jsonrpc: "2.0",
-				id: "archive-leaf",
-				method: "agent/archive",
-				params: {
-					sessionId: SESSION_ID,
-					agentId: leaf.agentId,
-					archived: true,
-					requestId: "00000000-0000-4000-8000-000000000203",
-				},
-			});
-			expect(archived).toMatchObject({ result: { agent: { agentId: leaf.agentId, archived: true } } });
-			const deleted = await connection.handle({
-				jsonrpc: "2.0",
-				id: "delete-tree",
-				method: "agent/delete",
-				params: {
-					sessionId: SESSION_ID,
-					agentId: coordinator.agentId,
-					requestId: "00000000-0000-4000-8000-000000000204",
-				},
-			});
-			expect(deleted).toMatchObject({
-				result: { agentId: coordinator.agentId, status: "deleted" },
-			});
-			expect(events()).toContainEqual(
-				expect.objectContaining({
-					type: "agent/deleted",
-					agentId: coordinator.agentId,
-					deletedAgentIds: expect.arrayContaining([coordinator.agentId, leaf.agentId]),
-				}),
-			);
-		} finally {
-			deleteSession.mockRestore();
-			leafResponse?.end("data: [DONE]\n\n");
-			server.beginShutdown();
-			await server.waitForShutdown();
-			provider.closeAllConnections();
-			await new Promise<void>((resolve) => provider.close(() => resolve()));
-		}
-	}, 30_000);
+				const liveRead = await connection.handle({
+					jsonrpc: "2.0",
+					id: "read-live",
+					method: "agent/readItems",
+					params: { sessionId: SESSION_ID, agentId: leaf.agentId, limit: 100 },
+				});
+				expect(JSON.stringify(liveRead)).toContain("leaf-live");
+				if (scenario === "shutdown-running") {
+					server.beginShutdown();
+					await server.waitForShutdown();
+					const canonicalCwd = realpathSync(projectDir);
+					const [persisted] = await SessionManager.list(
+						canonicalCwd,
+						getDefaultSessionDir(canonicalCwd, agentDir),
+					);
+					expect(persisted?.id).toBe(SESSION_ID);
+					const store = new AgentStore(SessionManager.openReadOnly(persisted!.path), agentDir);
+					expect(
+						store
+							.readJournal(leaf.agentId)
+							.filter((entry) => entry.type === "agent_task")
+							.at(-1),
+					).toMatchObject({
+						status: "stopped",
+						reason: "parent_unloaded",
+					});
+					return;
+				}
+
+				// A settled parent remains independently idle in the UI, while its live
+				// descendants still protect the shared runtime from idle-only changes.
+				await expect
+					.poll(async () => {
+						const response = await connection.handle({
+							jsonrpc: "2.0",
+							id: "root-idle-with-live-child",
+							method: "session/open",
+							params: { sessionId: SESSION_ID },
+						});
+						if (!("result" in response) || !("session" in response.result)) return undefined;
+						const session = response.result.session;
+						return session && "state" in session ? session.state : undefined;
+					})
+					.toBe("idle");
+				const modeChange = await connection.handle({
+					jsonrpc: "2.0",
+					id: "mode-change-with-live-child",
+					method: "session/setCollaborationMode",
+					params: {
+						sessionId: SESSION_ID,
+						requestId: "00000000-0000-4000-8000-000000000299",
+						collaborationMode: "plan",
+					},
+				});
+				expect(modeChange).toMatchObject({ error: { code: -32004 } });
+
+				chunk(leafResponse!, {}, "tool_calls");
+				leafResponse!.end("data: [DONE]\n\n");
+				leafResponse = undefined;
+				// Leaf completion includes its tool result, model response, and the
+				// coordinator's receipt turn before both durable statuses can settle.
+				await expect
+					.poll(
+						async () => {
+							const response = await connection.handle({
+								jsonrpc: "2.0",
+								id: "agents-done",
+								method: "agent/list",
+								params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
+							});
+							if (!("result" in response) || !("agents" in response.result)) return [];
+							return response.result.agents.map((agent) => agent.status);
+						},
+						{ timeout: 15_000 },
+					)
+					.toEqual(["done", "done"]);
+				expect(permissionApprovals).toBe(0);
+				expect(existsSync(reviewerWritePath)).toBe(false);
+
+				const archived = await connection.handle({
+					jsonrpc: "2.0",
+					id: "archive-leaf",
+					method: "agent/archive",
+					params: {
+						sessionId: SESSION_ID,
+						agentId: leaf.agentId,
+						archived: true,
+						requestId: "00000000-0000-4000-8000-000000000203",
+					},
+				});
+				expect(archived).toMatchObject({ result: { agent: { agentId: leaf.agentId, archived: true } } });
+				const deleted = await connection.handle({
+					jsonrpc: "2.0",
+					id: "delete-tree",
+					method: "agent/delete",
+					params: {
+						sessionId: SESSION_ID,
+						agentId: coordinator.agentId,
+						requestId: "00000000-0000-4000-8000-000000000204",
+					},
+				});
+				expect(deleted).toMatchObject({
+					result: { agentId: coordinator.agentId, status: "deleted" },
+				});
+				expect(events()).toContainEqual(
+					expect.objectContaining({
+						type: "agent/deleted",
+						agentId: coordinator.agentId,
+						deletedAgentIds: expect.arrayContaining([coordinator.agentId, leaf.agentId]),
+					}),
+				);
+			} catch (error) {
+				console.dir(error, { depth: 12 });
+				throw error;
+			} finally {
+				deleteSession.mockRestore();
+				leafResponse?.end("data: [DONE]\n\n");
+				server.beginShutdown();
+				await server.waitForShutdown().catch((error: unknown) => {
+					console.dir(error, { depth: 12 });
+					throw error;
+				});
+				provider.closeAllConnections();
+				await new Promise<void>((resolve) => provider.close(() => resolve()));
+			}
+		},
+		30_000,
+	);
 
 	it("pages a 105-agent durable tree and replays an agent mutation exactly once", async () => {
 		const root = mkdtempSync(join(tmpdir(), "app-server-agent-pagination-e2e-"));

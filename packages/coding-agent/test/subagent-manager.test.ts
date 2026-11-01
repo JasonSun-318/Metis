@@ -344,6 +344,35 @@ async function reopenHarness(harness: Harness): Promise<Harness> {
 }
 
 describe("SubagentManager", () => {
+	it("waits for a settled child's disposal without interrupting its closing runtime", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Settled worker",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const runtime = harness.runtimes[0]!;
+		const disposal = deferred();
+		runtime.disposeGate = disposal.promise;
+		runtime.session.settle("done");
+		await vi.waitFor(() => expect(runtime.disposeStarted).toBe(true));
+		const interrupt = vi.spyOn(runtime, "interrupt").mockRejectedValue(new Error("Runtime is disposing"));
+		try {
+			const unloaded = harness.manager.unload("parent_unloaded");
+			disposal.resolve();
+			await expect(unloaded).resolves.toBeUndefined();
+			expect(interrupt).not.toHaveBeenCalled();
+			expect(runtime.disposed).toBe(true);
+			expect(
+				new AgentStore(harness.parentManager, join(harness.root, "agent")).listTasks(child.agentId)[0]?.status,
+			).toBe("done");
+		} finally {
+			interrupt.mockRestore();
+			disposal.resolve();
+		}
+	});
+
 	it("recovers and unloads cold agents without rescanning the tree for each journal", async () => {
 		const harness = setup();
 		for (let index = 0; index < 4; index++) {
