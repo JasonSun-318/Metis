@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -58,7 +58,10 @@ describe("readDeliveredPreviewBytes", () => {
 		}
 
 		const hugeId = "cccccccccccccccc";
-		writeFileSync(join(dir, `${hugeId}-huge.pdf`), Buffer.alloc(PREVIEW_MAX_BYTES + 1));
+		const hugePath = join(dir, `${hugeId}-huge.pdf`);
+		writeFileSync(hugePath, "");
+		// The boundary is the logical file size; no 50 MiB payload needs writing.
+		truncateSync(hugePath, PREVIEW_MAX_BYTES + 1);
 		const tooBig = await readDeliveredPreviewBytes(join(dir, `${hugeId}-huge.pdf`), "huge.pdf");
 		expect(tooBig).toEqual({ ok: false, reason: "too-large" });
 	});

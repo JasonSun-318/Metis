@@ -151,6 +151,7 @@ describe("knowledge force layout", () => {
 		layout.stop();
 	});
 
+	// Keep the 2,000-node/180-tick convergence contract independent of CI CPU speed.
 	it("keeps a large sparse library finite and settles within bounded ticks", () => {
 		const layout = new KnowledgeGraphLayout();
 		const notes = Array.from({ length: 2000 }, (_, index) => ({ path: `${index}.md`, title: `${index}`, links: [] }));
@@ -164,7 +165,7 @@ describe("knowledge force layout", () => {
 		expect(layout.nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y))).toBe(true);
 		expect(layout.edges).toHaveLength(1999);
 		layout.stop();
-	});
+	}, 15_000);
 
 	it.each([
 		{ width: 280, height: 780 },

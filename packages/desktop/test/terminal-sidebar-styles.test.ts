@@ -3,16 +3,21 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TERMINAL_THEMES } from "../src/renderer/components/TerminalPanel.tsx";
 
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 const tokens = readFileSync(path.join(process.cwd(), "src/renderer/styles/tokens.css"), "utf8");
 
-function rule(selector: string): CSSStyleDeclaration {
-	const style = document.createElement("style");
+const style = document.createElement("style");
+beforeAll(() => {
+	// All assertions read the same immutable stylesheet; parse it once per fixture.
 	style.textContent = css;
-	document.head.replaceChildren(style);
+	document.head.append(style);
+});
+afterAll(() => style.remove());
+
+function rule(selector: string): CSSStyleDeclaration {
 	const rules = Array.from(style.sheet?.cssRules ?? []) as CSSStyleRule[];
 	const match = rules.find((candidate) => candidate.selectorText === selector);
 	if (!match) throw new Error(`Missing CSS rule: ${selector}`);
