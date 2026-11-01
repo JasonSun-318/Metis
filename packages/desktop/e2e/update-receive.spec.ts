@@ -175,6 +175,11 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 			await expect(checkButton).toContainText(updateState.version);
 			await expect(checkButton).toBeEnabled();
 			await expect(toast).not.toBeVisible();
+		} else if (process.platform === "linux") {
+			// updater.updateTarget has no Linux target, so the packaged Linux build
+			// intentionally reports an unsupported manual check; assert that exact
+			// feedback instead of requiring a successful check.
+			await expect(toast).toHaveText(/^(不支持在此构建中检查更新|Update checks are not supported in this build)$/u);
 		} else {
 			await expect(toast).toHaveText(/^(已是最新版本|Metis is up to date)$/u);
 		}

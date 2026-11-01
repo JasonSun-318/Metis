@@ -4,23 +4,52 @@ import { launchPermissionApp } from "./fixtures/permission-app.ts";
 
 test.describe.configure({ timeout: 180_000 });
 
+/**
+ * Disclosure and tab-panel heights animate through CSS transitions
+ * (`::details-content` block-size and `.model-provider-section` block-size)
+ * that Chrome does not expose through getAnimations(), so they cannot be
+ * paused and seeked like element animations. The transition timeline only
+ * advances on rendered frames, which makes a 220ms token produce two or three
+ * samples under a software renderer. Stretch the product's own
+ * --motion-duration-switch for the sample window instead: the real transition
+ * and easing still run, but every frame in the window sees an intermediate
+ * height regardless of the achieved frame rate.
+ */
+const SLOW_MOTION_MS = 1_000;
+const SLOW_MOTION_WINDOW_MS = SLOW_MOTION_MS + 120;
+
 async function sampleDisclosure(row: Locator, reverse = false) {
-	return row.evaluate(async (element, reverse) => {
-		const summary = element.querySelector("summary")!;
-		const samples = [element.getBoundingClientRect().height];
-		summary.click();
-		const start = performance.now();
-		let reversed = false;
-		do {
-			await new Promise(requestAnimationFrame);
-			samples.push(element.getBoundingClientRect().height);
-			if (reverse && !reversed && performance.now() - start > 65) {
+	return row.evaluate(
+		async (element, options) => {
+			const dialog = element.closest<HTMLElement>(".model-provider-dialog");
+			const previous = dialog?.style.getPropertyValue("--motion-duration-switch") ?? "";
+			dialog?.style.setProperty("--motion-duration-switch", `${options.duration}ms`);
+			try {
+				const summary = element.querySelector<HTMLElement>("summary")!;
+				const samples = [element.getBoundingClientRect().height];
 				summary.click();
-				reversed = true;
+				const start = performance.now();
+				let reversedAt: number | null = null;
+				do {
+					await new Promise(requestAnimationFrame);
+					samples.push(element.getBoundingClientRect().height);
+					if (options.reverse && reversedAt === null && performance.now() - start > 65) {
+						summary.click();
+						reversedAt = performance.now();
+					}
+					// A reverse click can land well after 65ms on a slow renderer, so give
+					// the closing transition a full window from the click that started it.
+				} while (performance.now() < (reversedAt ?? start) + options.window);
+				return samples;
+			} finally {
+				if (dialog) {
+					if (previous) dialog.style.setProperty("--motion-duration-switch", previous);
+					else dialog.style.removeProperty("--motion-duration-switch");
+				}
 			}
-		} while (performance.now() - start < 360);
-		return samples;
-	}, reverse);
+		},
+		{ reverse, duration: SLOW_MOTION_MS, window: SLOW_MOTION_WINDOW_MS },
+	);
 }
 
 function expectIntermediateFrames(samples: number[]) {
@@ -167,17 +196,29 @@ for (const theme of ["dark", "light"] as const) {
 			await expect(page.locator("html")).toHaveAttribute("data-motion", "full");
 			await sampleDisclosure(modelRow);
 			await dialog.getByLabel("显示名称", { exact: true }).first().fill("已编辑的模型");
-			const switching = await dialog.getByRole("tab", { name: "连接", exact: true }).evaluate(async (button) => {
-				const dialog = button.closest("dialog")!;
-				const samples = [dialog.getBoundingClientRect().height];
-				(button as HTMLButtonElement).click();
-				const start = performance.now();
-				do {
-					await new Promise(requestAnimationFrame);
-					samples.push(dialog.getBoundingClientRect().height);
-				} while (performance.now() - start < 360);
-				return samples;
-			});
+			const switching = await dialog
+				.getByRole("tab", { name: "连接", exact: true })
+				.evaluate(
+					async (button, options) => {
+						const element = button.closest<HTMLDialogElement>("dialog")!;
+						const previous = element.style.getPropertyValue("--motion-duration-switch");
+						element.style.setProperty("--motion-duration-switch", `${options.duration}ms`);
+						try {
+							const samples = [element.getBoundingClientRect().height];
+							(button as HTMLButtonElement).click();
+							const start = performance.now();
+							do {
+								await new Promise(requestAnimationFrame);
+								samples.push(element.getBoundingClientRect().height);
+							} while (performance.now() - start < options.window);
+							return samples;
+						} finally {
+							if (previous) element.style.setProperty("--motion-duration-switch", previous);
+							else element.style.removeProperty("--motion-duration-switch");
+						}
+					},
+					{ duration: SLOW_MOTION_MS, window: SLOW_MOTION_WINDOW_MS },
+				);
 			expectIntermediateFrames(switching);
 			await dialog.getByRole("tab", { name: "模型", exact: true }).click();
 			await expect(dialog.getByLabel("显示名称", { exact: true }).first()).toHaveValue("已编辑的模型");

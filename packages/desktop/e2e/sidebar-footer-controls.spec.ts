@@ -59,6 +59,45 @@ async function settleMenu(page: Page) {
 		Promise.all(element.getAnimations().map((animation) => animation.finished.catch(() => undefined))),
 	);
 }
+/**
+ * Toggles the menu and samples its live CSS transition at a fixed fraction of
+ * its own duration. Polling computed opacity races the 140/160ms transitions
+ * against CI scheduling, so pause and seek the exported Animation instead; the
+ * returned state is read while the transition is still mid-flight.
+ */
+async function sampleMenuTransition(page: Page) {
+	return account(page).evaluate(async (button) => {
+		button.focus();
+		(button as HTMLButtonElement).click();
+		// React commits the toggle after the native event, so wait a frame before
+		// reading the freshly mounted/updated popover.
+		await new Promise(requestAnimationFrame);
+		const element = document.querySelector<HTMLElement>(".account-menu-popover")!;
+		// Force a style flush so the transition objects exist before inspection.
+		getComputedStyle(element).opacity;
+		const animations = element.getAnimations();
+		for (const animation of animations) {
+			const timing = animation.effect!.getTiming();
+			animation.pause();
+			animation.currentTime = Number(timing.delay) + Number(timing.duration) / 2;
+		}
+		// Inert must reject focus during the exit, not only after it settles.
+		element.querySelector<HTMLButtonElement>("button")?.focus();
+		const state = {
+			animationCount: animations.length,
+			hasMotionKeyframes: animations
+				.flatMap((animation) => (animation.effect as KeyframeEffect).getKeyframes())
+				.some((frame) => frame.opacity || frame.transform),
+			opacity: Number(getComputedStyle(element).opacity),
+			display: getComputedStyle(element).display,
+			ariaHidden: element.getAttribute("aria-hidden"),
+			inert: element.hasAttribute("inert"),
+			focusInside: element.contains(document.activeElement),
+		};
+		for (const animation of animations) animation.finish();
+		return state;
+	});
+}
 async function assertGeometry(page: Page, width: number) {
 	const geometry = await rawMenu(page).evaluate((element) => {
 		const box = element.getBoundingClientRect();
@@ -303,24 +342,19 @@ for (const reduced of ["app", "os"]) {
 
 test("full motion animates entry and exit while closed rows become inert immediately", async ({ page }) => {
 	await page.goto(url);
-	await account(page).click();
-	await expect.poll(() => rawMenu(page).evaluate((element) => {
-		const opacity = Number(getComputedStyle(element).opacity);
-		return opacity > 0 && opacity < 1;
-	})).toBe(true);
-	expect(await rawMenu(page).evaluate((element) => element.getAnimations().flatMap((animation) => (animation.effect as KeyframeEffect).getKeyframes()).some((frame) => frame.opacity || frame.transform))).toBe(true);
-	await settleMenu(page);
-	await account(page).click();
-	await expect(rawMenu(page)).toHaveAttribute("aria-hidden", "true");
-	await expect(rawMenu(page)).toHaveAttribute("inert", "");
-	await expect.poll(() => rawMenu(page).evaluate((element) => {
-		const opacity = Number(getComputedStyle(element).opacity);
-		return opacity > 0 && opacity < 1;
-	})).toBe(true);
-	expect(await rawMenu(page).evaluate((element) => {
-		element.querySelector<HTMLButtonElement>("button")!.focus();
-		return element.contains(document.activeElement);
-	})).toBe(false);
+	const entry = await sampleMenuTransition(page);
+	expect(entry.animationCount).toBeGreaterThan(0);
+	expect(entry.hasMotionKeyframes).toBe(true);
+	expect(entry.opacity).toBeGreaterThan(0);
+	expect(entry.opacity).toBeLessThan(1);
+	const exit = await sampleMenuTransition(page);
+	// Closed rows are inert on the same commit that starts the exit transition.
+	expect(exit.ariaHidden).toBe("true");
+	expect(exit.inert).toBe(true);
+	expect(exit.focusInside).toBe(false);
+	expect(exit.display).toBe("grid");
+	expect(exit.opacity).toBeGreaterThan(0);
+	expect(exit.opacity).toBeLessThan(1);
 	await expect(rawMenu(page)).toHaveCSS("display", "none");
 	await expect(account(page)).toBeFocused();
 });

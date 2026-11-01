@@ -493,18 +493,31 @@ test("content updates preserve entering header and exiting remnant opacity anima
 			async ({ actionSelector, enteringHeader }) => {
 				const root = document.querySelector(".sidebar-list-motion")!;
 				document.querySelector<HTMLButtonElement>(actionSelector)!.click();
-				for (let frame = 0; frame < 2; frame += 1) await new Promise(requestAnimationFrame);
 				const selector = enteringHeader
 					? '[data-sidebar-motion-key="chat:status:running:header"]'
 					: '[data-sidebar-motion-exit][aria-hidden="true"]';
-				const header = root.querySelector<HTMLElement>(selector);
+				// Wait for the animation clock to start rather than assuming a fixed
+				// frame count: under CI load the second frame can still be time 0.
+				const deadline = performance.now() + 1_000;
+				let header: HTMLElement | null = null;
+				let animation: Animation | undefined;
+				while (performance.now() < deadline) {
+					header ??= root.querySelector<HTMLElement>(selector);
+					animation = header
+						?.getAnimations()
+						.find((effect) =>
+							(effect.effect as KeyframeEffect).getKeyframes().some((keyframe) => keyframe.opacity !== undefined),
+						);
+					if (animation && animation.startTime !== null) break;
+					await new Promise(requestAnimationFrame);
+				}
 				if (!header) throw new Error("Expected a real entering header or exiting remnant");
-				const animation = header
-					.getAnimations()
-					.find((effect) =>
-						(effect.effect as KeyframeEffect).getKeyframes().some((keyframe) => keyframe.opacity !== undefined),
-					);
-				if (!animation) throw new Error("Expected a real opacity animation");
+				if (!animation || animation.startTime === null) throw new Error("Expected a real running opacity animation");
+				// Pause and seek the real animation so a slow frame cannot finish it
+				// between the content update and the continuity assertions.
+				const timing = animation.effect!.getTiming();
+				animation.pause();
+				animation.currentTime = Number(timing.delay) + Number(timing.duration) * 0.25;
 				const before = {
 					time: Number(animation.currentTime),
 					start: animation.startTime,
@@ -512,7 +525,8 @@ test("content updates preserve entering header and exiting remnant opacity anima
 				};
 				document.querySelector<HTMLButtonElement>('[data-testid="content-update"]')!.click();
 				await new Promise(requestAnimationFrame);
-				return {
+				animation.currentTime = Number(timing.delay) + Number(timing.duration) * 0.5;
+				const result = {
 					before,
 					after: {
 						time: Number(animation.currentTime),
@@ -523,6 +537,8 @@ test("content updates preserve entering header and exiting remnant opacity anima
 					sameAnimation: header.getAnimations().includes(animation),
 					connected: header.isConnected,
 				};
+				animation.finish();
+				return result;
 			},
 			{ actionSelector: `[data-testid="${action}"]`, enteringHeader: entering },
 		);

@@ -227,9 +227,12 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			const originalViewport = page.viewportSize()!;
 			for (const width of [1200, 720]) {
 				await page.setViewportSize({ width, height: 800 });
-				const toggle = (await installedRow.locator(".plugins-toggle-btn").boundingBox())!;
-				const manage = (await installedRow.locator(".plugins-inspect-action-btn").boundingBox())!;
-				const row = (await installedRow.boundingBox())!;
+				// Read one layout snapshot; resize/reflow can occur between CDP calls.
+				const { toggle, manage, row } = await installedRow.evaluate((element) => ({
+					toggle: element.querySelector(".plugins-toggle-btn")!.getBoundingClientRect().toJSON(),
+					manage: element.querySelector(".plugins-inspect-action-btn")!.getBoundingClientRect().toJSON(),
+					row: element.getBoundingClientRect().toJSON(),
+				}));
 				expect(Math.abs(toggle.y - manage.y), "Card buttons share a top edge").toBeLessThanOrEqual(1);
 				expect(toggle.height).toBe(manage.height);
 				expect(manage.x - toggle.x - toggle.width, "Card buttons have an 8px gap").toBeGreaterThanOrEqual(8);

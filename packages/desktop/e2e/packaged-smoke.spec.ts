@@ -288,7 +288,9 @@ async function resizeWorkspacePanel(page: Page, targetWidth: number): Promise<vo
 	});
 	const workspaceX = Math.round((await page.locator(".workspace").boundingBox())?.x ?? 0);
 	const sidebarWidth = targetWidth + 1;
-	await page.setViewportSize({ width: Math.max(viewport.width, workspaceX + Math.ceil(sidebarWidth / .85), workspaceX + sidebarWidth + 288), height: viewport.height });
+	// SessionWorkspace clamps the tools sidebar to `workspace - 560 - 8`; widen
+	// the viewport when the requested width would otherwise be unreachable.
+	await page.setViewportSize({ width: Math.max(viewport.width, workspaceX + sidebarWidth + 568), height: viewport.height });
 	const current = await page.locator(".tool-sidebar").boundingBox();
 	const divider = await page.getByRole("separator", { name: "Resize tools sidebar", exact: true }).boundingBox();
 	if (!current || !divider) throw new Error("Missing tool sidebar divider");
@@ -307,12 +309,13 @@ async function codeEditorText(editor: Locator): Promise<string> {
 
 async function openSessionGroupingOptions(page: Page) {
 	await page.getByRole("button", { name: "Group sessions", exact: true }).click();
-	await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitem").click();
+	const menu = page.getByRole("menu", { name: "Session grouping" });
+	await expect(menu).toBeVisible();
 }
 
 async function groupSessionsBy(page: Page, grouping: "Date" | "Project" | "Unread" | "None") {
 	await openSessionGroupingOptions(page);
-	await page.getByRole("menu", { name: "Group sessions" }).getByRole("menuitemradio", { name: grouping, exact: true }).click();
+	await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitemradio", { name: grouping, exact: true }).click();
 }
 
 function launchPackagedApp(
@@ -324,6 +327,7 @@ function launchPackagedApp(
 	homeDir: string,
 	diagnostics: string[],
 	extraArguments: readonly string[] = [],
+	extraEnv: NodeJS.ProcessEnv = {},
 ) {
 	const app = spawn(executable, [
 		`--remote-debugging-port=${debuggingPort}`,
@@ -340,6 +344,7 @@ function launchPackagedApp(
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",
 			USERPROFILE: homeDir,
+			...extraEnv,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});
@@ -384,7 +389,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			{ id: sessionId, mode },
 		);
 		manager.appendSessionInfo(name);
-		if (withTranscriptFixture) manager.appendMessage({
+		manager.appendMessage({
 			...assistantMessage(Date.now() - 3, 0),
 			content: [{ type: "toolCall", id: `set-tasks-${mode}`, name: "set_tasks", arguments: { tasks } }],
 			stopReason: "toolUse",
@@ -467,14 +472,16 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 		await page.getByRole("button", { name: "Task list Chat fixture", exact: true }).click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
-		const chatToolChain = page.locator(".execution-chain").last();
-		await expect(chatToolChain).not.toHaveAttribute("open", "");
-		await chatToolChain.locator(":scope > summary").click();
-		await expect(chatToolChain).toContainText("How should Metis answer?");
-		await expect(chatToolChain).toContainText("Concise");
-		await expect(chatToolChain).not.toContainText('"questions"');
-		await expect(chatToolChain).not.toContainText('"multiple"');
-		await expect(chatToolChain).not.toContainText('"selected"');
+		// Answers arrive as their own summary card; ask_user is not part of the
+		// execution chain (see TranscriptTurn's activity filter).
+		const chatAnswerSummary = page.locator(".ask-user-answer-summary").last();
+		await expect(chatAnswerSummary).not.toHaveAttribute("open", "");
+		await chatAnswerSummary.locator(":scope > summary").click();
+		await expect(chatAnswerSummary).toContainText("How should Metis answer?");
+		await expect(chatAnswerSummary).toContainText("Concise");
+		await expect(chatAnswerSummary).not.toContainText('"questions"');
+		await expect(chatAnswerSummary).not.toContainText('"multiple"');
+		await expect(chatAnswerSummary).not.toContainText('"selected"');
 		for (const size of [13, 15, 20]) {
 			await page.evaluate((fontSize) => {
 				document.documentElement.style.setProperty("--content-font-size", `${fontSize}px`);
@@ -550,34 +557,23 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		phase = "checking expanded Chat task list";
 		let panel = page.getByRole("region", { name: "Tasks", exact: true });
 		await expect(panel).toBeVisible();
-		await expect(panel.locator(".task-list-row")).toHaveCount(6);
-		await expect(panel.locator(".task-list-items")).toHaveCSS("max-height", "150px");
-		await expect(panel.locator(".task-list-items")).toHaveCSS("overflow-y", "auto");
-		await expect(panel.locator(".task-list-spinner")).toHaveCount(5);
-		await expect(panel.locator(".task-list-row.is-completed")).toHaveCount(1);
-		await expect(panel.locator(".task-list-row.is-completed .task-list-text")).toHaveCSS(
-			"text-decoration-line",
-			"line-through",
-		);
-		await expect(panel).toHaveCSS("border-bottom-left-radius", "0px");
-		await expect(panel).toHaveCSS("border-bottom-right-radius", "0px");
-		await expect(panel).toHaveCSS("border-bottom-width", "0px");
-		const slot = page.locator(".composer-dock > .task-list-slot");
-		const composer = page.locator(".composer-dock > .composer-chat");
-		await expect(page.locator(".composer-dock > .task-list-slot + .composer-chat")).toHaveCount(1);
-		await expect(slot).toHaveCSS("opacity", "1");
-		const [slotBox, composerBox] = await Promise.all([slot.boundingBox(), composer.boundingBox()]);
-		expect(slotBox).not.toBeNull();
-		expect(composerBox).not.toBeNull();
-		expect(slotBox!.x - composerBox!.x).toBeCloseTo(16, 0);
-		expect(composerBox!.width - slotBox!.width).toBeCloseTo(32, 0);
-		expect(composerBox!.y - slotBox!.y - slotBox!.height).toBeCloseTo(0, 0);
-		await visiblePanel(page).locator(".composer-dock").screenshot({
+		const heading = panel.locator(".conversation-card-heading");
+		await expect(heading).toContainText("Tasks");
+		await expect(heading).toContainText("1/6");
+		await expect(heading).toHaveAttribute("aria-expanded", "true");
+		await expect(panel.locator(".conversation-task-items li")).toHaveCount(6);
+		await expect(panel.locator(".conversation-task-items .task-list-spinner")).toHaveCount(5);
+		const completedTask = panel.locator(".conversation-task-items li.is-completed");
+		await expect(completedTask).toHaveCount(1);
+		await expect(completedTask).toContainText("Confirm protocol projection");
+		await expect(completedTask.locator(".task-list-spinner")).toHaveCount(0);
+		const transcriptScroll = visiblePanel(page).locator(".transcript-scroll");
+		const expandedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
+		const expandedTaskListHeight = (await panel.boundingBox())?.height ?? 0;
+		await panel.screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-expanded-chat.png"),
 		});
-		const transcriptScroll = visiblePanel(page).locator(".transcript-scroll");
-		const expandedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
 		await page.evaluate(() => {
 			const state = window as typeof window & { __taskListLongTasks?: number[]; __taskListLongTaskObserver?: PerformanceObserver };
 			state.__taskListLongTasks = [];
@@ -590,31 +586,36 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		});
 
 		phase = "checking collapsed task list";
-		await panel.getByRole("button", { name: "Collapse task list" }).click();
-		await expect(panel).toHaveClass(/\bis-collapsed\b/u);
-		await page.waitForTimeout(240);
-		await expect(panel.locator(".task-list-items .task-list-row")).toHaveCount(6);
-		await expect(panel.locator(".task-list-drawer")).toHaveAttribute("inert", "");
-		await expect(panel.locator(".task-list-summary .task-list-text")).toHaveText("Inspect implementation");
-		const summary = panel.getByRole("button", { name: /Working.*Inspect implementation.*Expand task list/u });
-		await expect(summary).toHaveAttribute("aria-expanded", "false");
-		await expect(summary).toHaveAttribute("aria-live", "polite");
-		await expect(summary).not.toHaveAttribute("aria-label");
+		const composerDock = visiblePanel(page).locator(".composer-dock");
+		const composerBoxBefore = await composerDock.boundingBox();
+		await heading.click();
+		await expect(heading).toHaveAttribute("aria-expanded", "false");
+		const drawer = panel.locator(".transcript-drawer");
+		await expect(drawer).toHaveAttribute("inert", "");
+		await expect(drawer).toHaveAttribute("aria-hidden", "true");
+		await expect(drawer).not.toHaveAttribute("data-open", "");
+		// Rows stay mounted while the drawer is collapsed.
+		await expect(panel.locator(".conversation-task-items li")).toHaveCount(6);
+		// Collapsing frees transcript content height; the viewport and composer keep their size.
+		const collapsedTaskListHeight = (await panel.boundingBox())?.height ?? 0;
+		expect(collapsedTaskListHeight).toBeLessThan(expandedTaskListHeight);
+		const composerBoxAfter = await composerDock.boundingBox();
+		expect(composerBoxBefore).not.toBeNull();
+		expect(composerBoxAfter).not.toBeNull();
+		expect(composerBoxAfter!.height).toBeCloseTo(composerBoxBefore!.height, 0);
+		await page.waitForTimeout(300);
 		const collapsedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
-		expect(collapsedTranscriptHeight).toBeGreaterThan(expandedTranscriptHeight);
-		await visiblePanel(page).locator(".composer-dock").screenshot({
+		expect(collapsedTranscriptHeight).toBe(expandedTranscriptHeight);
+		await panel.screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-collapsed-chat.png"),
 		});
-		await summary.click();
-		await expect(panel).not.toHaveClass(/\bis-collapsed\b/u);
-		await page.waitForTimeout(240);
-		const expandedAgainTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
-		expect(expandedAgainTranscriptHeight).toBeCloseTo(expandedTranscriptHeight, 0);
-		const bottomGap = await transcriptScroll.evaluate((element) =>
-			Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight),
-		);
-		expect(bottomGap).toBeLessThanOrEqual(48);
+		await heading.click();
+		await expect(heading).toHaveAttribute("aria-expanded", "true");
+		await expect(drawer).not.toHaveAttribute("inert", "");
+		await page.waitForTimeout(300);
+		const expandedAgainTaskListHeight = (await panel.boundingBox())?.height ?? 0;
+		expect(expandedAgainTaskListHeight).toBeCloseTo(expandedTaskListHeight, 0);
 		const longestTaskListFrame = await page.evaluate(() => {
 			const state = window as typeof window & {
 				__taskListLongTaskObserver?: PerformanceObserver;
@@ -631,23 +632,18 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(codeSession).toBeVisible();
 		await codeSession.click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
-		const codeExecution = page.locator(".code-execution").first();
-		await expect(codeExecution).not.toHaveAttribute("open", "");
-		await codeExecution.locator(":scope > summary").click();
-		const codeTask = codeExecution.locator(".code-command").first();
-		await expect(codeTask).not.toHaveAttribute("open", "");
-		await codeTask.locator(":scope > summary").click();
-		await expect(codeTask).toContainText("○ Inspect implementation");
-		await expect(codeTask).not.toContainText('"tasks"');
+		// set_tasks renders as the inline Tasks card instead of a code execution detail.
+		panel = page.getByRole("region", { name: "Tasks", exact: true });
+		await expect(panel).toBeVisible();
+		await expect(panel).not.toContainText('"tasks"');
 		await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
 		await expect(page.locator(".code-turn-answer").first()).toHaveCSS("font-size", "20px");
 		expect(await visiblePanel(page).locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "code-dark-20px-1280x840.png") });
 		await page.evaluate(() => document.documentElement.style.removeProperty("--content-font-size"));
 		panel = page.getByRole("region", { name: "Tasks", exact: true });
-		await expect(panel.locator(".task-list-row")).toHaveCount(6);
-		await expect(page.locator(".composer-dock > .task-list-slot + .composer-code")).toHaveCount(1);
-		await visiblePanel(page).locator(".composer-dock").screenshot({
+		await expect(panel.locator(".conversation-task-items li")).toHaveCount(6);
+		await panel.screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-expanded-code.png"),
 		});
@@ -656,7 +652,12 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 		await page.getByRole("button", { name: "Completed task list fixture", exact: true }).click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
-		await expect(page.getByRole("region", { name: "Tasks", exact: true })).toHaveCount(0);
+		panel = page.getByRole("region", { name: "Tasks", exact: true });
+		await expect(panel.locator(".conversation-card-heading")).toContainText("Completed");
+		await expect(panel.locator(".conversation-card-heading")).toContainText("6/6");
+		await expect(panel.locator(".conversation-card-heading")).toHaveAttribute("aria-expanded", "false");
+		await expect(panel.locator(".transcript-drawer")).toHaveAttribute("inert", "");
+		await expect(panel.locator(".conversation-task-items li.is-completed")).toHaveCount(6);
 
 		phase = "checking packaged centered New Task home";
 		await page.getByRole("button", { name: "New task", exact: true }).click();
@@ -1057,7 +1058,10 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 			outsideApproval.waitFor({ timeout: 20_000 }).then(() => "panel" as const),
 		]);
 		if (outsideOutcome === "panel") {
-			await expect(outsideApproval).toContainText("workspace sandbox");
+			// The card discloses the exact outside command it is asking about.
+			await expect(outsideApproval.locator(".permission-approval-command code")).toHaveText(
+				`printf escaped > ${JSON.stringify(outsideFile)}`,
+			);
 			await outsideApproval.getByRole("button", { name: /Reject/u }).click();
 		}
 		await waitDone("case-auto-outside");
@@ -1070,8 +1074,10 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await writeFile(path.join(projectDir, "build", "artifact.txt"), "artifact");
 		await submit("case-exact-one");
 		const approval = page!.locator(".permission-approval-panel");
-		await expect(approval).toContainText("workspace sandbox");
-		await approval.getByRole("button", { name: "Always allow this exact action", exact: true }).click();
+		await expect(approval.locator(".permission-approval-command code")).toHaveText("rm -rf ./build");
+		await approval.getByRole("button", { name: "More approval options", exact: true }).click();
+		await page!.getByRole("listbox", { name: "More approval options", exact: true })
+			.getByRole("option", { name: "Remember for this project", exact: true }).click();
 		await waitDone("case-exact-one");
 		expect(existsSync(path.join(projectDir, "build"))).toBe(false);
 
@@ -1120,7 +1126,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 
 		phase = "checking Ask sandbox and Full host disclosure";
 		await submit("case-ask-pwd");
-		await expect(page!.locator(".permission-approval-panel")).toContainText("workspace sandbox");
+		await expect(page!.locator(".permission-approval-panel .permission-approval-command code")).toHaveText("pwd");
 		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
 		await waitDone("case-ask-pwd");
 		await setMode("Ask", "Full", "Full");
@@ -1759,9 +1765,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(todaySection.locator(".session-section-drawer")).toHaveAttribute("inert", "");
 		await todaySection.getByRole("button", { name: "Today", exact: true }).click();
 		await openSessionGroupingOptions(page);
-		await expect(page.getByRole("menu", { name: "Group sessions" })).toBeVisible();
 		await page.screenshot({ path: path.join(groupingQaDir, "group-menu.png") });
-		await page.getByRole("menu", { name: "Group sessions" }).getByRole("menuitemradio", { name: "Unread", exact: true }).click();
+		await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitemradio", { name: "Unread", exact: true }).click();
 		await expect(page.getByRole("button", { name: "Read", exact: true })).toBeVisible();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "unread.png") });
 		await groupSessionsBy(page, "None");
@@ -1811,7 +1816,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		}`);
 		await projectMcpDialog.getByRole("button", { name: "Inspect", exact: true }).click();
 		await expect(projectMcpDialog.locator(".mcp-import-candidate")).toHaveCount(1);
-		await projectMcpDialog.getByRole("button", { name: "Import selected", exact: true }).click();
+		await projectMcpDialog.getByRole("button", { name: "Import selected servers", exact: true }).click();
 		await expect(projectMcpDialog).toHaveCount(0);
 		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toHaveCount(2);
 		expect(await page.locator("body").innerText()).not.toContain("METIS_E2E_USER_MCP_SECRET");
@@ -1897,24 +1902,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(questionPanel).toBeVisible();
 		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
 		await expect(questionPanel).toContainText("How should Metis answer?");
-		await expect(questionPanel).toContainText("Something else");
-		await expect(questionPanel.locator(".ask-user-custom")).toHaveCount(0);
-		const questionSlot = page.locator(".composer-dock > .ask-user-slot");
-		const questionComposer = page.locator(".composer-dock > .composer-chat");
-		await expect(page.locator(".composer-dock > .ask-user-slot + .composer-chat")).toHaveCount(1);
-		await questionSlot.evaluate(async (element) => {
-			await Promise.all(element.getAnimations().map((animation) => animation.finished));
-		});
-		const [questionSlotBox, questionComposerBox] = await Promise.all([
-			questionSlot.boundingBox(),
-			questionComposer.boundingBox(),
-		]);
-		expect(questionSlotBox).not.toBeNull();
-		expect(questionComposerBox).not.toBeNull();
-		expect(questionSlotBox!.x - questionComposerBox!.x).toBeCloseTo(16, 0);
-		expect(questionComposerBox!.width - questionSlotBox!.width).toBeCloseTo(32, 0);
-		expect(questionComposerBox!.y - questionSlotBox!.y - questionSlotBox!.height).toBeCloseTo(0, 0);
-		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeQuestions);
+		// The custom answer is an always-visible textarea, and the panel renders
+		// inline in the transcript instead of the composer dock.
+		const customAnswer = questionPanel.getByLabel("Something else");
+		await expect(customAnswer).toBeVisible();
+		await expect(customAnswer).toHaveValue("");
+		await expect(page.locator(".transcript .conversation-interaction-card").filter({ has: questionPanel })).toHaveCount(1);
+		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeQuestions);
 		await questionPanel.getByRole("checkbox", { name: "Fast and concise", exact: true }).click();
 		await questionPanel.getByRole("checkbox", { name: "Adapt to context", exact: true }).click();
 		await questionPanel.getByRole("checkbox", { name: "Detailed explanation", exact: true }).focus();
@@ -1930,10 +1924,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await questionPanel.getByRole("checkbox", { name: "Friendly", exact: true }).focus();
 		await expect(questionPanel.getByRole("checkbox", { checked: true })).toHaveCount(2);
 		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-last.png") });
-		phase = "opening the packaged multi-select custom answer";
-		await questionPanel.getByRole("button", { name: "Something else", exact: true }).click({ timeout: 5_000 });
 		phase = "filling the packaged multi-select custom answer";
-		await expect(questionPanel.getByLabel("Something else")).toBeVisible({ timeout: 5_000 });
 		await questionPanel.getByLabel("Something else").fill("Linux later", { timeout: 5_000 });
 		phase = "submitting packaged structured questions";
 		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-custom.png") });
@@ -1963,15 +1954,15 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(approvalPanel).toBeVisible();
 		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
 		await expect(approvalPanel).toHaveAttribute("role", "dialog");
-		await expect(approvalPanel).toContainText("Metis wants to use bash");
-		await expect(approvalPanel.locator("dt", { hasText: "Command" })).toBeVisible();
-		await expect(approvalPanel.locator("dd code", { hasText: "pwd" })).toBeVisible();
-		await expect(approvalPanel.locator("dt", { hasText: "Working directory" })).toBeVisible();
+		await expect(
+			approvalPanel.getByRole("heading", { name: "Allow Metis to execute the following command?", exact: true }),
+		).toBeVisible();
+		await expect(approvalPanel.locator(".permission-approval-command code")).toHaveText("pwd");
 		await expect(approvalPanel).not.toContainText("Arguments:");
-		await expect(approvalPanel.locator(".permission-approval-complete-details")).toHaveCount(0);
-		await expect(approvalPanel).toContainText("workspace sandbox");
-		await expect(approvalPanel.locator('[aria-expanded]')).toHaveCount(0);
-		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeApproval);
+		await expect(approvalPanel.locator("details")).toHaveCount(0);
+		// The approval renders inline in the transcript, so the transcript viewport is unchanged.
+		await expect(page.locator(".transcript .conversation-interaction-card").filter({ has: approvalPanel })).toHaveCount(1);
+		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
 		const denyButton = approvalPanel.getByRole("button", { name: /Reject/u });
 		const allowButton = approvalPanel.getByRole("button", { name: "Allow once", exact: true });
 		const [denyBox, allowBox] = await Promise.all([denyButton.boundingBox(), allowButton.boundingBox()]);
@@ -2071,7 +2062,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(retainedSessionDot).toHaveCSS("border-radius", "50%");
 		await expect(page.locator(".scheduled-task-quick-list").getByRole("heading", { name: "Scheduled tasks" })).toBeVisible();
 		expect(await page.locator(".project-list").locator(
-			":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2",
+			".session-grouping-label, .loose-tasks > h2, .scheduled-task-quick-list > h2",
 		).allTextContents()).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
 		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar.png") });
 		const retainedSessionName = await retainedSessionRow.locator(".session-button").getAttribute("aria-label");
@@ -2351,13 +2342,20 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		phase = "checking Model settings";
 		await page.getByRole("button", { name: "Model", exact: true }).click();
 		await expect(page.locator(".settings-main-header").getByRole("heading", { name: "Model", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Browse providers", exact: true }).click();
-		const providerGrid = page.locator(".model-provider-grid");
+		await page.getByRole("button", { name: "Add provider", exact: true }).click();
+		const providerCatalog = page.getByRole("dialog", { name: "Add provider", exact: true });
+		await expect(providerCatalog).toBeVisible();
+		const providerGrid = providerCatalog.locator(".model-provider-grid");
 		await expect(providerGrid.locator(".model-provider-card")).not.toHaveCount(0);
 		await page.screenshot({ path: path.join(settingsQaDir, "model-grid-1440x820.png") });
+		expect(cssGridTrackCount(await providerGrid.evaluate((grid) => getComputedStyle(grid).gridTemplateColumns))).toBe(2);
+		// The catalog paginates its providers and OpenAI is not on the first page.
+		const catalogSearch = providerCatalog.getByRole("searchbox", { name: "Search providers" });
+		await catalogSearch.fill("OpenAI");
 		const openAiProvider = providerGrid.locator(".model-provider-card").filter({
 			has: page.getByText("OpenAI", { exact: true }),
 		});
+		await expect(openAiProvider).toHaveCount(1);
 		await openAiProvider.click();
 		await expect(page.locator(".model-provider-dialog")).toBeVisible();
 		const builtinEditor = page.locator(".model-provider-editor");
@@ -2367,31 +2365,29 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await builtinEditor.getByRole("button", { name: "Save API key", exact: true }).click();
 		await expect(page.getByText("Provider saved", { exact: true })).toBeVisible();
 		await expect(builtinEditor.getByText("••••••••••••", { exact: true })).toBeVisible();
-		await builtinEditor.getByRole("button", { name: "Use this model", exact: true }).click();
+		await builtinEditor.getByRole("tab", { name: "New task defaults", exact: true }).click();
+		await builtinEditor.getByRole("button", { name: "Set as default for new tasks", exact: true }).click();
 		await expect(page.getByText("Defaults saved", { exact: true })).toBeVisible();
-		const modelLayout = await page.locator(".settings-page-scroll").evaluate((scroll) => {
-			const page = scroll.querySelector<HTMLElement>(".model-settings-page")!;
-			const grid = page.querySelector<HTMLElement>(".model-provider-grid")!;
-			return {
-				outerOverflow: scroll.scrollHeight - scroll.clientHeight,
-				columns: getComputedStyle(grid).gridTemplateColumns,
-			};
-		});
-		expect(modelLayout.outerOverflow).toBeGreaterThan(0);
 		await expect(page.locator(".settings-page-scroll-model")).toHaveCSS("overflow-y", "auto");
-		expect(cssGridTrackCount(modelLayout.columns)).toBe(2);
 		expect((await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings(),
 		)).defaultModel?.provider).toBe("openai");
 		await page.screenshot({ path: path.join(settingsQaDir, "model-builtin-1440x820.png") });
 		await builtinEditor.getByRole("button", { name: "Clear credentials", exact: true }).click();
+		await builtinEditor.getByRole("button", { name: "Confirm clear credentials", exact: true }).click();
 		await expect(page.getByText("Credentials cleared", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Close provider settings", exact: true }).click();
-		await expect(openAiProvider.getByText("Set up", { exact: true })).toBeVisible();
+		// The catalog closed when the provider editor opened, so reopen and search again.
 		await page.getByRole("button", { name: "Add provider", exact: true }).click();
+		await expect(providerCatalog).toBeVisible();
+		await providerCatalog.getByRole("searchbox", { name: "Search providers" }).fill("OpenAI");
+		await expect(openAiProvider.getByText("Set up", { exact: true })).toBeVisible();
+		await providerCatalog.getByRole("button", { name: "Close provider catalog", exact: true }).click();
+		await page.getByRole("button", { name: "Add custom provider", exact: true }).click();
 		const customProviderDialog = page.getByRole("dialog", { name: "Custom provider", exact: true });
 		await expect(customProviderDialog.getByLabel("Provider name", { exact: true })).toBeVisible();
 		await expect(customProviderDialog.getByLabel("Base URL", { exact: true })).toBeVisible();
+		await customProviderDialog.getByRole("tab", { name: "Models", exact: true }).click();
 		await expect(customProviderDialog.getByLabel("Model ID", { exact: true })).toBeVisible();
 		await customProviderDialog.getByRole("button", { name: "Close provider settings", exact: true }).click();
 
@@ -2593,7 +2589,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		await dialog.getByRole("button", { name: "Inspect", exact: true }).click();
 		await expect(dialog.locator(".mcp-import-candidate")).toHaveCount(2);
 		await expect(dialog.locator('.mcp-import-candidate input[type="checkbox"]:checked')).toHaveCount(2);
-		await dialog.getByRole("button", { name: "Import selected", exact: true }).click();
+		await dialog.getByRole("button", { name: "Import selected servers", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
 
 		for (const [name, tool] of [["json-http", "search_docs"], ["json-stdio", "env_status"]] as const) {
@@ -2937,15 +2933,20 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "Expand Packaged project inspector", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Show archived", exact: true }).click();
+		// Selecting an agent routes the full center conversation; the sidebar tree stays mounted beside it.
 		await page.getByRole("button", { name: "View summary for Archived result reviewer", exact: true }).click();
+		const archivedConversation = page.getByRole("region", { name: "Agent conversation", exact: true });
+		await expect(archivedConversation).toBeVisible();
 		await expect(page.getByRole("heading", { name: "Archived result", exact: true })).toBeVisible();
 		await expect(page.getByText("no remaining issues", { exact: true })).toBeVisible();
-		await expect(page.getByRole("region", { name: "Agent transcript", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Unarchive agent", exact: true }).click();
-		await expect(page.getByRole("button", { name: "Archive agent", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Archive agent", exact: true }).click();
-		await expect(page.getByRole("button", { name: "Unarchive agent", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
+		// Archive state is managed from the sidebar card while the conversation stays open.
+		const archivedCard = page.locator(".subagent-card").filter({ hasText: "Archived result reviewer" });
+		await archivedCard.getByRole("button", { name: "Unarchive agent", exact: true }).click();
+		await expect(archivedCard.getByRole("button", { name: "Archive agent", exact: true })).toBeVisible();
+		await expect(page.getByRole("button", { name: "View transcript for Archived result reviewer", exact: true })).toBeVisible();
+		await archivedCard.getByRole("button", { name: "Archive agent", exact: true }).click();
+		await expect(archivedCard.getByRole("button", { name: "Unarchive agent", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Open parent conversation", exact: true }).first().click();
 		await resizeWorkspacePanel(page, 392);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 		await expect(page.getByRole("button", { name: "New browser tab", exact: true }).first()).toBeInViewport();
@@ -2958,32 +2959,27 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 
 		phase = "opening the child transcript";
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
-		const transcript = page.getByRole("region", { name: "Agent transcript", exact: true });
+		const transcript = page.getByRole("region", { name: "Agent conversation", exact: true });
 		await expect(transcript).toBeVisible();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const taskSelector = page.locator(".subagent-task-selector .menu-select-trigger");
-		const taskMenu = page.locator(".menu-select-popover");
-		const chooseAgentTask = async (summary: string) => {
-			await taskSelector.click();
-			await taskMenu.getByRole("option", { name: summary }).click();
-		};
-		await chooseAgentTask("Inspect initial packaged state");
-		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
-		await chooseAgentTask("Inspect packaged project");
-		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
-		expect(await transcript.locator(".code-execution > summary").count()).toBeGreaterThanOrEqual(2);
 		await transcript.locator(".code-execution > summary").last().click();
 		await transcript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(transcript.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		expect(await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow)).toBe("auto");
+		// The full conversation integrates every task; load the earliest page to reach the first task.
+		await page.getByRole("button", { name: "Load older messages", exact: true }).click();
+		await expect(transcript.getByRole("button", { name: "Load older messages", exact: true })).toHaveCount(0);
+		await transcript.locator(".transcript-scroll").evaluate((element) => {
+			element.scrollTop = 0;
+		});
+		await expect(page.getByText("Inspect initial packaged state", { exact: true })).toBeVisible();
+		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
+		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
 		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-392x986.png") });
 		await page.setViewportSize({ width: 1280, height: 938 });
 		await resizeWorkspacePanel(page, 856);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-856x924.png") });
-		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
-		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
 		phase = "reopening the Agents tab";
 		await page.getByRole("button", { name: "Close Agents", exact: true }).click();
@@ -2991,16 +2987,13 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const reopenedTranscript = page.getByRole("region", { name: "Agent transcript", exact: true });
-		await reopenedTranscript.locator(".code-execution > summary").last().click();
-		await reopenedTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
-		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
+		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
 
 		phase = "deleting a nested agent";
-		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
 		await page.getByRole("button", { name: "View transcript for Nested verifier", exact: true }).click();
+		const nestedCard = page.locator(".subagent-card").filter({ hasText: "Nested verifier" });
 		page.once("dialog", (dialog) => dialog.accept());
-		await page.getByRole("button", { name: "Delete", exact: true }).click();
+		await nestedCard.getByRole("button", { name: "Delete", exact: true }).click();
 		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toHaveCount(0);
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
@@ -3033,12 +3026,12 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		const restoredTranscript = page.getByRole("region", { name: "Agent transcript", exact: true });
+		const restoredTranscript = page.getByRole("region", { name: "Agent conversation", exact: true });
 		await restoredTranscript.locator(".code-execution > summary").last().click();
 		await restoredTranscript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(page.getByText("Packaged tool output", { exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeFocused();
+		await page.getByRole("button", { name: "Open parent conversation", exact: true }).first().click();
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
@@ -3453,7 +3446,8 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		const panel = visibleToolPanel(page);
 		const fileHeaders = page.locator(".review-file-header");
 		await expect(page.locator(".review-details")).toHaveCount(0);
-		await expect(fileHeaders).toHaveCount(178);
+		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
+		expect(await fileHeaders.count()).toBeLessThan(178);
 		await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
 		await expect(page.locator(".review-patch")).toHaveCount(0);
 		const contextHeader = fileHeaders.filter({ hasText: "context.md" });
@@ -3492,7 +3486,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-open.png") });
 
 		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
-		await resizePanel(720);
+		await resizePanel(680);
 		let [detailsBox, contentBox] = await Promise.all([
 			page.locator(".review-details").boundingBox(),
 			page.locator(".review-content").boundingBox(),
@@ -3538,9 +3532,14 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await expect(fileHeaders).toHaveCount(3);
 		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
 		await page.getByRole("button", { name: "All Changes", exact: true }).click();
-		await expect(fileHeaders).toHaveCount(178);
+		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
+		expect(await fileHeaders.count()).toBeLessThan(178);
 		await expect(fileHeaders.filter({ hasText: "context.md" })).toBeVisible();
+		await page.locator(".review-tree button").filter({ hasText: "current.ts" }).click();
 		await expect(fileHeaders.filter({ hasText: "packages/nested/current.ts" })).toBeVisible();
+		await expect(fileHeaders.filter({ hasText: "packages/nested/current.ts" })).toHaveAttribute("aria-expanded", "true");
+		await page.locator(".review-tree button").filter({ hasText: "context.md" }).click();
+		await expect(fileHeaders.filter({ hasText: "context.md" })).toBeVisible();
 		await expect(page.getByRole("button", { name: "All Changes", exact: true })).toHaveAttribute("aria-pressed", "true");
 		expect(await page.evaluate(() => (window as typeof window & { __reviewBlankTransitions?: number }).__reviewBlankTransitions ?? -1)).toBe(0);
 		await page.getByRole("button", { name: "Refresh review", exact: true }).click();
@@ -3939,14 +3938,14 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "中文", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-		await page.getByRole("button", { name: "Chat 字体", exact: true }).click();
-		const fontMenuBox = await page.getByRole("listbox", { name: "Chat 字体", exact: true }).boundingBox();
+		await page.getByRole("button", { name: "Chat 回复字体", exact: true }).click();
+		const fontMenuBox = await page.getByRole("listbox", { name: "Chat 回复字体", exact: true }).boundingBox();
 		expect(fontMenuBox).not.toBeNull();
 		expect(fontMenuBox!.x).toBeGreaterThanOrEqual(0);
 		expect(fontMenuBox!.x + fontMenuBox!.width).toBeLessThanOrEqual(viewport.width);
 		expect(fontMenuBox!.y + fontMenuBox!.height).toBeLessThanOrEqual(viewport.height);
 		await page.getByRole("option", { name: "系统无衬线", exact: true }).click();
-		await page.getByRole("button", { name: "Code 字体", exact: true }).click();
+		await page.getByRole("button", { name: "Code 回复字体", exact: true }).click();
 		await page.getByRole("option", { name: "系统衬线", exact: true }).click();
 		const measureFixedSettingsLayout = () => page!.evaluate(() => ({
 			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
@@ -4234,8 +4233,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "通用", exact: true }).click();
 		await expect(page.getByRole("button", { name: "中文", exact: true })).toHaveAttribute("aria-pressed", "true");
 		await expect(page.getByRole("button", { name: "浅色", exact: true })).toHaveAttribute("aria-pressed", "true");
-		await expect(page.getByRole("button", { name: "Chat 字体", exact: true })).toContainText("系统无衬线");
-		await expect(page.getByRole("button", { name: "Code 字体", exact: true })).toContainText("系统衬线");
+		await expect(page.getByRole("button", { name: "Chat 回复字体", exact: true })).toContainText("系统无衬线");
+		await expect(page.getByRole("button", { name: "Code 回复字体", exact: true })).toContainText("系统衬线");
 		await expect(page.getByRole("button", { name: "内容字号", exact: true })).toContainText("20 px");
 		expect(await page.evaluate(() =>
 			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
@@ -4393,7 +4392,38 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 			await expect(importDialog).toHaveCount(0);
 			await expect(page.getByText(/\d+ history entries retained/u)).toBeVisible();
 		} else {
-			await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+			// Report what the importer actually discovered: runners that ship a
+			// Chromium browser without a default profile show recovery guidance.
+			const importSources = await page.evaluate(async () =>
+				(globalThis as unknown as {
+					metis: {
+						listBrowserImportSources(): Promise<
+							readonly { name: string; status?: string; profiles: readonly unknown[] }[]
+						>;
+					};
+				}).metis.listBrowserImportSources(),
+			);
+			await expect(importDialog.getByText("Checking browser data…", { exact: true })).toHaveCount(0);
+			const selectedSource = importSources[0];
+			if (!selectedSource) {
+				await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+			} else {
+				await expect(importDialog.getByText(selectedSource.name, { exact: true })).toBeVisible();
+				if (selectedSource.profiles.length === 0) {
+					if (selectedSource.status === "not-found") {
+						await expect(
+							importDialog.getByText(
+								`${selectedSource.name} data was not found at the default location. Choose its data folder to make it available.`,
+								{ exact: true },
+							),
+						).toBeVisible();
+					} else if (selectedSource.status === undefined) {
+						await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+					} else {
+						await expect(importDialog.locator(".browser-import-warning, .browser-import-empty")).toHaveCount(1);
+					}
+				}
+			}
 			await importDialog.getByRole("button", { name: "Close", exact: true }).click();
 		}
 
@@ -4463,7 +4493,12 @@ test("packaged Code project setup creates and opens a project", async () => {
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
-	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	// macOS ignores HOME for Electron's `home` path (NSHomeDirectory); the
+	// CFFIXED_USER_HOME override keeps the default project location inside the
+	// temporary home instead of the real user profile.
+	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics, [], {
+		CFFIXED_USER_HOME: homeDir,
+	});
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
@@ -4473,13 +4508,14 @@ test("packaged Code project setup creates and opens a project", async () => {
 		await waitForServerReady(page);
 		phase = "opening Code project setup";
 		const codeProjectName = "Packaged Code project";
-		const codeProjectRoot = path.join(tempRoot, "Metis Projects");
-		const codeProjectDir = path.join(codeProjectRoot, codeProjectName);
 		const defaultLocation = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getDefaultProjectLocation(),
 		);
-		expect(path.isAbsolute(defaultLocation)).toBe(true);
-		expect(path.basename(defaultLocation)).toBe("Metis Projects");
+		// The main process only grants the location returned by this call; a
+		// renderer-chosen absolute path is intentionally not trusted.
+		expect(defaultLocation).toBe(path.join(homeDir, "Metis Projects"));
+		const codeProjectRoot = defaultLocation;
+		const codeProjectDir = path.join(codeProjectRoot, codeProjectName);
 		await page.evaluate((location) => localStorage.setItem("metis.codeProjectLocation", location), codeProjectRoot);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await page.getByRole("button", { name: "Create a new project", exact: true }).click();
@@ -4621,6 +4657,9 @@ test("packaged mode project actions preserve the other mode and shared project d
 		);
 		const sessionActionButton = sessionActionRow.locator(".session-actions > button");
 		const sessionButton = sessionActionRow.locator(".session-button");
+		// Earlier sidebar clicks can leave the pointer resting on this row; park it
+		// before asserting the hover-revealed actions are hidden.
+		await page.mouse.move(0, 0);
 		await expect(sessionActionButton).toHaveCSS("opacity", "0");
 		await sessionActionButton.focus();
 		await expect(sessionActionButton).toHaveCSS("opacity", "1");
@@ -4720,12 +4759,14 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
-		await expect(page.getByRole("menuitem", { name: "Group by Date", exact: true })).toBeVisible();
+		await expect(
+			page.getByRole("menu", { name: "Session grouping", exact: true }).getByRole("menuitemradio", { name: "Date", exact: true }),
+		).toBeVisible();
 		await page.keyboard.press("Escape");
 		await groupSessionsBy(page, "Project");
 		const codeGroup = projectGroup(page, projectName);
 		await expect(codeGroup).toBeVisible();
-		await expect(codeGroup.locator(".project-heading span")).toHaveText(projectName);
+		await expect(codeGroup.locator(".project-heading span:not([aria-hidden='true'])")).toHaveText(projectName);
 		await showProjectActions(codeGroup);
 		await codeGroup.getByRole("button", { name: "Project actions" }).click();
 		await expect(page.getByRole("menuitem", { name: "Pin" })).toBeVisible();

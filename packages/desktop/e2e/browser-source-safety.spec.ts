@@ -111,10 +111,24 @@ const test = base.extend<{ safetyBrowser: SafetyBrowser }>({
 	},
 });
 
+// Native selection produces asynchronous DOM/accessibility events. Settle the
+// observed revision before taking the next snapshot; stale actions still fail
+// instead of being automatically replayed.
+async function settleAccessibility(browser: SafetyBrowser): Promise<void> {
+	let observation = await browser.observe();
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		const confirmation = await browser.observe({ sinceRevision: observation.revision });
+		if (confirmation.change === "unchanged") return;
+		observation = confirmation;
+	}
+	throw new Error("Accessibility updates did not settle before the next select action");
+}
+
 test("selects native options by exact value across implicit values, groups and duplicate labels", async ({
 	safetyBrowser: browser,
 }) => {
 	await browser.navigate("/select");
+	await settleAccessibility(browser);
 	for (const value of ["Implicit value", "second", "first", "last", "", "中文"]) {
 		const before = await browser.observe();
 		const result = await browser.act(before, {
@@ -125,6 +139,7 @@ test("selects native options by exact value across implicit values, groups and d
 
 		expect(result.ok, result.text).toBe(true);
 		await expect(browser.page.locator("#choices")).toHaveValue(value);
+		await settleAccessibility(browser);
 	}
 	expect(await browser.page.evaluate(() => (window as any).changes)).toEqual(
 		["Implicit value", "second", "first", "last", "", "中文"].flatMap((value) => [

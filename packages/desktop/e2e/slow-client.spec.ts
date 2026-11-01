@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
@@ -12,6 +11,7 @@ import {
 	connectToApp,
 	createAndRestoreChatSession,
 	desktopRoot,
+	launchPackagedDesktop,
 	listen,
 	packagedExecutable,
 	reservePort,
@@ -64,10 +64,17 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 
 	const root = await mkdtemp(path.join(tmpdir(), "metis-slow-client-"));
 	const agentDir = path.join(root, "agent");
+	const homeDir = path.join(root, "home");
 	const projectDir = path.join(root, "project");
 	const userDataDir = path.join(root, "electron");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "sidebar");
-	await Promise.all([mkdir(agentDir), mkdir(projectDir), mkdir(userDataDir), mkdir(qaDir, { recursive: true })]);
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(homeDir),
+		mkdir(projectDir),
+		mkdir(userDataDir),
+		mkdir(qaDir, { recursive: true }),
+	]);
 
 	let releaseStream!: () => void;
 	const streamGate = new Promise<void>((resolve) => {
@@ -137,19 +144,17 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 
 	const port = await reservePort();
 	const diagnostics: string[] = [];
-	const app = spawn(executable, [`--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`], {
-		cwd: projectDir,
-		env: {
-			...process.env,
-			METIS_CODING_AGENT_DIR: agentDir,
-			HTTP_PROXY: "",
-			HTTPS_PROXY: "",
-			NO_PROXY: "127.0.0.1,localhost",
-		},
-		stdio: ["ignore", "pipe", "pipe"],
+	// launchPackagedDesktop centralizes the packaged-app spawn contract, including
+	// the justified Linux --no-sandbox flag for CI runners.
+	const app = launchPackagedDesktop({
+		agentDir,
+		debuggingPort: port,
+		diagnostics,
+		executable,
+		homeDir,
+		projectDir,
+		userDataDir,
 	});
-	app.stdout?.on("data", (chunk) => diagnostics.push(String(chunk)));
-	app.stderr?.on("data", (chunk) => diagnostics.push(String(chunk)));
 
 	let browser: Browser | undefined;
 	let page: Page | undefined;
@@ -240,7 +245,12 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 			.toBe(10_000);
 		phase = "verify recovered renderer";
 		expect(await page.locator("[data-transcript-turn]").count()).toBeLessThan(50);
-		expect(await page.locator(".transcript-scroll").evaluate((element) => {
+		// Both the active and the keep-mounted background chat panels exist at this
+		// point; only the recovered streaming session's transcript has answers.
+		const transcriptScroll = page
+			.locator(".transcript-scroll")
+			.filter({ has: page.locator("[data-transcript-answer]") });
+		expect(await transcriptScroll.evaluate((element) => {
 			const scroll = element as unknown as { scrollHeight: number; scrollTop: number; clientHeight: number };
 			return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
 		})).toBeLessThanOrEqual(48);

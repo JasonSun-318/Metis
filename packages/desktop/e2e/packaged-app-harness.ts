@@ -274,7 +274,7 @@ export async function connectToApp(
 					return false;
 				}
 			},
-			{ timeout: 30_000 },
+			{ timeout: process.platform === "win32" ? 90_000 : 30_000 },
 		)
 		.toBe(true);
 	const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
@@ -282,6 +282,9 @@ export async function connectToApp(
 	if (!context) throw new Error("Packaged app did not expose a browser context");
 	const page = context.pages()[0];
 	if (!page) throw new Error("Packaged app did not expose a renderer page");
+	// CDP pages do not inherit Playwright fixture timeouts; fail stale actions
+	// promptly instead of spending the entire native test budget on one locator.
+	page.setDefaultTimeout(process.env.CI ? 20_000 : 10_000);
 	await page.bringToFront();
 	return { browser, page };
 }

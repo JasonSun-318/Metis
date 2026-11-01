@@ -69,7 +69,8 @@ test("packaged agent types settings CRUD reaches the user registry", async ({}, 
 		await expect(pageBody.getByText("No custom agent types yet")).toBeVisible();
 
 		phase = "creating a custom agent type";
-		await pageBody.getByRole("button", { name: "New agent type", exact: true }).click();
+		// The toolbar and the empty Custom section each offer a create action.
+		await pageBody.locator("button.settings-primary-button", { hasText: "New agent type" }).click();
 		await pageBody.getByLabel("Display name", { exact: true }).fill("E2E Auditor");
 		await pageBody.getByLabel("Type id", { exact: true }).fill("e2e-auditor");
 		await pageBody.getByLabel("Description", { exact: true }).fill("Read-only auditor created by e2e.");

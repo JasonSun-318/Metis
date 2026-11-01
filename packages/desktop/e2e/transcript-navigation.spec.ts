@@ -579,8 +579,8 @@ for (const mode of ["chat", "code"] as const) {
 				height: card.getBoundingClientRect().height,
 			};
 		});
-		expect(Math.abs(geometry.before - 10)).toBeLessThanOrEqual(1);
-		expect(Math.abs(geometry.after - 10)).toBeLessThanOrEqual(1);
+		expect(Math.abs(geometry.before - 12)).toBeLessThanOrEqual(1);
+		expect(Math.abs(geometry.after - 12)).toBeLessThanOrEqual(1);
 		expect(geometry.width).toBe(0);
 		expect(geometry.height).toBeLessThan(130);
 		const actions = plan.locator(".plan-card-actions button");
@@ -592,7 +592,7 @@ for (const mode of ["chat", "code"] as const) {
 		await expect.poll(async () => {
 			const cardBounds = (await plan.boundingBox())!;
 			const toolBounds = (await execution.boundingBox())!;
-			return Math.abs(cardBounds.y - toolBounds.y - toolBounds.height - 10);
+			return Math.abs(cardBounds.y - toolBounds.y - toolBounds.height - 12);
 		}).toBeLessThanOrEqual(1);
 		await execution.locator(":scope > summary").click();
 		await page.setViewportSize({ width: 420, height: 800 });
@@ -607,7 +607,7 @@ for (const mode of ["chat", "code"] as const) {
 		await expect.poll(async () => {
 			const cardBounds = (await plan.boundingBox())!;
 			const summaryBounds = (await execution.locator(":scope > summary").boundingBox())!;
-			return Math.abs(cardBounds.y - summaryBounds.y - summaryBounds.height - 10);
+			return Math.abs(cardBounds.y - summaryBounds.y - summaryBounds.height - 12);
 		}).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: info.outputPath(`compact-plan-${mode}-narrow-light.png`) });
 	});

@@ -116,7 +116,10 @@ test("visible browser keeps its viewport stable, actually navigates links, and m
 			state.__navigationGeometry = [];
 			const sample = () => {
 				const rect = anchor.getBoundingClientRect();
-				state.__navigationGeometry.push({ active: Boolean(panel.querySelector(".browser-control-bar[role=status]")), bounds: [rect.x, rect.y, rect.width, rect.height] });
+				// BrowserPanel.tsx renders the active bar as <output>, which carries the
+				// implicit status role without an explicit role attribute, so match the
+				// element instead of a [role=status] CSS selector.
+				state.__navigationGeometry.push({ active: Boolean(panel.querySelector("output.browser-automation-bar")), bounds: [rect.x, rect.y, rect.width, rect.height] });
 			};
 			sample();
 			new MutationObserver(sample).observe(panel, { attributes: true, childList: true, subtree: true });

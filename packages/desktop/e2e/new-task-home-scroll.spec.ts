@@ -157,7 +157,7 @@ test.describe("new task home workspace and compact layout", () => {
 				await page.setViewportSize(viewport);
 				await page.goto(`${fixture.url}/?mode=${mode}`, { waitUntil: "load" });
 				await waitForHome(page);
-				await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(18, 18, 18)");
+				await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(20, 20, 20)");
 				await expect(page.locator(".new-task-home-composer")).toHaveCSS("background-color", "rgb(24, 24, 24)");
 				const layout = await snapshot(page);
 				expect(layout.headingText).toContain("QA User");

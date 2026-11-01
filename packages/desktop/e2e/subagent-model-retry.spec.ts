@@ -47,7 +47,7 @@ for (const [mode, scenario] of cases)
 			if (scenario === "child") {
 				await expect.poll(async () => (await listSubagents(page, sessionId)).length).toBe(1);
 				await openAgentConversation(page, RETRY_CHILD);
-				await expect(page.locator(".agent-conversation:visible .turn-runtime-status")).toHaveAttribute(
+				await expect(page.locator(".agent-conversation:visible .turn-runtime-status .turn-runtime-activity")).toHaveAttribute(
 					"aria-label",
 					/Retrying \([12]\/5\)/,
 				);
@@ -70,7 +70,7 @@ for (const [mode, scenario] of cases)
 				expect(await retryEvents(page)).toHaveLength(0);
 			} else {
 				if (scenario !== "exhaust") {
-					await expect(page.locator(".turn-runtime-status:visible")).toHaveAttribute(
+					await expect(page.locator(".turn-runtime-status:visible .turn-runtime-activity")).toHaveAttribute(
 						"aria-label",
 						"Retrying (1/5)",
 					);

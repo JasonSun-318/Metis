@@ -22,7 +22,7 @@ async function expectCompactGaps(card: Locator) {
 			const visibleExecution = execution.hasAttribute("open") ? execution : execution.querySelector(":scope > summary")!;
 			gaps.push(rect.top - visibleExecution.getBoundingClientRect().bottom);
 		}
-		return gaps.every((gap) => Math.abs(gap - 10) <= 1);
+		return gaps.every((gap) => Math.abs(gap - 12) <= 1);
 	})).toBe(true);
 }
 

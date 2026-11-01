@@ -136,7 +136,9 @@ test("forks a conversation from an assistant reply and switches to the forked se
 		const forkButtons = page.getByRole("button", { name: "Fork conversation", exact: true });
 		await expect(forkButtons).toHaveCount(2);
 
-		// Fork the earlier reply, not the latest one.
+		// Fork the earlier reply, not the latest one. Per-turn actions are
+		// hover-revealed, so move over the reply before clicking its fork control.
+		await page.locator("[data-transcript-answer]").first().hover();
 		await forkButtons.first().click();
 		const forkedSession = page.locator('.session-button[aria-label="fork Fork source title"]');
 		await expect(forkedSession).toHaveCount(1, { timeout: 20_000 });

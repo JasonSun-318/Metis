@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import net from "node:net";
 import JSZip from "jszip";
 import { createMcpTestServer, type McpTestServer } from "../../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server in plugin market integration fixtures
@@ -319,25 +322,47 @@ When asked about fixture suite, use the suite echo tool.
 }
 
 export async function createPluginFixtureServer(extraCatalogEntries = 0): Promise<PluginFixtureServer> {
-	// 1. Generate multi-domain self-signed TLS cert
-	const key = spawnSync("openssl", ["genrsa", "2048"], { encoding: "buffer" }).stdout;
-	const cert = spawnSync(
-		"openssl",
-		[
-			"req",
-			"-new",
-			"-x509",
-			"-key",
-			"/dev/stdin",
-			"-subj",
-			"/CN=github.com",
-			"-addext",
-			"subjectAltName = DNS:api.github.com, DNS:codeload.github.com, DNS:raw.githubusercontent.com, DNS:github.com",
-			"-days",
-			"1",
-		],
-		{ input: key, encoding: "buffer" },
-	).stdout;
+	// 1. Generate multi-domain self-signed TLS cert. Piping the key through
+	// /dev/stdin is unreliable on Linux OpenSSL (PEM "no start line"), so one
+	// req invocation writes both files and its outcome is checked explicitly.
+	// The files are only needed until the PEM buffers are read, so they are
+	// removed before any later fixture setup can fail and leak them.
+	const tlsDir = await mkdtemp(path.join(tmpdir(), "metis-plugin-fixture-tls-"));
+	const keyPath = path.join(tlsDir, "fixture-key.pem");
+	const certPath = path.join(tlsDir, "fixture-cert.pem");
+	let key: Buffer;
+	let cert: Buffer;
+	try {
+		const generated = spawnSync(
+			"openssl",
+			[
+				"req",
+				"-new",
+				"-x509",
+				"-newkey",
+				"rsa:2048",
+				"-nodes",
+				"-keyout",
+				keyPath,
+				"-out",
+				certPath,
+				"-subj",
+				"/CN=github.com",
+				"-addext",
+				"subjectAltName = DNS:api.github.com, DNS:codeload.github.com, DNS:raw.githubusercontent.com, DNS:github.com",
+				"-days",
+				"1",
+			],
+			{ encoding: "buffer" },
+		);
+		if (generated.error) throw new Error(`openssl req could not be executed: ${generated.error.message}`);
+		if (generated.status !== 0) {
+			throw new Error(`openssl req failed with exit status ${generated.status}: ${generated.stderr.toString()}`);
+		}
+		[key, cert] = await Promise.all([readFile(keyPath), readFile(certPath)]);
+	} finally {
+		await rm(tlsDir, { recursive: true, force: true });
+	}
 
 	// 2. Start HTTP MCP Test Server with required Bearer token
 	const mcpTestServer = await createMcpTestServer({

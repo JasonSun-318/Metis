@@ -245,9 +245,11 @@ test("two thousand notes keep controls usable and budget labels in the crowded o
 	const labels = page.locator('.knowledge-node text:not([opacity="0"])');
 	await expect.poll(() => labels.count()).toBeGreaterThan(0);
 	expect(await labels.count()).toBeLessThan(80);
-	// Controls must work while the large simulation is still running.
-	await page.getByRole("button", { name: "Zoom in", exact: true }).click({ timeout: 1500 });
-	await page.getByRole("button", { name: "Reset view" }).click({ timeout: 1500 });
+	// Scope role queries to the toolbar instead of scanning 2,000 live SVG nodes.
+	// Controls must still work while the large simulation is running.
+	const controls = page.locator(".knowledge-graph-controls");
+	await controls.getByRole("button", { name: "Zoom in", exact: true }).click({ timeout: 1500 });
+	await controls.getByRole("button", { name: "Reset view" }).click({ timeout: 1500 });
 	await settle(page, 20_000);
 	await page.screenshot({ path: info.outputPath("2000-notes.png") });
 	expect(errors).toEqual([]);

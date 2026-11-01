@@ -64,21 +64,13 @@ for (const mode of ["chat", "code"] as const) {
 			await conversation.locator(".transcript-scroll").evaluate((scroll) => {
 				scroll.scrollTop = scroll.scrollHeight;
 			});
-			const timing = conversation.getByRole("button", { name: "Message timing", exact: true });
-			const geometry = await timing.evaluate((trigger) => {
-				const style = getComputedStyle(trigger);
-				return {
-					height: trigger.getBoundingClientRect().height,
-					border: style.borderTopWidth,
-					background: style.backgroundColor,
-				};
-			});
-			expect(geometry.height).toBeLessThanOrEqual(mode === "code" ? 24 : 28);
-			expect(geometry.border).toBe("0px");
-			expect(geometry.background).toBe("rgba(0, 0, 0, 0)");
-			await timing.click();
-			await expect(app.page.getByRole("option", { name: /^After current task/ })).toBeVisible();
-			await app.page.keyboard.press("Escape");
+			// The per-message timing menu was replaced by automatic queueing; a
+			// running child's composer must offer the queue affordance after the
+			// restart without mutating the durable queue.
+			const composerInput = conversation.locator('[id^="agent-composer-"]');
+			await composerInput.fill("Queued after restart");
+			await expect(conversation.getByRole("button", { name: "Queue message", exact: true })).toBeEnabled();
+			await composerInput.fill("");
 			await app.page.screenshot({ path: testInfo.outputPath(`${mode}-child-progress.png`) });
 			fixture.release();
 			await expect.poll(async () => (await listSubagents(app!.page, sessionId))[0]?.status).toBe("done");
@@ -153,7 +145,6 @@ for (const mode of ["chat", "code"] as const) {
 				receipt,
 				afterRestart,
 				conflict,
-				geometry,
 			});
 		} catch (error) {
 			await saveSubagentEvidence(testInfo, `${mode}-replay-failure.json`, {

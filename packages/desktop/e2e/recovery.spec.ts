@@ -211,7 +211,8 @@ test("packaged projection client recovers across renderer and app-server restart
 		phase = "reloading the renderer mid-turn";
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await expect(page.locator(".app-shell")).toBeVisible();
-		await expect(page.locator(".workspace-header h1")).toBeVisible();
+		// The workspace chrome is the titlebar row now; it carries the restored session id.
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", sessionId);
 		await expect(page.getByText("renderer-before-", { exact: true })).toBeVisible();
 		expect(appServerPid(rootPid)).toBe(serverPidBeforeReload);
 
