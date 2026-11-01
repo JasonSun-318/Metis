@@ -217,6 +217,7 @@ import {
 	getOwnedSessionWorkDirs,
 	getSessionAttachmentDir,
 } from "./session-attachments.ts";
+import type { AgentInputEntry } from "./session-control.ts";
 import { SessionDeliveredArtifacts } from "./session-delivered-artifacts.ts";
 import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
@@ -226,6 +227,7 @@ import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildAgentMailboxContent, safePromptJson } from "./subagents/prompts.ts";
+import { queuedAdmissionRequestId } from "./subagents/queued-messages.ts";
 import { utf8Length, utf8Prefix } from "./subagents/trace.ts";
 import {
 	type AgentMailboxEvent,
@@ -1643,10 +1645,23 @@ export class AgentSession {
 		};
 	}
 
-	private _agentInputForRequest(requestId: string) {
-		return [...this.sessionManager.getDurableJournalSnapshot()]
-			.reverse()
-			.find((entry) => entry.type === "agent_input" && entry.messageId === requestId);
+	private _agentInputForRequest(requestId: string): AgentInputEntry | undefined {
+		const journal = [...this.sessionManager.getDurableJournalSnapshot()].reverse();
+		const direct = journal.find(
+			(entry): entry is AgentInputEntry => entry.type === "agent_input" && entry.messageId === requestId,
+		);
+		if (direct) return direct;
+		// A queued Guide admission is submitted under its hashed admission identity.
+		// Resolve it only through the journal entry that actually produced that
+		// alias, then hand back the latest input for the same canonical messageId.
+		const aliased = journal.find(
+			(entry): entry is AgentInputEntry =>
+				entry.type === "agent_input" && queuedAdmissionRequestId(entry.messageId, entry.id) === requestId,
+		);
+		if (!aliased) return undefined;
+		return journal.find(
+			(entry): entry is AgentInputEntry => entry.type === "agent_input" && entry.messageId === aliased.messageId,
+		);
 	}
 
 	private _recordAgentInputTrust(requestId: string): void {
@@ -2525,8 +2540,8 @@ export class AgentSession {
 				throw new Error(`Queue item is not durably enqueued: ${item.queueItemId}`);
 			}
 			metadata.push(queue);
-			if (this._agentInputForRequest(queue.operation.identity.requestId))
-				this._agentMessageIds.set(item.message, queue.operation.identity.requestId);
+			const agentInput = this._agentInputForRequest(queue.operation.identity.requestId);
+			if (agentInput) this._agentMessageIds.set(item.message, agentInput.messageId);
 		}
 		let hydratedImages: Array<ImageContent[] | undefined>;
 		try {
@@ -4641,13 +4656,11 @@ export class AgentSession {
 			});
 
 			const inputScope = durablePromptExecutionContext.getStore();
-			if (
-				inputScope?.owner === this &&
-				inputScope.active &&
-				inputScope.requestId &&
-				this._agentInputForRequest(inputScope.requestId)
-			)
-				this._agentMessageIds.set(messages[messages.length - 1]!, inputScope.requestId);
+			const agentInput =
+				inputScope?.owner === this && inputScope.active && inputScope.requestId
+					? this._agentInputForRequest(inputScope.requestId)
+					: undefined;
+			if (agentInput) this._agentMessageIds.set(messages[messages.length - 1]!, agentInput.messageId);
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			for (const msg of this._pendingNextTurnMessages) {

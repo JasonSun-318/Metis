@@ -854,11 +854,23 @@ export class SubagentManager implements SubagentManagerApi {
 				throw new AgentError("INVALID_STATE", "Queued message delivery does not match the current task");
 			}
 			const { id: _id, parentId: _parentId, timestamp: _timestamp, ...payload } = current;
+			// A guided steer lands on the hot task, so its revision must advance the
+			// target task's sequence instead of reusing the queued task's numbering.
+			const instructionRevision =
+				input.delivery === "steer"
+					? Math.max(
+							0,
+							...record.inputs
+								.filter((entry) => entry.taskId === hot!.taskId)
+								.map((entry) => entry.instructionRevision),
+						) + 1
+					: payload.instructionRevision;
 			const sending: Omit<AgentInputEntry, "id" | "parentId" | "timestamp"> = {
 				...payload,
 				taskId: input.delivery === "steer" ? hot!.taskId : payload.taskId,
 				delivery: input.delivery === "steer" ? "steer" : payload.delivery,
 				state: "accepted",
+				instructionRevision,
 			};
 			this.appendControl(input.agentId, sending, record);
 			if (input.delivery === "steer") {
@@ -2534,7 +2546,11 @@ export function agentSummaryFromRecord(
 	const hot = options.hotTaskId ? { taskId: options.hotTaskId } : undefined;
 	const running = tasks.find((task) => task.taskId === hot?.taskId) ?? tasks.find((task) => task.status === "running");
 	const current = running ?? tasks.find((task) => task.status === "queued");
-	const latest = tasks.at(-1);
+	// Task creation order is not lifecycle order: a queued Guide placeholder is
+	// stopped before the active task completes, so the last state change
+	// decides the latest task (later-created tasks win timestamp ties).
+	let latest: AgentTaskSummary | undefined;
+	for (const task of tasks) if (!latest || task.updatedAt >= latest.updatedAt) latest = task;
 	const status = hot ? "running" : agentStatusFromTasks(tasks);
 	const createdAt = tasks[0]?.createdAt ?? new Date(options.now ?? Date.now()).toISOString();
 	const updatedAt = tasks.reduce(

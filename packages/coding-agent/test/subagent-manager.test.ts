@@ -1527,8 +1527,46 @@ describe("SubagentManager", () => {
 		harness.runtimes[0]!.session.settle("first done");
 		await vi.waitFor(() => expect(harness.manager.listTasks(first.agentId)[0]?.status).toBe("done"));
 		const summary = harness.manager.listSummaries(ROOT_ID)[0]!;
-		expect(summary.latestTask?.taskId).toBe(second.taskId);
+		expect(summary.latestTask?.taskId).toBe(first.taskId);
 		expect(summary.updatedAt).toBe(summary.tasks.find((task) => task.taskId === first.taskId)?.updatedAt);
+	});
+
+	it("keeps the done status and latest reply after a guided queue placeholder is stopped", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "guided worker",
+			task: "Inspect the fixture",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.submitMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "guide-regression-queue",
+				delivery: "queue",
+				input: { text: "Guide correction" },
+			},
+		);
+		const [pending] = harness.manager.listQueuedMessages({ kind: "user" }, child.agentId);
+		await harness.manager.sendQueuedMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "guide-regression-delivery",
+				messageId: pending!.messageId,
+				expectedRevision: pending!.revision,
+				delivery: "steer",
+			},
+		);
+		await vi.waitFor(() => expect(harness.manager.listTasks(child.agentId).at(-1)?.status).toBe("stopped"));
+		// The interrupted task keeps running and completes after the placeholder was stopped.
+		harness.runtimes[0]!.session.settle("original done");
+		await vi.waitFor(() => expect(harness.manager.listTasks(child.agentId)[0]?.status).toBe("done"));
+		const summary = harness.manager.listSummaries(ROOT_ID)[0]!;
+		expect(summary.status).toBe("done");
+		expect(summary.latestTask).toMatchObject({ taskId: child.taskId, status: "done", finalMessage: "original done" });
+		expect(summary.tasks.map((task) => task.status)).toEqual(["done", "stopped"]);
 	});
 
 	it("publishes queued spawn, follow-up, and interrupt state immediately", async () => {

@@ -224,7 +224,7 @@ describe("SubagentManager durable queued messages", () => {
 				delivery: "steer",
 			},
 		);
-		expect(receipt).toMatchObject({ taskId: child.taskId, delivery: "steer" });
+		expect(receipt).toMatchObject({ taskId: child.taskId, delivery: "steer", instructionRevision: 2 });
 		expect(harness.manager.listQueuedMessages({ kind: "user" }, child.agentId)).toEqual([]);
 		expect(harness.runtimes[0]!.prompts).toEqual(["Inspect", "Guided follow-up"]);
 
@@ -234,6 +234,10 @@ describe("SubagentManager durable queued messages", () => {
 		expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === queued.taskId)?.status).toBe(
 			"stopped",
 		);
+		expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)).toMatchObject({
+			instructionRevision: 2,
+			consumedInstructionRevision: 2,
+		});
 		const journal = await harness.manager.readJournal(ROOT_ID, child.agentId);
 		const latest = [...journal]
 			.reverse()
@@ -248,10 +252,14 @@ describe("SubagentManager durable queued messages", () => {
 			requestHash: queuedEntry?.type === "agent_input" ? queuedEntry.requestHash : "missing",
 			delivery: "steer",
 			state: "delivered",
+			instructionRevision: 2,
 		});
 		expect(
 			harness.mailboxEvents.filter((event) => event.type === "terminal" && event.taskId === queued.taskId),
 		).toEqual([]);
+		expect(
+			harness.mailboxEvents.find((event) => event.type === "terminal" && event.taskId === child.taskId),
+		).toMatchObject({ instructionRevision: 2, consumedInstructionRevision: 2 });
 	});
 
 	it("rejects stale and duplicate guide actions without delivering twice", async () => {
@@ -436,6 +444,52 @@ describe("SubagentManager durable queued messages", () => {
 		await finishCurrent(harness, child.agentId, child.taskId);
 	});
 
+	it("advances the hot task revision for each guided queued message", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, { name: "worker", task: "Inspect", agentType: "worker" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const first = await queueHuman(harness, child.agentId, "Guide one", "human-guide-rev-1");
+		const second = await queueHuman(harness, child.agentId, "Guide two", "human-guide-rev-2");
+
+		const [pendingOne] = harness.manager.listQueuedMessages({ kind: "user" }, child.agentId);
+		const receiptOne = await harness.manager.sendQueuedMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "guide-rev-1",
+				messageId: pendingOne.messageId,
+				expectedRevision: pendingOne.revision,
+				delivery: "steer",
+			},
+		);
+		const [pendingTwo] = harness.manager.listQueuedMessages({ kind: "user" }, child.agentId);
+		const receiptTwo = await harness.manager.sendQueuedMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "guide-rev-2",
+				messageId: pendingTwo.messageId,
+				expectedRevision: pendingTwo.revision,
+				delivery: "steer",
+			},
+		);
+
+		expect(receiptOne).toMatchObject({ messageId: first.messageId, taskId: child.taskId, instructionRevision: 2 });
+		expect(receiptTwo).toMatchObject({ messageId: second.messageId, taskId: child.taskId, instructionRevision: 3 });
+		expect(harness.runtimes[0]!.prompts).toEqual(["Inspect", "Guide one", "Guide two"]);
+		expect(harness.manager.listQueuedMessages({ kind: "user" }, child.agentId)).toEqual([]);
+		await finishCurrent(harness, child.agentId, child.taskId);
+		expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)).toMatchObject({
+			instructionRevision: 3,
+			consumedInstructionRevision: 3,
+		});
+		const journal = await harness.manager.readJournal(ROOT_ID, child.agentId);
+		const latestRevision = (messageId: string) =>
+			[...journal].reverse().find((entry) => entry.type === "agent_input" && entry.messageId === messageId);
+		expect(latestRevision(first.messageId)).toMatchObject({ taskId: child.taskId, instructionRevision: 2 });
+		expect(latestRevision(second.messageId)).toMatchObject({ taskId: child.taskId, instructionRevision: 3 });
+	});
+
 	it("retries a failed real runtime Guide once and consumes it exactly once", async () => {
 		const faux = registerFauxProvider();
 		let release!: () => void;
@@ -557,7 +611,7 @@ describe("SubagentManager durable queued messages", () => {
 				delivery: "steer",
 			},
 		);
-		expect(receipt).toMatchObject({ taskId: child.taskId, delivery: "steer" });
+		expect(receipt).toMatchObject({ taskId: child.taskId, delivery: "steer", instructionRevision: 2 });
 		release();
 		await vi.waitFor(() => expect(manager.listTasks(child.agentId)[0]?.status).toBe("done"), { timeout: 5000 });
 		const journal = await manager.readJournal(ROOT_ID, child.agentId);
@@ -568,6 +622,7 @@ describe("SubagentManager durable queued messages", () => {
 				JSON.stringify(entry.message.content).includes("Guide once"),
 		);
 		expect(consumed).toHaveLength(1);
+		expect(consumed[0]).toMatchObject({ agentMessageId: queued.messageId });
 		expect(manager.listQueuedMessages({ kind: "user" }, child.agentId)).toEqual([]);
 		expect(manager.listTasks(child.agentId).filter((task) => task.status !== "stopped")).toHaveLength(1);
 	}, 15000);

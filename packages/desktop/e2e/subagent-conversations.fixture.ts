@@ -487,6 +487,8 @@ export async function createSubagentSession(
 		},
 		{ mode, cwd: environment.projectDir, name },
 	);
+	// Finish the initial document load before requesting a renderer restart.
+	await page.waitForLoadState("load");
 	await page.reload({ waitUntil: "domcontentloaded", timeout: 20_000 });
 	await waitForServerReady(page);
 	const trust = page.getByRole("heading", { name: "Trust this project?", exact: true });

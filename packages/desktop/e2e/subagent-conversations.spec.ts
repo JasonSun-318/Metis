@@ -130,21 +130,13 @@ async function verifyAgentControls(page: Page, child: AgentRecord): Promise<void
 	await expect(details).toHaveCount(0);
 	await expect(detailsButton).toBeFocused();
 
-	const timing = conversation.getByRole("button", { name: "Message timing", exact: true });
-	await timing.click();
-	const choices = page.getByRole("listbox", { name: "Message timing", exact: true });
-	const steer = choices.getByRole("option", { name: /^During current task/ });
-	const queue = choices.getByRole("option", { name: /^After current task/ });
-	await expect(steer).toHaveAttribute("aria-description", "The agent reads your message after its current step. Use Stop to interrupt immediately.");
-	await expect(queue).toHaveAttribute("aria-description", "Start a follow-up after this task finishes.");
-	await expect(steer.locator("small")).toBeVisible();
-	await expect(queue.locator("small")).toBeVisible();
-	await queue.click();
-	await expect(timing).toContainText("After current task");
-	await timing.click();
-	await steer.click();
-	await expect(timing).toContainText("During current task");
-	await expect(timing).toBeFocused();
+	// Delivery timing is no longer a per-child menu: messages to a running child
+	// queue automatically, and the composer must offer that queue affordance.
+	// The steer/queue delivery itself is exercised below with the correction.
+	const childComposerProbe = conversation.locator('[id^="agent-composer-"]');
+	await childComposerProbe.fill("Probe queue affordance");
+	await expect(conversation.getByRole("button", { name: "Queue message", exact: true })).toBeEnabled();
+	await childComposerProbe.fill("");
 }
 
 async function verifyNativeWindowLayout(app: Awaited<ReturnType<typeof launchSubagentApp>>, testInfo: TestInfo): Promise<void> {
@@ -365,6 +357,8 @@ for (const mode of ["chat", "code"] as const) {
 			await childComposer.fill(SUBAGENT_FIXTURE.correction);
 			await expect(childConversation.getByRole("button", { name: "Stop agent", exact: true })).toBeEnabled();
 			await childConversation.getByRole("button", { name: "Queue message", exact: true }).click();
+			await childConversation.locator(".queued-turn-row").filter({ hasText: SUBAGENT_FIXTURE.correction })
+				.getByRole("button", { name: "Guide with queued message", exact: true }).click();
 
 			const intervention = await waitForModelRequest(
 				model,
@@ -381,8 +375,9 @@ for (const mode of ["chat", "code"] as const) {
 			expect(interventionEvent).toBeTruthy();
 			expect(interventionEvent?.agentId).toBe(alpha.agentId);
 			expect(interventionEvent?.taskId).toBeTruthy();
-			expect(interventionEvent?.instructionRevision).toBe(2);
-			expect(interventionEvent?.delivery).toBe("steer");
+			// The first coordination notice records queue admission, not consumption.
+			expect(interventionEvent?.instructionRevision).toBe(1);
+			expect(interventionEvent?.delivery).toBe("queue");
 			expect(interventionEvent?.messageId).toBeTruthy();
 
 			const completed = await waitForAgents(
@@ -403,7 +398,8 @@ for (const mode of ["chat", "code"] as const) {
 					(message) => (message?.length ?? 0) > 0,
 				),
 			).toBe(true);
-			const alphaTask = finishedAlpha.tasks.find((task) => task.taskId === interventionEvent?.taskId);
+			const alphaTask = finishedAlpha.tasks.find((task) => task.taskId === alpha.tasks[0]!.taskId);
+			expect(finishedAlpha.tasks.find((task) => task.taskId === interventionEvent?.taskId)?.status).toBe("stopped");
 			expect(alphaTask?.instructionRevision).toBe(2);
 			expect(alphaTask?.consumedInstructionRevision).toBeGreaterThanOrEqual(2);
 
@@ -430,6 +426,7 @@ for (const mode of ["chat", "code"] as const) {
 			expect(correctionItem?.origin).toMatchObject({ kind: "user" });
 			expect(correctionItem?.agentMessageId).toBe(interventionEvent?.messageId);
 			expect(correctionItem?.instructionRevision).toBe(2);
+			expect(correctionItem?.agentTaskId).toBe(alphaTask?.taskId);
 			expect(correctionItem?.deliveryState).toBe("delivered");
 
 			for (const request of model.requests) {
