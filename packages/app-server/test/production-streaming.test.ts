@@ -44,19 +44,30 @@ describe("production runtime streaming", () => {
 	it("projects cache hits, explicit misses, and missing reports without mixing them", async () => {
 		let calls = 0;
 		const finishResponses: (() => void)[] = [];
+		// Resolve on the provider request instead of polling: this test makes real
+		// HTTP and filesystem round-trips, and timer-driven polls add scheduler
+		// latency that varies with CI load.
+		const providerCalls = Array.from({ length: 3 }, () => {
+			let resolve!: () => void;
+			const promise = new Promise<void>((done) => {
+				resolve = done;
+			});
+			return { promise, resolve };
+		});
 		const cacheCounts = [9600, 0, undefined];
 		const provider = createServer(async (request, response) => {
 			for await (const _ of request) {
 				/* Drain the request body. */
 			}
-			const cache = cacheCounts[calls++];
+			const index = calls++;
+			const cache = cacheCounts[index];
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			response.flushHeaders();
-			finishResponses.push(() =>
+			finishResponses[index] = () =>
 				response.end(
 					`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 10000, completion_tokens: 400, ...(cache === undefined ? {} : { prompt_tokens_details: { cached_tokens: cache } }) } })}\n\ndata: [DONE]\n\n`,
-				),
-			);
+				);
+			providerCalls[index]?.resolve();
 		});
 		const port = await listen(provider);
 		const root = mkdtempSync(join(tmpdir(), "metis-cache-status-"));
@@ -89,10 +100,20 @@ describe("production runtime streaming", () => {
 		});
 		const connection = server.connect();
 		const completedOperations = new Set<string>();
+		const completionWaiters = new Map<string, () => void>();
+		const waitForCompletion = (operationId: string) =>
+			completedOperations.has(operationId)
+				? Promise.resolve()
+				: new Promise<void>((resolve) => completionWaiters.set(operationId, resolve));
 		connection.onMessage((message) => {
 			if (!("method" in message) || message.method !== "connection/events") return;
 			for (const event of message.params.events) {
-				if (event.type === "turn/completed") for (const id of event.turn.operationIds) completedOperations.add(id);
+				if (event.type !== "turn/completed") continue;
+				for (const id of event.turn.operationIds) {
+					completedOperations.add(id);
+					completionWaiters.get(id)?.();
+					completionWaiters.delete(id);
+				}
 			}
 		});
 		try {
@@ -132,12 +153,14 @@ describe("production runtime streaming", () => {
 					},
 				});
 				expect(start).not.toHaveProperty("error");
-				await expect.poll(() => calls).toBe(i + 1);
+				await providerCalls[i].promise;
+				expect(calls).toBe(i + 1);
 				if (!("result" in start) || !("operationId" in start.result)) throw new Error("Expected accepted turn");
 				const operationId = start.result.operationId;
 				expect(completedOperations.has(operationId)).toBe(false);
 				finishResponses[i]();
-				await expect.poll(() => completedOperations.has(operationId)).toBe(true);
+				await waitForCompletion(operationId);
+				expect(completedOperations.has(operationId)).toBe(true);
 				const status = await connection.handle({
 					jsonrpc: "2.0",
 					id: `status-${i}`,
@@ -160,7 +183,9 @@ describe("production runtime streaming", () => {
 			provider.closeAllConnections();
 			await new Promise<void>((resolve) => provider.close(() => resolve()));
 		}
-	});
+		// Real HTTP and filesystem round-trips across three turns; bound the wait
+		// like the sibling streaming test instead of relying on the default 5s.
+	}, 15_000);
 
 	it("projects ordered thinking and text before the provider stream ends", async () => {
 		const longThinking = "t".repeat(9 * 1024);

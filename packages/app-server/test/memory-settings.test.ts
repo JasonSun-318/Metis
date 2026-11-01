@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	getDefaultSessionDir,
@@ -101,8 +101,10 @@ describe("MemoryService", () => {
 	it("exposes the session's project vault paths", async () => {
 		const { service: svc } = await withSession();
 		const view = await svc.view({ sessionId: SESSION_ID });
-		expect(view.vault.projectRoot).toBe(realpathSync(projectDir));
-		expect(view.vault.projectDir).toMatch(/^.*\/memory\/projects\/[a-f0-9]{64}$/u);
+		const projectRoot = realpathSync(projectDir);
+		expect(view.vault.projectRoot).toBe(projectRoot);
+		expect(dirname(view.vault.projectDir!)).toBe(join(getVaultRoot(agentDir), "projects"));
+		expect(basename(view.vault.projectDir!)).toMatch(/^[a-f0-9]{64}$/u);
 	});
 
 	it("has no project scope for managed workspaces", async () => {

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readPermissionSandboxHealth, runPermissionSandboxSelfTest } from "../src/permission-sandbox-health.ts";
 
 vi.mock("@metis/coding-agent/host", () => ({ WorkspaceSandbox: { health: vi.fn(), selfTest: vi.fn() } }));
-afterEach(() => vi.resetAllMocks());
+
+const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+afterEach(() => {
+	Object.defineProperty(process, "platform", realPlatform);
+	vi.resetAllMocks();
+});
 
 const checkedAt = "2026-10-29T08:00:00.000Z";
 
@@ -120,20 +125,30 @@ describe("permission sandbox diagnostics bridge", () => {
 		expect(WorkspaceSandbox.selfTest).toHaveBeenCalledOnce();
 	});
 
-	it("reports a failed self-test without exposing the thrown error", async () => {
-		vi.mocked(WorkspaceSandbox.selfTest).mockRejectedValue(new Error("/Users/private/secret"));
-		const result = await runPermissionSandboxSelfTest();
-		expect(result).toMatchObject({
-			status: "misconfigured",
-			code: "probe-failed",
-			mode: "self-test",
-			recoveryActions: ["check-app-update"],
-		});
-		expect(result.checks).toContainEqual({
-			id: "sandbox-startup",
-			status: "failed",
-			reason: "probe-failed",
-		});
-		expect(JSON.stringify(result)).not.toContain("/Users/private/secret");
-	});
+	// The failure report derives its recovery actions from the host platform, so
+	// pin both branches instead of asserting whichever platform CI happens to run.
+	it.each([
+		{ platform: "win32" as NodeJS.Platform, recoveryActions: ["install-windows-sandbox", "check-app-update"] },
+		{ platform: "darwin" as NodeJS.Platform, recoveryActions: ["check-app-update"] },
+	])(
+		"reports a failed self-test on $platform without exposing the thrown error",
+		async ({ platform, recoveryActions }) => {
+			Object.defineProperty(process, "platform", { configurable: true, value: platform });
+			vi.mocked(WorkspaceSandbox.selfTest).mockRejectedValue(new Error("/Users/private/secret"));
+			const result = await runPermissionSandboxSelfTest();
+			expect(result).toMatchObject({
+				status: "misconfigured",
+				code: "probe-failed",
+				mode: "self-test",
+				platform,
+				recoveryActions,
+			});
+			expect(result.checks).toContainEqual({
+				id: "sandbox-startup",
+				status: "failed",
+				reason: "probe-failed",
+			});
+			expect(JSON.stringify(result)).not.toContain("/Users/private/secret");
+		},
+	);
 });
