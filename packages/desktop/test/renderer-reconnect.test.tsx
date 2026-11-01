@@ -396,7 +396,9 @@ describe("renderer reconnect behavior", () => {
 		const itemsById = new Map<string, ItemView>();
 		const itemIds = Array.from({ length: 10_000 }, (_, index) => {
 			const itemId = `item-${index}`;
-			itemsById.set(itemId, item(itemId, `Message ${index}`));
+			// Give each message a virtual row instead of merging this entire fixture
+			// into one legacy turn, which only appears to satisfy the DOM bound.
+			itemsById.set(itemId, { ...item(itemId, `Message ${index}`), turnId: `turn-${index}` });
 			return itemId;
 		});
 		const container = document.createElement("div");
