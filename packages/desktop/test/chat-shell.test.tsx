@@ -708,6 +708,36 @@ function createHarness(
 	};
 }
 
+async function mountWorkspaceFileEditor() {
+	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+		x: 0,
+		y: 0,
+		top: 0,
+		right: 320,
+		bottom: 600,
+		left: 0,
+		width: 320,
+		height: 600,
+		toJSON: () => ({}),
+	});
+	localStorage.setItem("metis.activeSessionId.code", "code-existing");
+	const { api } = createHarness();
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	await act(async () => root.render(<App api={api} store={new AppStore()} />));
+	await flush();
+
+	await act(async () => button(container, "Code").click());
+	await flush();
+	await addTool(container, "Files");
+	await flush();
+	await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
+	await flush();
+	return { api, container, root };
+}
+
 beforeEach(async () => {
 	await setLocale("en");
 	Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -6818,34 +6848,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("edits workspace text safely and protects unsaved file tabs", async () => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0,
-			y: 0,
-			top: 0,
-			right: 320,
-			bottom: 600,
-			left: 0,
-			width: 320,
-			height: 600,
-			toJSON: () => ({}),
-		});
-		localStorage.setItem("metis.activeSessionId.code", "code-existing");
-		const { api } = createHarness();
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		await act(async () => root.render(<App api={api} store={new AppStore()} />));
-		await flush();
-
-		await act(async () => button(container, "Code").click());
-		await flush();
-		await addTool(container, "Files");
-		await flush();
-		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
-		await flush();
-
+	it("preserves unsaved workspace edits across previews and modes before keyboard save", async () => {
+		const { api, container, root } = await mountWorkspaceFileEditor();
 		let editor = codeEditor(container, "Edit README.md");
 		await act(async () => changeCodeEditor(editor, "# Edited README"));
 		await flush();
@@ -6908,7 +6912,12 @@ describe("Chat desktop shell", () => {
 			visibleSessionId: "code-existing",
 		});
 		expect(container.querySelector(".file-preview-notice")?.textContent).toBe("File saved");
+		await act(async () => root.unmount());
+	});
 
+	it("preserves newer workspace edits while a save is pending", async () => {
+		const { api, container, root } = await mountWorkspaceFileEditor();
+		const editor = codeEditor(container, "Edit README.md");
 		let finishWrite!: (result: { readonly revision: string; readonly byteLength: number }) => void;
 		vi.mocked(api.writeWorkspaceFile).mockImplementationOnce(
 			() =>
@@ -6937,7 +6946,12 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".tool-tab.is-dirty")).toBeNull();
 		await act(async () => button(container, "Copy contents").click());
 		expect(api.writeClipboardText).toHaveBeenLastCalledWith({ text: "newer version" });
+		await act(async () => root.unmount());
+	});
 
+	it("protects unsaved workspace tabs when closing and handles save conflicts", async () => {
+		const { api, container, root } = await mountWorkspaceFileEditor();
+		let editor = codeEditor(container, "Edit README.md");
 		await act(async () => changeCodeEditor(editor, "discard me"));
 		await act(async () => button(container, "Close README.md").click());
 		expect(container.querySelector('[role="dialog"][aria-label="Unsaved changes"]')).not.toBeNull();
