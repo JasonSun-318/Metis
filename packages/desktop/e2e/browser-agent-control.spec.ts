@@ -272,6 +272,7 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 	let popupActResult = "";
 	let popupObservation = "";
 	let popupSourceId = "";
+	let stateBurst: Promise<void> = Promise.resolve();
 	try {
 		fixture.setScript("ordinary-control", async ({ step, lastResult, origin }) => {
 			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
@@ -349,8 +350,11 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 			return { text: "done:ordinary-control" };
 		});
 
-		fixture.setScript("performance-cycle", ({ step, lastResult }) => {
+		fixture.setScript("performance-cycle", async ({ step, lastResult }) => {
 			if (step < PERFORMANCE_OBSERVATIONS) {
+				// Finish the title burst before the final observation used by the
+				// first click, so this latency sample does not request a stale action.
+				if (step === PERFORMANCE_OBSERVATIONS - 1) await stateBurst;
 				return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "state" } };
 			}
 			if (step < PERFORMANCE_OBSERVATIONS + PERFORMANCE_ACTIONS) {
@@ -422,7 +426,7 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 				}
 			});
 		}, mainBrowserId);
-		const stateBurst = embedded.evaluate(
+		stateBurst = embedded.evaluate(
 			() =>
 				new Promise<void>((resolve) => {
 					let index = 0;
