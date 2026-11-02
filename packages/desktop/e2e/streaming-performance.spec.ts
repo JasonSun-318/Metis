@@ -22,6 +22,10 @@ const ALPHA_ID = "81000000-0000-4000-8000-0000000000e1";
 const BETA_ID = "81000000-0000-4000-8000-0000000000e2";
 const DELTA_COUNT = 400;
 
+// Trace snapshots execute inside the measured renderer. Keep the action trace
+// without injecting snapshot or screencast work into this performance test.
+test.use({ trace: { mode: "retain-on-failure", snapshots: false, screenshots: false } });
+
 function writeChunk(response: ServerResponse, delta: object, finishReason: string | null = null): void {
 	response.write(`data: ${JSON.stringify({
 		id: "stream-reply",
@@ -136,14 +140,17 @@ async function launchWorkspace(): Promise<{
 	// The renderer is already loaded by the time CDP attaches, so the observer
 	// is installed through addInitScript plus a reload: it must exist before
 	// the app scripts run to catch every long task on this load.
+	expect(await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes("longtask"))).toBe(true);
 	await page.addInitScript(() => {
 		const recorded: { startTime: number; duration: number }[] = [];
 		Object.defineProperty(globalThis, "__longtasks", { value: recorded });
-		new PerformanceObserver((list) => {
+		const observer = new PerformanceObserver((list) => {
 			for (const entry of list.getEntries()) {
 				recorded.push({ startTime: entry.startTime, duration: entry.duration });
 			}
-		}).observe({ entryTypes: ["longtask"] });
+		});
+		Object.defineProperty(globalThis, "__longtaskObserver", { value: observer });
+		observer.observe({ entryTypes: ["longtask"] });
 	});
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await page.setViewportSize({ width: 1200, height: 800 });
@@ -191,14 +198,24 @@ test("two visible sessions stream concurrently without long tasks", async () => 
 		await expect(alphaPanel).toHaveCount(1);
 		await expect(betaPanel).toHaveCount(1);
 
-		// Both transcripts must grow to completion while visible together.
-		await expect(alphaPanel.locator(".transcript-scroll")).toContainText(`w${DELTA_COUNT - 1}`, { timeout: 30_000 });
-		await expect(alphaPanel.locator(".transcript-scroll")).toContainText("stream-end", { timeout: 30_000 });
-		await expect(betaPanel.locator(".transcript-scroll")).toContainText(`w${DELTA_COUNT - 1}`, { timeout: 30_000 });
-		await expect(betaPanel.locator(".transcript-scroll")).toContainText("stream-end", { timeout: 30_000 });
+		// Read completion directly: retrying text assertions builds accessibility
+		// snapshots while the streams are still growing, distorting the timing.
+		for (const panel of [alphaPanel, betaPanel]) {
+			await expect.poll(() => panel.locator(".transcript-scroll").evaluate((element, lastWord) => {
+				const text = element.textContent ?? "";
+				return text.includes(lastWord) && text.includes("stream-end");
+			}, `w${DELTA_COUNT - 1}`), { timeout: 30_000 }).toBe(true);
+		}
 
-		const measurement = await page.evaluate((mark) => {
-			const entries = (globalThis as unknown as { __longtasks: { startTime: number; duration: number }[] }).__longtasks;
+		const measurement = await page.evaluate(async (mark) => {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+			const state = globalThis as unknown as {
+				__longtasks: { startTime: number; duration: number }[];
+				__longtaskObserver: PerformanceObserver;
+			};
+			const entries = state.__longtasks;
+			entries.push(...state.__longtaskObserver.takeRecords().map(({ startTime, duration }) => ({ startTime, duration })));
+			state.__longtaskObserver.disconnect();
 			const baseline = entries.filter((entry) => entry.startTime < mark);
 			const streaming = entries.filter((entry) => entry.startTime >= mark);
 			return {
