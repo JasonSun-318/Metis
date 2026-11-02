@@ -3532,6 +3532,12 @@ reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folde
 		const reviewHistory = panel.locator(".review-history");
 		const captureReview = async (filename: string) => {
 			await page!.evaluate(async () => {
+				// Keep the drawer's own transition tail in the app timing window.
+				await Promise.all(
+					[...document.querySelectorAll(".review-layout, .review-history")]
+						.flatMap((node) => node.getAnimations({ subtree: false }))
+						.map((animation) => animation.finished),
+				);
 				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 				const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
 				state.__reviewLongTasks?.push(...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration));
