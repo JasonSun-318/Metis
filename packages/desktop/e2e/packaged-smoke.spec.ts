@@ -3461,6 +3461,10 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await expect(page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" })).toHaveCount(0);
 		await unmodifiedLines.click();
 		await expect(page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" })).toHaveCount(1);
+		const reviewToolbar = panel.locator(".review-toolbar");
+		const reviewHistory = panel.locator(".review-history");
+		// Poll DOM values in the measured interval. Failed web-first assertions build
+		// accessibility snapshots, which would time Playwright diagnostics as app work.
 		await page.evaluate(() => {
 			const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
 			state.__reviewLongTasks = [];
@@ -3474,15 +3478,15 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
 
 		phase = "opening complete information from the folder button";
-		await page.getByRole("button", { name: "Show review details", exact: true }).click();
-		await expect(page.getByRole("complementary", { name: "Review details", exact: true })).toBeVisible();
-		await expect(page.locator(".review-toolbar > span")).toHaveText("master → review-project");
-		await expect(page.locator(".review-toolbar > span")).toHaveAttribute("title", await realpath(projectDir));
-		await expect(page.getByRole("button", { name: "All Changes", exact: true })).toBeVisible();
-		await expect(page.locator('.review-commits button[title="history fixture"]')).toBeVisible();
+		await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
+		await expect.poll(() => panel.getByRole("complementary", { name: "Review details", exact: true }).isVisible()).toBe(true);
+		await expect.poll(() => panel.locator(".review-toolbar > span").textContent()).toBe("master → review-project");
+		await expect.poll(() => panel.locator(".review-toolbar > span").getAttribute("title")).toBe(await realpath(projectDir));
+		await expect.poll(() => reviewHistory.getByRole("button", { name: "All Changes", exact: true }).isVisible()).toBe(true);
+		await expect.poll(() => panel.locator('.review-commits button[title="history fixture"]').isVisible()).toBe(true);
 		await expect(page.locator('.review-details button[aria-expanded="false"]')).toHaveCount(0);
-		await expect(page.locator(".review-tree button").filter({ hasText: ".gitignore" })).toBeVisible();
-		await expect(page.locator(".review-tree button").filter({ hasText: "current.ts" })).toBeVisible();
+		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: ".gitignore" }).isVisible()).toBe(true);
+		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: "current.ts" }).isVisible()).toBe(true);
 		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-open.png") });
 
 		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
@@ -3502,14 +3506,14 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		]);
 		if (!detailsBox || !contentBox) throw new Error("Narrow review drawer is missing");
 		expect(Math.abs(detailsBox.x - contentBox.x)).toBeLessThanOrEqual(1);
-		await expect(page.getByRole("button", { name: "Hide review details", exact: true })).toHaveAttribute("aria-expanded", "true");
-		await expect(fileHeaders.filter({ hasText: "context.md" })).toHaveAttribute("aria-expanded", "true");
+		await expect.poll(() => reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).getAttribute("aria-expanded")).toBe("true");
+		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).getAttribute("aria-expanded")).toBe("true");
 		await panel.screenshot({ path: path.join(qaDir, "details-narrow-drawer.png") });
 
 		phase = "preserving state and switching revisions";
-		await page.getByRole("button", { name: "Hide review details", exact: true }).click();
+		await reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).click();
 		await expect(changedLine).toHaveCount(1);
-		await page.getByRole("button", { name: "Show review details", exact: true }).click();
+		await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
 		await page.evaluate(() => {
 			const state = window as typeof window & { __reviewBlankTransitions?: number; __reviewBlankObserver?: MutationObserver };
 			state.__reviewBlankTransitions = 0;
@@ -3520,31 +3524,33 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 			if (content) state.__reviewBlankObserver.observe(content, { childList: true, subtree: true });
 		});
 		await page.locator('.review-commits button[title="empty fixture"]').click();
-		await expect(page.locator(".review-empty")).toHaveText("No changes");
+		await expect.poll(() => panel.locator(".review-empty").textContent()).toBe("No changes");
 		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
 		await page.locator('.review-commits button[title="history fixture"]').click();
 		await expect(fileHeaders).toHaveCount(1);
-		await expect(fileHeaders.filter({ hasText: "history-only.txt" })).toBeVisible();
-		await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
-		await expect(page.locator('.review-commits button[title="history fixture"]')).toHaveAttribute("aria-pressed", "true");
+		await expect.poll(() => fileHeaders.filter({ hasText: "history-only.txt" }).isVisible()).toBe(true);
+		await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
+		await expect.poll(() => panel.locator('.review-commits button[title="history fixture"]').getAttribute("aria-pressed")).toBe("true");
 		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
 		await page.locator('.review-commits button[title="initial"]').click();
 		await expect(fileHeaders).toHaveCount(3);
 		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
-		await page.getByRole("button", { name: "All Changes", exact: true }).click();
+		await reviewHistory.getByRole("button", { name: "All Changes", exact: true }).click();
 		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
 		expect(await fileHeaders.count()).toBeLessThan(178);
-		await expect(fileHeaders.filter({ hasText: "context.md" })).toBeVisible();
+		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
 		await page.locator(".review-tree button").filter({ hasText: "current.ts" }).click();
-		await expect(fileHeaders.filter({ hasText: "packages/nested/current.ts" })).toBeVisible();
-		await expect(fileHeaders.filter({ hasText: "packages/nested/current.ts" })).toHaveAttribute("aria-expanded", "true");
+		await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).isVisible()).toBe(true);
+		await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).getAttribute("aria-expanded")).toBe("true");
 		await page.locator(".review-tree button").filter({ hasText: "context.md" }).click();
-		await expect(fileHeaders.filter({ hasText: "context.md" })).toBeVisible();
-		await expect(page.getByRole("button", { name: "All Changes", exact: true })).toHaveAttribute("aria-pressed", "true");
+		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
+		await expect.poll(() => reviewHistory.getByRole("button", { name: "All Changes", exact: true }).getAttribute("aria-pressed")).toBe("true");
 		expect(await page.evaluate(() => (window as typeof window & { __reviewBlankTransitions?: number }).__reviewBlankTransitions ?? -1)).toBe(0);
-		await page.getByRole("button", { name: "Refresh review", exact: true }).click();
-		await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
-		const longestTask = await page.evaluate(() => {
+		await reviewToolbar.getByRole("button", { name: "Refresh review", exact: true }).click();
+		await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
+		await expect.poll(() => panel.locator(".review-layout").getAttribute("aria-busy")).toBe("false");
+		const longestTask = await page.evaluate(async () => {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 			const state = window as typeof window & {
 				__reviewBlankObserver?: MutationObserver;
 				__reviewLongTaskObserver?: PerformanceObserver;
