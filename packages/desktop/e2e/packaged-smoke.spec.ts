@@ -3438,7 +3438,11 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	}
 });
 
-test("packaged Code review lazily renders diffs and keeps folder-controlled details responsive", async () => {
+const reviewPerformanceTest = test.extend({
+	trace: { mode: "retain-on-failure", snapshots: false, screenshots: true },
+});
+
+reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folder-controlled details responsive", async () => {
 	test.setTimeout(120_000);
 	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
@@ -3526,9 +3530,26 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await expect(page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" })).toHaveCount(1);
 		const reviewToolbar = panel.locator(".review-toolbar");
 		const reviewHistory = panel.locator(".review-history");
-		// Poll DOM values in the measured interval. Failed web-first assertions build
-		// accessibility snapshots, which would time Playwright diagnostics as app work.
-		await page.evaluate(() => {
+		const captureReview = async (filename: string) => {
+			await page!.evaluate(async () => {
+				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+				const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
+				state.__reviewLongTasks?.push(...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration));
+				state.__reviewLongTaskObserver?.disconnect();
+			});
+			await panel.screenshot({ path: path.join(qaDir, filename) });
+			await page!.evaluate(async () => {
+				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+				(window as typeof window & { __reviewLongTaskObserver?: PerformanceObserver }).__reviewLongTaskObserver?.observe({ entryTypes: ["longtask"] });
+			});
+		};
+
+		// Trace DOM snapshots and QA screenshots execute in the renderer too. Keep
+		// that instrumentation out of the app's timing window, retaining every click.
+		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
+		expect(await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes("longtask"))).toBe(true);
+		await page.evaluate(async () => {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 			const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
 			state.__reviewLongTasks = [];
 			if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
@@ -3538,7 +3559,6 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 				state.__reviewLongTaskObserver.observe({ entryTypes: ["longtask"] });
 			}
 		});
-		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
 
 		phase = "opening complete information from the folder button";
 		await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
@@ -3550,7 +3570,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await expect(page.locator('.review-details button[aria-expanded="false"]')).toHaveCount(0);
 		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: ".gitignore" }).isVisible()).toBe(true);
 		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: "current.ts" }).isVisible()).toBe(true);
-		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-open.png") });
+		await captureReview("context-expanded-folder-open.png");
 
 		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
 		await resizePanel(680);
@@ -3560,7 +3580,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		]);
 		if (!detailsBox || !contentBox) throw new Error("Wide review layout is missing");
 		expect(contentBox.x).toBeGreaterThanOrEqual(detailsBox.x + detailsBox.width - 1);
-		await panel.screenshot({ path: path.join(qaDir, "details-wide.png") });
+		await captureReview("details-wide.png");
 
 		await resizePanel(500);
 		[detailsBox, contentBox] = await Promise.all([
@@ -3571,7 +3591,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		expect(Math.abs(detailsBox.x - contentBox.x)).toBeLessThanOrEqual(1);
 		await expect.poll(() => reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).getAttribute("aria-expanded")).toBe("true");
 		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).getAttribute("aria-expanded")).toBe("true");
-		await panel.screenshot({ path: path.join(qaDir, "details-narrow-drawer.png") });
+		await captureReview("details-narrow-drawer.png");
 
 		phase = "preserving state and switching revisions";
 		await reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).click();
@@ -3620,6 +3640,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 				__reviewLongTasks?: number[];
 			};
 			state.__reviewBlankObserver?.disconnect();
+			state.__reviewLongTasks?.push(...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration));
 			state.__reviewLongTaskObserver?.disconnect();
 			return Math.max(0, ...(state.__reviewLongTasks ?? []));
 		});
