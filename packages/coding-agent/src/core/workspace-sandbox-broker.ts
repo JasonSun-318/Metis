@@ -1,6 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, isAbsolute, win32 } from "node:path";
+import { basename, delimiter, isAbsolute, join, win32 } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -126,6 +127,39 @@ function isInsideWindowsHome(callerHome: string, candidate: string): boolean {
 	);
 }
 
+/** Quote a native path as one POSIX word for the Git Bash / sh child. */
+function posixQuote(value: string): string {
+	return `'${value.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * srt-win's second hop cannot carry a long command line, so Windows execs hand
+ * the shell a short bootstrap that reads the untouched command from a
+ * sandbox-read-only file. Bash's `$(< file)` builtin avoids PATH lookups; sh
+ * gets `cat`, which Git for Windows ships alongside its shell.
+ */
+function windowsCommandBootstrap(commandPath: string, shellPath: string): string {
+	const quoted = posixQuote(commandPath);
+	return /^bash(?:\.exe)?$/iu.test(win32.basename(shellPath)) ? `eval -- "$(< ${quoted})"` : `eval "$(cat ${quoted})"`;
+}
+
+/**
+ * Persist one Windows command for the child to read. The caller owns the
+ * broker-private directory; `wx` prevents replacing a pre-existing entry.
+ */
+export function prepareWindowsCommand(
+	commandDir: string,
+	command: string,
+	shellPath: string,
+): { bootstrap: string; cleanup: () => void } {
+	const commandPath = join(commandDir, `${randomUUID()}.sh`);
+	writeFileSync(commandPath, command, { encoding: "utf8", flag: "wx" });
+	return {
+		bootstrap: windowsCommandBootstrap(commandPath, shellPath),
+		cleanup: () => rmSync(commandPath, { force: true }),
+	};
+}
+
 export interface SandboxRuntimeConfigInput {
 	readonly workspaceRoots: readonly string[];
 	readonly readOnlyRoots: readonly string[];
@@ -136,6 +170,7 @@ export interface SandboxRuntimeConfigInput {
 	readonly runtimeReads: readonly string[];
 	readonly shellPath?: string;
 	readonly workspaceReadOnly?: boolean;
+	readonly windowsCommandDir?: string;
 }
 
 function canonicalNetworkHost(host: string): string | undefined {
@@ -194,9 +229,10 @@ export function createSandboxRuntimeConfig(
 	// Root deny-read mounts hide the installation; re-bind only the verified
 	// static helper into the read-only namespace so Linux can execute it.
 	const seccompApplyPath = process.platform === "linux" ? bundledSandboxHelperPath("seccomp") : undefined;
+	const bundledTools = getBundledToolsDir();
 	const runtimeReads =
 		platform === "win32"
-			? input.runtimeReads.filter((path) => isInsideWindowsHome(callerHome, path))
+			? input.runtimeReads.filter((path) => path === bundledTools || isInsideWindowsHome(callerHome, path))
 			: input.runtimeReads;
 	const shellRead =
 		input.shellPath && (platform !== "win32" || isInsideWindowsHome(callerHome, input.shellPath))
@@ -205,10 +241,14 @@ export function createSandboxRuntimeConfig(
 	const allowedWrite = [
 		...new Set([...(input.workspaceReadOnly ? [] : input.workspaceRoots), ...input.writeRoots, input.temporaryDir]),
 	];
+	// Windows reads long commands from files inside the writable temp dir.
+	// srt-win stamps this read grant before applying the denyWrite carve-out.
+	const windowsCommandDir = platform === "win32" && input.windowsCommandDir ? [input.windowsCommandDir] : [];
 	const allowedRead = [
 		...new Set([
 			...input.workspaceRoots,
 			...allowedWrite,
+			...windowsCommandDir,
 			...input.readOnlyRoots,
 			...runtimeReads,
 			...shellRead,
@@ -221,6 +261,7 @@ export function createSandboxRuntimeConfig(
 			...getDefaultWritePaths().filter(
 				(path) => !path.startsWith("/dev/") && !allowedWrite.some((root) => pathsIntersect(root, path)),
 			),
+			...windowsCommandDir,
 			...input.protectedRoots,
 			...input.writeProtectedRoots,
 		]),
@@ -254,6 +295,7 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 
 export async function runWorkspaceSandboxBroker(): Promise<void> {
 	let workspaceRoots: readonly string[] | undefined;
+	let windowsCommandDir: string | undefined;
 	let explicitWriteRoots: readonly string[] = [];
 	let networkEndpoints: readonly SandboxNetworkEndpoint[] = [];
 	let shellPath: string | undefined;
@@ -324,6 +366,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 		active = state;
 		state.promise = (async () => {
 			let timeoutHandle: NodeJS.Timeout | undefined;
+			let cleanupCommandFile: (() => void) | undefined;
 			try {
 				const shell = getShellConfig(shellPath);
 				const previousSandboxTemporaryDir = process.env.CLAUDE_CODE_TMPDIR;
@@ -337,8 +380,15 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						process.platform !== "win32" && /^(?:bash|sh|zsh|dash|ksh)$/u.test(basename(shell.shell))
 							? `export NO_PROXY= no_proxy=;\n${request.command}`
 							: request.command;
+					let command = proxyCommand;
+					if (process.platform === "win32") {
+						if (!windowsCommandDir) throw new Error("Sandbox command directory is missing");
+						const prepared = prepareWindowsCommand(windowsCommandDir, request.command, shell.shell);
+						cleanupCommandFile = prepared.cleanup;
+						command = prepared.bootstrap;
+					}
 					wrapped = await SandboxManager.wrapWithSandboxArgv(
-						proxyCommand,
+						command,
 						shell.shell,
 						undefined,
 						controller.signal,
@@ -422,6 +472,12 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				});
 			} finally {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
+				try {
+					cleanupCommandFile?.();
+				} catch (error) {
+					// Keep the command result and reclaim the directory on broker close.
+					process.stderr.write(`${sanitizedMessage(error, "Sandbox command cleanup failed")}\n`);
+				}
 				if (active === state) active = undefined;
 			}
 		})();
@@ -503,6 +559,16 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					const temporaryDir = process.env.METIS_SANDBOX_TEMP_DIR;
 					if (!temporaryDir) throw new Error("Sandbox temporary directory is missing");
 					mkdirSync(temporaryDir, { recursive: true });
+					if (process.platform === "win32") {
+						// Command files must stay outside model-writable roots while
+						// remaining readable by the sandbox user.
+						const commandDir = join(temporaryDir, "commands");
+						mkdirSync(commandDir, { recursive: true });
+						windowsCommandDir = realpathSync(commandDir);
+						if (!isPathInside(realpathSync(temporaryDir), windowsCommandDir)) {
+							throw new Error("Sandbox command directory escapes the temporary directory");
+						}
+					}
 					process.env.CLAUDE_CODE_TMPDIR = temporaryDir;
 					await SandboxManager.initialize(
 						createSandboxRuntimeConfig({
@@ -515,6 +581,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 							runtimeReads,
 							...(shellPath ? { shellPath } : {}),
 							workspaceReadOnly: request.workspaceReadOnly === true,
+							...(windowsCommandDir ? { windowsCommandDir } : {}),
 						}),
 						(target) => Promise.resolve(exactNetworkGrantAllows(networkEndpoints, target)),
 					);
