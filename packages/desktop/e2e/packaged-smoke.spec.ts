@@ -3534,7 +3534,7 @@ reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folde
 			await page!.evaluate(async () => {
 				// Keep the drawer's own transition tail in the app timing window.
 				await Promise.all(
-					[...document.querySelectorAll(".review-layout, .review-history")]
+					Array.from(document.querySelectorAll(".review-layout, .review-history"))
 						.flatMap((node) => node.getAnimations({ subtree: false }))
 						.map((animation) => animation.finished),
 				);
