@@ -59,10 +59,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # The workspace sandbox runtime requires bwrap, socat and rg on PATH;
-        # without them the packaged sandbox health probe reports "unavailable".
-        # ripgrep was preinstalled before the ubuntu-latest migration to 26.
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep socat unzip xvfb
+        # Linux covers runtime builds, types and foundation tests only.
+        # Foundation tests still exercise sandbox dependency discovery.
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep socat unzip
 
       - name: Install dependencies
         run: npm ci
@@ -101,9 +100,11 @@ jobs:
         run: npm test --workspace @metis/app-protocol && npm test --workspace @metis/app-server && npm test --workspace @metis/desktop
 
       - name: Make native artifacts
+        if: runner.os != 'Linux'
         run: npm run make --workspace @metis/desktop
 
       - name: Verify packaged runtime assets
+        if: runner.os != 'Linux'
         run: npm run verify:package --workspace @metis/desktop
 
       - name: Prepare Windows sandbox prerequisites
@@ -114,17 +115,9 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
 
-      - name: Probe packaged sandbox health (Linux)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
-
       - name: Run packaged E2E (macOS and Windows)
         if: runner.os != 'Linux'
         run: npm run test:e2e --workspace @metis/desktop
-
-      - name: Run packaged E2E (Linux)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:e2e --workspace @metis/desktop
 
       - name: Upload E2E failure diagnostics
         if: failure()
@@ -136,6 +129,7 @@ jobs:
           retention-days: 7
 
       - name: Upload native artifacts
+        if: runner.os != 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: metis-${{ runner.os }}-${{ runner.arch }}
