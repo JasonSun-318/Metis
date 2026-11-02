@@ -566,7 +566,7 @@ for (const mode of ["chat", "code"] as const) {
 		const plan = page.locator(".plan-card");
 		await expect(plan.locator(".markdown, summary")).toHaveCount(0);
 		await expect(page.locator("[data-transcript-turn]")).toHaveCount(2);
-		const geometry = await plan.evaluate((card) => {
+		const measureGeometry = () => plan.evaluate((card) => {
 			const row = card.closest<HTMLElement>("[data-index]")!;
 			const previous = row.previousElementSibling!;
 			const next = row.nextElementSibling!;
@@ -579,6 +579,12 @@ for (const mode of ["chat", "code"] as const) {
 				height: card.getBoundingClientRect().height,
 			};
 		});
+		// The virtualizer repositions adjacent rows after the drawer closes.
+		await expect.poll(async () => {
+			const { before, after } = await measureGeometry();
+			return Math.max(Math.abs(before - 12), Math.abs(after - 12));
+		}).toBeLessThanOrEqual(1);
+		const geometry = await measureGeometry();
 		expect(Math.abs(geometry.before - 12)).toBeLessThanOrEqual(1);
 		expect(Math.abs(geometry.after - 12)).toBeLessThanOrEqual(1);
 		expect(geometry.width).toBe(0);
