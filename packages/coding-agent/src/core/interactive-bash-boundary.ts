@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { canonicalizeActionPath } from "../utils/paths.ts";
 import { assertConsumedExecutionGrant, claimConsumedExecutionGrant } from "./permissions/grant-store.ts";
@@ -88,12 +89,23 @@ function normalizeContext(value: InteractiveBashContext): InteractiveBashContext
 }
 
 export function workspaceSandboxProfileKey(value: InteractiveBashContext): string {
+	const context = normalizeContext(value);
+	// NTFS grants belong to filesystem objects. Recreating a granted path must
+	// rebuild the sandbox so its new object receives the reviewed ACL again.
+	const writeRootObjects =
+		process.platform === "win32"
+			? context.writeRoots.map((root) => {
+					const object = statSync(root, { throwIfNoEntry: false });
+					return object ? [object.dev, object.ino] : null;
+				})
+			: undefined;
 	return digestCanonical({
 		version: 1,
 		sandboxRuntime: SANDBOX_RUNTIME_ID,
 		platform: process.platform,
 		architecture: process.arch,
-		context: normalizeContext(value),
+		context,
+		...(writeRootObjects ? { writeRootObjects } : {}),
 	});
 }
 

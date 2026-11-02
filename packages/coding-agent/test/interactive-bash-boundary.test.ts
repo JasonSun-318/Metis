@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -83,6 +85,37 @@ describe("interactive Bash boundary", () => {
 	afterEach(async () => {
 		await Promise.all(boundaries.splice(0).map((value) => value.dispose()));
 	});
+
+	it.each(["win32", "darwin"] as const)(
+		"refreshes recreated write-root objects only on Windows (%s)",
+		async (platform) => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+			const root = mkdtempSync(join(tmpdir(), "metis-grant-object-"));
+			const writeRoot = join(root, "output");
+			mkdirSync(writeRoot);
+			const instances: WorkspaceSandbox[] = [];
+			const createSandbox = vi.fn(async () => {
+				const instance = sandbox();
+				instances.push(instance);
+				return instance;
+			});
+			try {
+				Object.defineProperty(process, "platform", { value: platform });
+				const value = boundary({ createSandbox });
+				bind(value, "before", "sandbox", "pwd", { writeRoots: [writeRoot] });
+				await value.operations.exec("pwd", cwd, options("before"));
+				renameSync(writeRoot, join(root, "old-output"));
+				mkdirSync(writeRoot);
+				bind(value, "after", "sandbox", "pwd", { writeRoots: [writeRoot] });
+				await value.operations.exec("pwd", cwd, options("after"));
+				expect(createSandbox).toHaveBeenCalledTimes(platform === "win32" ? 2 : 1);
+				expect(instances[0]!.dispose).toHaveBeenCalledTimes(platform === "win32" ? 1 : 0);
+			} finally {
+				Object.defineProperty(process, "platform", originalPlatform);
+				rmSync(root, { recursive: true, force: true });
+			}
+		},
+	);
 
 	it("routes exact one-action bindings and lazily reuses one sandbox", async () => {
 		const hostExec = vi.fn(async () => ({ exitCode: 0 }));
