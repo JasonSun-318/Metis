@@ -13,7 +13,6 @@ import type {
 } from "@metis/app-protocol";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import metisIcon from "../../../assets/metis-icon.svg";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
@@ -1730,9 +1729,9 @@ export function App({ api, store }: AppProps) {
 		</>
 	) : null;
 
-	// Windows stacks two titlebar rows: the native 32px overlay keeps only the
-	// app mark, then a 40px row spans the window for navigation, session tabs
-	// and tool tabs. The row starts where the workspace does so the tab cells
+	// Windows keeps navigation in the native 32px overlay. A separate 40px
+	// row spans the window for session and tool tabs.
+	// The row starts where the workspace does so the tab cells
 	// stay above their panes; macOS keeps the single in-workspace row below.
 	const winTitlebarSidebarOffset = isCollapsed ? 0 : sessionSidebarWidth;
 	const titlebar = (
@@ -1745,37 +1744,7 @@ export function App({ api, store }: AppProps) {
 					: undefined
 			}
 		>
-			{api.platform === "win32" ? (
-				<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
-					<button
-						aria-label={t(
-							sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
-						)}
-						aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-						className="sessions-sidebar-toggle-fixed"
-						onClick={toggleSessionsSidebar}
-						type="button"
-					>
-						<SidebarSimple aria-hidden="true" size={16} />
-					</button>
-					<button
-						aria-label={t("Go back")}
-						disabled={navigationBusy || navigationBack.length === 0}
-						onClick={navigateBack}
-						type="button"
-					>
-						<ArrowLeft aria-hidden="true" size={16} />
-					</button>
-					<button
-						aria-label={t("Go forward")}
-						disabled={navigationBusy || navigationForward.length === 0}
-						onClick={navigateForward}
-						type="button"
-					>
-						<ArrowRight aria-hidden="true" size={16} />
-					</button>
-				</nav>
-			) : (
+			{api.platform !== "win32" && (
 				<button
 					aria-label={t(
 						sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
@@ -1818,12 +1787,6 @@ export function App({ api, store }: AppProps) {
 				value={{ openAgent: openAgentConversation, viewPermissionRule }}
 				enabled={Boolean(serverReady && !visibleInteraction)}
 			>
-				{api.platform === "win32" && (
-					<div aria-hidden="true" className="windows-titlebar-brand">
-						<img alt="" className="windows-titlebar-brand-mark" src={metisIcon} />
-						<span className="windows-titlebar-brand-name">Metis</span>
-					</div>
-				)}
 				<div
 					aria-hidden={settingsOpen || undefined}
 					className={`app-shell${isCollapsed ? " sessions-sidebar-collapsed" : ""}`}
@@ -1831,6 +1794,37 @@ export function App({ api, store }: AppProps) {
 					inert={settingsOpen || undefined}
 					style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
 				>
+					{api.platform === "win32" && (
+						<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
+							<button
+								aria-label={t("Go back")}
+								disabled={navigationBusy || navigationBack.length === 0}
+								onClick={navigateBack}
+								type="button"
+							>
+								<ArrowLeft aria-hidden="true" size={16} />
+							</button>
+							<button
+								aria-label={t("Go forward")}
+								disabled={navigationBusy || navigationForward.length === 0}
+								onClick={navigateForward}
+								type="button"
+							>
+								<ArrowRight aria-hidden="true" size={16} />
+							</button>
+							<button
+								aria-label={t(
+									sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
+								)}
+								aria-pressed={sessionsSidebarOpen && !sidebarClosing}
+								className="sessions-sidebar-toggle-fixed"
+								onClick={toggleSessionsSidebar}
+								type="button"
+							>
+								<SidebarSimple aria-hidden="true" size={16} />
+							</button>
+						</nav>
+					)}
 					{sessionsSidebarOpen && (
 						<SessionSidebar
 							agentNavigation={{ api, active: activeAgentConversation, onOpen: openAgentConversation }}

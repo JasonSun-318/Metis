@@ -169,7 +169,6 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 		const selectors = [
 			".sessions-sidebar-toggle-fixed", ".details-sidebar-toggle", ".tool-tab", ".tool-tab-group-label",
 			".session-add-trigger", ".tool-add-trigger", ".tool-tab-select > svg", ".tool-tab-close",
-			".windows-titlebar-navigation button",
 		];
 		return Array.from(titlebar.querySelectorAll<HTMLElement>(selectors.join(",")))
 			.filter((element) => element.getClientRects().length > 0)
@@ -181,6 +180,21 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 	expect(controls.length).toBeGreaterThanOrEqual(5);
 	for (const { control, center } of controls) {
 		expect(Math.abs(center - expectedCenter), `${control}: center ${center}, expected ${expectedCenter}`).toBeLessThanOrEqual(0.5);
+	}
+	if (platform === "win32") {
+		const navigation = page.locator(".windows-titlebar-navigation");
+		const buttons = navigation.locator("button");
+		await expect(buttons).toHaveCount(3);
+		await expect(buttons.nth(0)).toHaveAttribute("aria-label", "Go back");
+		await expect(buttons.nth(1)).toHaveAttribute("aria-label", "Go forward");
+		await expect(buttons.nth(2)).toHaveClass("sessions-sidebar-toggle-fixed");
+		const rects = await buttons.evaluateAll((elements) => elements.map((element) => {
+			const rect = element.getBoundingClientRect();
+			return { left: rect.left, right: rect.right, center: rect.y + rect.height / 2 };
+		}));
+		for (const rect of rects) expect(Math.abs(rect.center - 16)).toBeLessThanOrEqual(0.5);
+		expect(rects[0]!.right).toBeLessThanOrEqual(rects[1]!.left);
+		expect(rects[1]!.right).toBeLessThanOrEqual(rects[2]!.left);
 	}
 	const expectedHeight = platform === "darwin" && !fullscreen ? 46 : 40;
 	await expect(page.locator(".workspace-titlebar")).toHaveCSS("height", `${expectedHeight}px`);
@@ -450,7 +464,17 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		await page.locator(".details-sidebar-toggle").click();
 		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toBeVisible();
 		if (process.platform === "win32") {
-			await expect(page.locator(".windows-titlebar-brand")).toHaveCSS("height", "32px");
+			await expect(page.locator(".windows-titlebar-navigation")).toHaveCSS("height", "32px");
+			const sidebarSpacing = await page.locator(".session-sidebar").evaluate((sidebar) => {
+				const mode = sidebar.querySelector<HTMLElement>(".mode-switch")!.getBoundingClientRect();
+				const task = sidebar.querySelector<HTMLElement>(".new-task-button")!.getBoundingClientRect();
+				return {
+					topGap: mode.top - 32,
+					bottomGap: task.top - mode.bottom,
+					nativeDivider: getComputedStyle(document.body, "::before").borderBottomStyle,
+				};
+			});
+			expect(sidebarSpacing).toEqual({ topGap: 7, bottomGap: 12, nativeDivider: "none" });
 			const row = await page.locator(".workspace-titlebar").boundingBox();
 			expect(row?.y).toBe(32);
 			expect(row?.height).toBe(40);

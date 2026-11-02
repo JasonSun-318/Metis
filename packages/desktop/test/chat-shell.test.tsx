@@ -5346,9 +5346,12 @@ describe("Chat desktop shell", () => {
 
 		const titlebar = container.querySelector<HTMLElement>(".windows-titlebar-navigation")!;
 		expect(titlebar).not.toBeNull();
-		expect(titlebar.querySelector(".sessions-sidebar-toggle-fixed")).not.toBeNull();
-		expect(titlebar.querySelector('[aria-label="Go back"]')).not.toBeNull();
-		expect(titlebar.querySelector('[aria-label="Go forward"]')).not.toBeNull();
+		expect(titlebar.closest(".workspace-titlebar")).toBeNull();
+		expect(Array.from(titlebar.querySelectorAll("button"), (control) => control.getAttribute("aria-label"))).toEqual([
+			"Go back",
+			"Go forward",
+			"Hide sessions sidebar",
+		]);
 		expect(titlebar.querySelector(".mode-switch")).toBeNull();
 		expect(container.querySelector(".session-sidebar .mode-switch")).not.toBeNull();
 		expect(button(container, "Go back").disabled).toBe(true);
@@ -5369,7 +5372,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("stacks the Windows titlebar into an app-mark row and a workspace row", async () => {
+	it("keeps Windows navigation above the session and tool tab row", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
@@ -5379,16 +5382,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const brand = container.querySelector<HTMLElement>(".windows-titlebar-brand")!;
-		expect(brand.textContent).toContain("Metis");
-		expect(brand.closest(".app-shell")).toBeNull();
-
 		const row = container.querySelector<HTMLElement>(".workspace-titlebar.windows-titlebar-row")!;
 		expect(row).not.toBeNull();
 		expect(row.closest("main.workspace")).toBeNull();
-		expect(row.querySelector(".windows-titlebar-navigation .sessions-sidebar-toggle-fixed")).not.toBeNull();
-		expect(row.querySelector('[aria-label="Go back"]')).not.toBeNull();
-		expect(row.querySelector('[aria-label="Go forward"]')).not.toBeNull();
+		expect(row.querySelector(".windows-titlebar-navigation")).toBeNull();
+		expect(container.querySelectorAll(".sessions-sidebar-toggle-fixed")).toHaveLength(1);
 		expect(row.querySelector(".workspace-titlebar-tabs [role='tablist']")).not.toBeNull();
 		expect(row.style.getPropertyValue("--windows-sidebar-offset")).not.toBe("0px");
 
@@ -5420,7 +5418,6 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		expect(container.querySelector(".windows-titlebar-brand")).toBeNull();
 		expect(container.querySelector(".windows-titlebar-row")).toBeNull();
 		const header = container.querySelector<HTMLElement>("main.workspace > .workspace-titlebar")!;
 		expect(header).not.toBeNull();
