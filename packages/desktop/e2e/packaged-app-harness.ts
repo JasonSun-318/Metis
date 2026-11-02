@@ -320,15 +320,18 @@ export async function createAndRestoreChatSession(
 
 /** Quit normally before falling back to a forced stop so Chromium flushes profile state. */
 export async function quitPackagedApp({ app, browser }: { app: ChildProcess; browser: Browser }): Promise<void> {
-	if (app.exitCode === null && app.signalCode === null) {
-		const session = await browser.newBrowserCDPSession().catch(() => undefined);
-		if (session) {
+	try {
+		if (app.exitCode === null && app.signalCode === null) {
+			const session = await browser.newBrowserCDPSession();
 			void session.send("Browser.close").catch(() => undefined);
-			await Promise.race([once(app, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+			// The application's own shutdown may take five seconds. Wait for its
+			// exit instead of racing that deadline and killing Chromium mid-flush.
+			await expect.poll(() => app.exitCode !== null || app.signalCode !== null).toBe(true);
 		}
+	} finally {
+		await browser.close().catch(() => undefined);
+		await stopProcess(app);
 	}
-	await browser.close().catch(() => undefined);
-	await stopProcess(app);
 }
 
 export async function stopProcess(child: ChildProcess): Promise<void> {

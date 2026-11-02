@@ -10,6 +10,7 @@ import {
 	launchPackagedDesktop,
 	listen,
 	packagedExecutable,
+	quitPackagedApp,
 	readOpenAiChatRequest,
 	reservePort,
 	respondWithText,
@@ -96,10 +97,10 @@ for (const mode of ["chat", "code"] as const) {
 			await expect(answers).toHaveCount(2);
 			await expect(answers.last()).toContainText("Compaction fixture response");
 		} finally {
-			await browser?.close();
-			await stopProcess(app);
+			if (browser) await quitPackagedApp({ app, browser });
+			else await stopProcess(app);
 			await closeServer(provider);
-			await rm(tempRoot, { recursive: true, force: true });
+			await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		}
 	});
 }

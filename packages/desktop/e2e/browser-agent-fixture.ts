@@ -168,7 +168,7 @@ export async function launchBrowserAgentApp(
 export { quitPackagedApp as closeBrowserAgentApp } from "./packaged-app-harness.ts";
 
 export async function removeBrowserAgentEnvironment(environment: BrowserAgentEnvironment): Promise<void> {
-	await rm(environment.tempRoot, { recursive: true, force: true });
+	await rm(environment.tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 export async function sendFixturePrompt(page: Page, marker: string): Promise<void> {
