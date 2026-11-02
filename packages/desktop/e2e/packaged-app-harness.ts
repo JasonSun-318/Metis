@@ -318,6 +318,19 @@ export async function createAndRestoreChatSession(
 	return created.sessionId;
 }
 
+/** Quit normally before falling back to a forced stop so Chromium flushes profile state. */
+export async function quitPackagedApp({ app, browser }: { app: ChildProcess; browser: Browser }): Promise<void> {
+	if (app.exitCode === null && app.signalCode === null) {
+		const session = await browser.newBrowserCDPSession().catch(() => undefined);
+		if (session) {
+			void session.send("Browser.close").catch(() => undefined);
+			await Promise.race([once(app, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+		}
+	}
+	await browser.close().catch(() => undefined);
+	await stopProcess(app);
+}
+
 export async function stopProcess(child: ChildProcess): Promise<void> {
 	if (child.exitCode !== null || child.signalCode !== null) return;
 	if (process.platform === "win32" && child.pid !== undefined) {

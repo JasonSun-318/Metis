@@ -1,5 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -166,17 +165,7 @@ export async function launchBrowserAgentApp(
 	}
 }
 
-export async function closeBrowserAgentApp(app: RunningBrowserAgentApp): Promise<void> {
-	if (app.app.exitCode === null && app.app.signalCode === null) {
-		const session = await app.browser.newBrowserCDPSession().catch(() => undefined);
-		if (session) {
-			void session.send("Browser.close").catch(() => undefined);
-			await Promise.race([once(app.app, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-		}
-	}
-	await app.browser.close().catch(() => undefined);
-	await stopProcess(app.app);
-}
+export { quitPackagedApp as closeBrowserAgentApp } from "./packaged-app-harness.ts";
 
 export async function removeBrowserAgentEnvironment(environment: BrowserAgentEnvironment): Promise<void> {
 	await rm(environment.tempRoot, { recursive: true, force: true });

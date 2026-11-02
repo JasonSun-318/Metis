@@ -103,9 +103,14 @@ for (const [preset, verdict] of [["ask", "deny"], ["auto", "deny"], ["auto", "al
 				const result = request.messages.at(-1);
 				expect(result.role).toBe("tool");
 				expect(result.content).not.toMatch(/Permission denied|command not found|exited with code/i);
-				if (marker === "case-workdir") expect(result.content).toContain("/document-work/");
+				if (marker === "case-workdir") expect(result.content).toMatch(/[\\/]document-work[\\/]/u);
 				if (marker === "case-office-version") expect(result.content).toMatch(/\d+\.\d+/);
-				if (marker === "case-pwd-after-workdir") expect(result.content).toContain(app.projectDir);
+				if (marker === "case-pwd-after-workdir") {
+					const shellProjectDir = process.platform === "win32"
+						? app.projectDir.replace(/\\/gu, "/").replace(/^([A-Za-z]):/u, (_match, drive: string) => `/${drive.toLowerCase()}`)
+						: app.projectDir;
+					expect(result.content).toContain(shellProjectDir);
+				}
 			}
 			await expect(app.page.getByText("Permission denied: review.unavailable", { exact: true })).toHaveCount(0);
 			expect(app.provider.reviewCount).toBe(preset === "auto" ? 3 : 0);

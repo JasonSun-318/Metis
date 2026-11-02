@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,6 +18,7 @@ import {
 	launchPackagedDesktop,
 	listen,
 	packagedExecutable,
+	quitPackagedApp,
 	readOpenAiChatRequest,
 	reservePort,
 	respondWithText,
@@ -433,9 +434,11 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(page.getByText("No plugins installed yet.", { exact: true })).toBeVisible();
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
-			await writeFile(
-				"/tmp/debug-plugins-e2e.txt",
-				JSON.stringify(
+			// Attach to the report instead of a hard-coded /tmp path: the output
+			// path is platform-safe and an attachment failure must not mask the
+			// original error.
+			await testInfo.attach("debug-plugins-e2e", {
+				body: JSON.stringify(
 					{
 						bodyHtml,
 						diagnostics,
@@ -445,13 +448,14 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 					null,
 					2,
 				),
-			);
+				contentType: "application/json",
+			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
-			await browser?.close();
-			await stopProcess(app);
+			if (browser) await quitPackagedApp({ app, browser });
+			else await stopProcess(app);
 			fakeProvider.close();
-			await rm(tempRoot, { recursive: true, force: true });
+			await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		}
 	});
 
@@ -574,13 +578,24 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(partialDialog.getByText("partial-echo-server", { exact: false })).toBeVisible();
 
 			// Step 5 of Task 7: Layout bounding box check for checkbox and label
+			// Measure both boxes in one renderer frame: separate boundingBox
+			// round trips can land in different layout states (entrance animation,
+			// scroll settling) and report an offset that never existed on screen.
 			const label = partialDialog.locator(".plugins-partial-checkbox").first();
-			const inputBox = await label.locator('input[type="checkbox"]').boundingBox();
-			const textBox = await label.locator("span").boundingBox();
-			expect(inputBox).not.toBeNull();
-			expect(textBox).not.toBeNull();
-			expect(Math.abs(inputBox!.y + inputBox!.height / 2 - textBox!.y - textBox!.height / 2)).toBeLessThan(4);
-			expect(textBox!.x).toBeGreaterThan(inputBox!.x + inputBox!.width);
+			const checkboxAlignment = await label.evaluate((node) => {
+				const inputBox = node.querySelector('input[type="checkbox"]')!.getBoundingClientRect();
+				const textBox = node.querySelector("span")!.getBoundingClientRect();
+				return {
+					input: { x: inputBox.x, y: inputBox.y, width: inputBox.width, height: inputBox.height },
+					text: { x: textBox.x, y: textBox.y, width: textBox.width, height: textBox.height },
+				};
+			});
+			expect(
+				Math.abs(
+					checkboxAlignment.input.y + checkboxAlignment.input.height / 2 - checkboxAlignment.text.y - checkboxAlignment.text.height / 2,
+				),
+			).toBeLessThan(4);
+			expect(checkboxAlignment.text.x).toBeGreaterThan(checkboxAlignment.input.x + checkboxAlignment.input.width);
 
 			// Checkbox for partial install
 			const partialCheckbox = partialDialog.locator(".plugins-partial-checkbox input[type='checkbox']");
@@ -704,9 +719,11 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(brokenDialog).toHaveCount(0);
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
-			await writeFile(
-				"/tmp/debug-plugins-e2e-compat.txt",
-				JSON.stringify(
+			// Attach to the report instead of a hard-coded /tmp path: the output
+			// path is platform-safe and an attachment failure must not mask the
+			// original error.
+			await testInfo.attach("debug-plugins-e2e-compat", {
+				body: JSON.stringify(
 					{
 						bodyHtml,
 						diagnostics,
@@ -715,13 +732,14 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 					null,
 					2,
 				),
-			);
+				contentType: "application/json",
+			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
-			await browser?.close();
-			await stopProcess(app);
+			if (browser) await quitPackagedApp({ app, browser });
+			else await stopProcess(app);
 			fakeProvider.close();
-			await rm(tempRoot, { recursive: true, force: true });
+			await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		}
 	});
 
@@ -921,9 +939,11 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await runHttpTool(false);
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
-			await writeFile(
-				"/tmp/debug-plugins-e2e-cred.txt",
-				JSON.stringify(
+			// Attach to the report instead of a hard-coded /tmp path: the output
+			// path is platform-safe and an attachment failure must not mask the
+			// original error.
+			await testInfo.attach("debug-plugins-e2e-cred", {
+				body: JSON.stringify(
 					{
 						bodyHtml,
 						diagnostics,
@@ -932,13 +952,14 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 					null,
 					2,
 				),
-			);
+				contentType: "application/json",
+			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
-			await browser?.close();
-			await stopProcess(app);
+			if (browser) await quitPackagedApp({ app, browser });
+			else await stopProcess(app);
 			fakeProvider.close();
-			await rm(tempRoot, { recursive: true, force: true });
+			await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 		}
 	});
 });

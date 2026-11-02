@@ -1,11 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import JSZip from "jszip";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { createMcpTestServer } from "../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server for packaged app smoke coverage
 import {
@@ -18,6 +20,7 @@ import {
 	packagedAsar,
 	packagedExecutable,
 	processIsAlive,
+	quitPackagedApp,
 	reservePort,
 	stopProcess,
 	waitForServerReady,
@@ -351,6 +354,47 @@ function launchPackagedApp(
 	app.stdout?.on("data", (chunk) => diagnostics.push(String(chunk)));
 	app.stderr?.on("data", (chunk) => diagnostics.push(String(chunk)));
 	return app;
+}
+
+/**
+ * Windows has no SIGSTOP; NtSuspendProcess/NtResumeProcess suspend and resume
+ * every thread of the target so the packaged App Server truly stops serving
+ * while the test verifies pending-request UI. POSIX keeps the signals.
+ */
+function windowsNtProcessControl(pid: number, method: "NtSuspendProcess" | "NtResumeProcess"): void {
+	const script = [
+		"$ErrorActionPreference = 'Stop'",
+		"$src = @'",
+		"using System;",
+		"using System.Runtime.InteropServices;",
+		"public static class MetisProcessControl {",
+		'  [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr handle);',
+		'  [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr handle);',
+		'  [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);',
+		'  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);',
+		"}",
+		"'@",
+		"Add-Type -TypeDefinition $src",
+		`$handle = [MetisProcessControl]::OpenProcess(0x0800, $false, ${pid})`,
+		"if ($handle -eq [IntPtr]::Zero) { throw 'OpenProcess failed' }",
+		"try {",
+		`  if ([MetisProcessControl]::${method}($handle) -ne 0) { throw '${method} failed' }`,
+		"} finally {",
+		"  [void][MetisProcessControl]::CloseHandle($handle)",
+		"}",
+	].join("\n");
+	const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+	if (result.status !== 0) throw new Error(result.stderr || `Could not ${method} process ${pid}`);
+}
+
+function pauseAppServer(pid: number): void {
+	if (process.platform === "win32") windowsNtProcessControl(pid, "NtSuspendProcess");
+	else process.kill(pid, "SIGSTOP");
+}
+
+function resumeAppServer(pid: number): void {
+	if (process.platform === "win32") windowsNtProcessControl(pid, "NtResumeProcess");
+	else process.kill(pid, "SIGCONT");
 }
 
 test("packaged task list uses the Metis composer UI in Chat and Code", async ({}, testInfo) => {
@@ -1075,6 +1119,9 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await submit("case-exact-one");
 		const approval = page!.locator(".permission-approval-panel");
 		await expect(approval.locator(".permission-approval-command code")).toHaveText("rm -rf ./build");
+		if (process.platform === "win32") {
+			await expect(approval.locator(".permission-approval-scope code")).toHaveText(path.join(projectDir, "build"));
+		}
 		await approval.getByRole("button", { name: "More approval options", exact: true }).click();
 		await page!.getByRole("listbox", { name: "More approval options", exact: true })
 			.getByRole("option", { name: "Remember for this project", exact: true }).click();
@@ -1096,9 +1143,8 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		expect(existsSync(path.join(projectDir, "src"))).toBe(true);
 
 		phase = "restarting and reusing the persisted exact project rule";
-		await browser?.close();
+		await quitPackagedApp({ app: app!, browser: browser! });
 		browser = undefined;
-		await stopProcess(app!);
 		app = undefined;
 		await launch();
 		await mkdir(path.join(projectDir, "build"));
@@ -1473,8 +1519,19 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			"---\nname: packaged-beta\ndescription: Imported packaged beta Skill\n---\n\n# Instructions\n\nUse beta.\n",
 		),
 	]);
-	const zipped = spawnSync("zip", ["-q", "-r", importArchive, "."], { cwd: importSourceDir, encoding: "utf8" });
-	if (zipped.status !== 0) throw new Error(zipped.stderr || "Could not create packaged Skill fixture");
+	// `zip` is not available on Windows; JSZip (the plugin e2e fixture
+	// dependency) builds the same archive without a platform binary.
+	const importArchiveZip = new JSZip();
+	const addFixtureTree = async (current: string): Promise<void> => {
+		for (const entry of await readdir(current, { withFileTypes: true })) {
+			const entryPath = path.join(current, entry.name);
+			const archivePath = path.relative(importSourceDir, entryPath).split(path.sep).join("/");
+			if (entry.isDirectory()) await addFixtureTree(entryPath);
+			else importArchiveZip.file(archivePath, await readFile(entryPath));
+		}
+	};
+	await addFixtureTree(importSourceDir);
+	await writeFile(importArchive, await importArchiveZip.generateAsync({ type: "nodebuffer" }));
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
@@ -2191,8 +2248,14 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
 		expect(storedAvatar!.length).toBeLessThan(50_000);
 		const settingsBox = await page.locator(".settings-dialog").boundingBox();
+		// Windows draws its own 32px title bar strip inside the renderer and the
+		// settings backdrop starts beneath it (app.css data-platform rules); the
+		// dialog fills the remaining height on every platform.
+		const viewportHeight = page.viewportSize()?.height ?? 0;
 		expect(Math.round(settingsBox?.width ?? 0)).toBe(1_440);
-		expect(Math.round(settingsBox?.height ?? 0)).toBe(900);
+		expect(Math.round(settingsBox?.height ?? 0)).toBe(
+			process.platform === "win32" ? viewportHeight - 32 : viewportHeight,
+		);
 		await expect(page.getByText("Most used Skills", { exact: true })).toBeVisible();
 		await expect(page.locator(".profile-heatmap-week")).toHaveCount(53);
 		await expect(page.getByText("pdf", { exact: true })).toBeVisible();
@@ -4353,7 +4416,39 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 
 	const diagnostics: string[] = [];
 	const debuggingPort = await reservePort();
-	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+	// The Windows importer discovers browsers under LOCALAPPDATA; point the app
+	// at an isolated fixture root so discovery and import never touch the real
+	// browser profiles installed on the runner.
+	const windowsBrowserDataDir = path.join(tempRoot, "browser-data");
+	if (process.platform === "win32") {
+		const chromeRoot = path.join(windowsBrowserDataDir, "Google", "Chrome", "User Data");
+		await Promise.all([
+			writeFixtureFile(
+				path.join(chromeRoot, "Local State"),
+				JSON.stringify({ profile: { info_cache: { "Profile 1": { name: "Fixture Chrome" } } } }),
+			),
+			writeFixtureFile(path.join(chromeRoot, "Profile 1", "Preferences"), "{}"),
+		]);
+		const history = new DatabaseSync(path.join(chromeRoot, "Profile 1", "History"));
+		try {
+			history.exec("CREATE TABLE urls (url TEXT, title TEXT, last_visit_time INTEGER, hidden INTEGER DEFAULT 0)");
+			history.prepare("INSERT INTO urls VALUES (?, ?, ?, 0)")
+				.run("https://fixture.example/imported", "Fixture imported history", 13_380_163_200_000_000n);
+		} finally {
+			history.close();
+		}
+	}
+	const app = launchPackagedApp(
+		executable,
+		debuggingPort,
+		userDataDir,
+		projectDir,
+		agentDir,
+		homeDir,
+		diagnostics,
+		[],
+		process.platform === "win32" ? { LOCALAPPDATA: windowsBrowserDataDir } : {},
+	);
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
@@ -4396,7 +4491,7 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 			await expect(importDialog.getByText("Cookies", { exact: true })).toHaveCount(0);
 			await importDialog.getByRole("button", { name: "Import", exact: true }).click();
 			await expect(importDialog).toHaveCount(0);
-			await expect(page.getByText(/\d+ history entries retained/u)).toBeVisible();
+			await expect(page.getByText(/\b1 history entries retained\b/u)).toBeVisible();
 		} else {
 			// Report what the importer actually discovered: runners that ship a
 			// Chromium browser without a default profile show recovery guidance.
@@ -4501,26 +4596,34 @@ test("packaged Code project setup creates and opens a project", async () => {
 	const diagnostics: string[] = [];
 	// macOS ignores HOME for Electron's `home` path (NSHomeDirectory); the
 	// CFFIXED_USER_HOME override keeps the default project location inside the
-	// temporary home instead of the real user profile.
+	// temporary home instead of the real user profile. Windows resolves `home`
+	// from the OS profile and ignores every environment override, so the default
+	// location there is the OS home, so the test cleans up only its unique child.
+	const appHome = process.platform === "win32" ? homedir() : homeDir;
 	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics, [], {
 		CFFIXED_USER_HOME: homeDir,
 	});
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
+	let windowsProjectDir: string | undefined;
+	let windowsProjectParent: string | undefined;
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
 		phase = "opening Code project setup";
-		const codeProjectName = "Packaged Code project";
+		const codeProjectName = process.platform === "win32"
+			? `Packaged Code project ${path.basename(tempRoot)}`
+			: "Packaged Code project";
 		const defaultLocation = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getDefaultProjectLocation(),
 		);
 		// The main process only grants the location returned by this call; a
 		// renderer-chosen absolute path is intentionally not trusted.
-		expect(defaultLocation).toBe(path.join(homeDir, "Metis Projects"));
+		expect(defaultLocation).toBe(path.join(appHome, "Metis Projects"));
 		const codeProjectRoot = defaultLocation;
+		const parentExisted = existsSync(codeProjectRoot);
 		const codeProjectDir = path.join(codeProjectRoot, codeProjectName);
 		await page.evaluate((location) => localStorage.setItem("metis.codeProjectLocation", location), codeProjectRoot);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
@@ -4537,14 +4640,20 @@ test("packaged Code project setup creates and opens a project", async () => {
 		await expect(page.getByRole("dialog", { name: "Create a new project" })).toBeVisible();
 
 		phase = "creating the project";
-		expect(existsSync(codeProjectRoot)).toBe(false);
+		expect(existsSync(codeProjectDir)).toBe(false);
 		await page.getByRole("button", { name: "Start from scratch", exact: true }).click();
 		await expect(page.getByRole("dialog", { name: "Start a new project" })).toBeVisible();
 		await expect(page.locator(".code-project-location")).toContainText(codeProjectRoot);
 		await expect(page.getByText("Memory is on", { exact: true })).toHaveCount(0);
 		await expect(page.getByText("Instructions", { exact: true })).toHaveCount(0);
-		expect(existsSync(codeProjectRoot)).toBe(false);
+		expect(existsSync(codeProjectDir)).toBe(false);
 		await page.locator("#code-project-name").fill(codeProjectName);
+		if (process.platform === "win32") {
+			// Use the native-authorized default parent with a unique throwaway
+			// child; an arbitrary localStorage path receives no main-process grant.
+			windowsProjectDir = codeProjectDir;
+			if (!parentExisted) windowsProjectParent = codeProjectRoot;
+		}
 		await page.getByRole("button", { name: "Create", exact: true }).click();
 		await expect(page.locator("#composer-input")).toBeVisible();
 		expect(existsSync(codeProjectDir)).toBe(true);
@@ -4569,6 +4678,11 @@ test("packaged Code project setup creates and opens a project", async () => {
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
+		if (windowsProjectDir) await rm(windowsProjectDir, TEMP_REMOVE_OPTIONS);
+		if (windowsProjectParent) await rmdir(windowsProjectParent).catch((error: NodeJS.ErrnoException) => {
+			// Another project may have appeared in the shared default parent.
+			if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+		});
 		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
@@ -4784,9 +4898,10 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "New task in Pinned Chat Project" }).click();
 		const workspaceHeader = page.locator(".workspace-titlebar");
-		await expect.poll(
-			() => workspaceHeader.getAttribute("data-active-session-id"),
-		).not.toBe(CHAT_ACTIVE_ID);
+		await expect.poll(async () => {
+			const id = await workspaceHeader.getAttribute("data-active-session-id");
+			return id !== null && ![CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID].includes(id);
+		}).toBe(true);
 		const createdSessionId = await workspaceHeader.getAttribute("data-active-session-id");
 		expect(createdSessionId).not.toBeNull();
 		expect([CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID]).not.toContain(createdSessionId);
@@ -4805,13 +4920,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 		if (!rootPid) throw new Error("Packaged app has no process id");
 		const utilityPid = appServerPid(rootPid);
 		if (!utilityPid) throw new Error("Could not find the packaged App Server");
-		process.kill(utilityPid, "SIGSTOP");
+		pauseAppServer(utilityPid);
 		try {
 			await deleteMenuItem.click({ timeout: 10_000 });
 			await expect(page.getByText("Checking project data…", { exact: true })).toBeVisible();
 			await page.screenshot({ path: path.join(qaDir, "delete-loading-normal.png") });
 		} finally {
-			process.kill(utilityPid, "SIGCONT");
+			resumeAppServer(utilityPid);
 		}
 		const deleteDialog = page.getByRole("dialog", { name: "Delete Chat project?" });
 		await expect(deleteDialog.getByText("3 Chat sessions", { exact: false })).toBeVisible();
@@ -4821,9 +4936,8 @@ test("packaged mode project actions preserve the other mode and shared project d
 
 		phase = "removing the test schedule and loading a fresh preview";
 		await deleteDialog.getByRole("button", { name: "Cancel" }).click();
-		await browser.close();
+		await quitPackagedApp({ app, browser });
 		browser = undefined;
-		await stopProcess(app);
 		await fixtures.ScheduleManager.create({ agentDir }).delete(SCHEDULE_ID, { deleteSessions: false });
 		scheduleRemoved = true;
 		debuggingPort = await reservePort();
@@ -4876,8 +4990,8 @@ test("packaged mode project actions preserve the other mode and shared project d
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
-		await browser?.close().catch(() => undefined);
-		await stopProcess(app);
+		if (browser) await quitPackagedApp({ app, browser });
+		else await stopProcess(app);
 		if (!scheduleRemoved) await fixtures.ScheduleManager.create({ agentDir }).delete(SCHEDULE_ID, { deleteSessions: false }).catch(() => undefined);
 		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}

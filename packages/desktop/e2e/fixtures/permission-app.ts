@@ -9,6 +9,7 @@ import {
 	desktopRoot,
 	launchPackagedDesktop,
 	packagedExecutable,
+	quitPackagedApp,
 	reservePort,
 	stopProcess,
 	waitForServerReady,
@@ -348,8 +349,8 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			return page!.locator(".permission-approval-panel");
 		},
 		async close() {
-			await browser?.close().catch(() => undefined);
-			if (app) await stopProcess(app);
+			if (app && browser) await quitPackagedApp({ app, browser });
+			else if (app) await stopProcess(app);
 			await provider.close();
 			await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 		},
@@ -390,9 +391,9 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			);
 		},
 		async relaunch() {
-			await browser?.close().catch(() => undefined);
+			if (app && browser) await quitPackagedApp({ app, browser });
+			else if (app) await stopProcess(app);
 			browser = undefined;
-			if (app) await stopProcess(app);
 			app = undefined;
 			await open();
 		},
