@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type {
 	ExecutionGrantConsumeInput,
 	ExecutionGrantIssueInput,
@@ -85,7 +86,7 @@ function executionRequest(
 ): PermissionExecutionRequest<string> {
 	return {
 		action: overrides.action ?? action,
-		args: overrides.args ?? { path: `${projectDir}/README.md` },
+		args: overrides.args ?? { path: join(projectDir, "README.md") },
 		settings: overrides.settings ?? { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
 		sandboxHealth: overrides.sandboxHealth ?? "healthy",
 		trustedUserMessages: overrides.trustedUserMessages ?? [
