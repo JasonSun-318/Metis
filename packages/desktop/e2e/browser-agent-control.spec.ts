@@ -40,6 +40,12 @@ const PERFORMANCE_WARMUPS = 5;
 const PERFORMANCE_OBSERVATIONS = 35;
 const PERFORMANCE_ACTIONS = 100;
 
+interface BrowserProgressMeasurement {
+	readonly startedAt: number;
+	count: number;
+	lastTitle: string;
+}
+
 async function waitForDone(app: RunningBrowserAgentApp, marker: string): Promise<void> {
 	await expect(app.page.getByText(`done:${marker}`, { exact: true })).toBeVisible({ timeout: 60_000 });
 }
@@ -403,13 +409,19 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		).toBe(true);
 		expect(fixture.calls.filter((call) => call.marker === "ordinary-control" && call.name === "browser_tabs").at(-1)?.result).toContain(mainBrowserId);
 
-		await app.page.evaluate(() => {
-			const state = window as typeof window & { __browserProgressEvents?: number[] };
-			state.__browserProgressEvents = [];
+		await app.page.evaluate((browserId) => {
+			const state = window as typeof window & { __browserProgress?: BrowserProgressMeasurement };
+			const progress = { startedAt: performance.now(), count: 0, lastTitle: "" };
+			state.__browserProgress = progress;
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.subscribeBrowser((event) => {
-				if (event.type === "activity" || event.type === "state") state.__browserProgressEvents!.push(performance.now());
+				if (event.type === "state" && event.state.browserId === browserId) {
+					progress.count += 1;
+					progress.lastTitle = event.state.title;
+				} else if (event.type === "activity" && event.browserId === browserId) {
+					progress.count += 1;
+				}
 			});
-		});
+		}, mainBrowserId);
 		const stateBurst = embedded.evaluate(
 			() =>
 				new Promise<void>((resolve) => {
@@ -425,6 +437,17 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		);
 		await sendFixturePrompt(app.page, "performance-cycle");
 		await stateBurst;
+		await expect.poll(() => app!.page.evaluate(
+			() => (window as typeof window & { __browserProgress?: BrowserProgressMeasurement }).__browserProgress?.lastTitle,
+		)).toBe("Browser control burst 199");
+		const burstProgress = await app.page.evaluate(() => {
+			const progress = (window as typeof window & { __browserProgress?: BrowserProgressMeasurement }).__browserProgress!;
+			return { count: progress.count, elapsed: performance.now() - progress.startedAt };
+		});
+		// Measure the complete stimulus through its final delivered state: IPC can bunch
+		// arrivals inside an arbitrary sliding window. The emitter's strict 20/s spacing
+		// is checked with fake timers in browser-manager.test.ts; one initial event is allowed here.
+		expect(burstProgress.count).toBeLessThanOrEqual(Math.ceil(burstProgress.elapsed * 20 / 1_000) + 1);
 		await waitForDone(app, "performance-cycle");
 		const performanceCalls = fixture.calls.filter((call) => call.marker === "performance-cycle");
 		expect(performanceCalls.every((call) => call.completedAt !== undefined)).toBe(true);
@@ -441,15 +464,6 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 		expect(actionDurations).toHaveLength(PERFORMANCE_ACTIONS);
 		expect(p95(observationDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_000);
 		expect(p95(actionDurations.slice(PERFORMANCE_WARMUPS))).toBeLessThan(1_500);
-		const progressEvents = await app.page.evaluate(
-			() => (window as typeof window & { __browserProgressEvents?: number[] }).__browserProgressEvents ?? [],
-		);
-		const peakEventsPerSecond = progressEvents.reduce(
-			(maximum, startedAt) =>
-				Math.max(maximum, progressEvents.filter((timestamp) => timestamp >= startedAt && timestamp < startedAt + 1_000).length),
-			0,
-		);
-		expect(peakEventsPerSecond).toBeLessThanOrEqual(20);
 		await expect(embedded.locator("#count")).toHaveText("Count: 101");
 
 		await sendFixturePrompt(app.page, "stale-observe");
