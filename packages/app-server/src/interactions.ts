@@ -189,6 +189,22 @@ function priorReviewFields(
 	return {};
 }
 
+const WRITABLE_DIRECTORY_LABEL = "Writable directory";
+
+/**
+ * Windows sandbox grants cover directories, so the approval card must show the
+ * actual write roots rather than the exact file the command named. These come
+ * from the reviewed action args, not from the command text.
+ */
+function writableDirectoryScope(request: PermissionApprovalRequest): readonly string[] {
+	if (process.platform !== "win32") return [];
+	if (request.action.toolName !== "bash" || approvalExecutionTarget(request) !== "sandbox") return [];
+	const paths = recordArgs(request.args)?.writePaths;
+	if (!Array.isArray(paths)) return [];
+	const directories = paths.filter((path): path is string => typeof path === "string" && path.trim().length > 0);
+	return [...new Set(directories)];
+}
+
 function permissionOperation(request: PermissionApprovalRequest) {
 	const rows: Array<{ label: string; value: string }> = [];
 	const args =
@@ -207,6 +223,9 @@ function permissionOperation(request: PermissionApprovalRequest) {
 	}
 	if (request.action.command) push("Command", redactPermissionCommand(request.action.command));
 	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
+	// Keep the directory scope even when it equals the working directory: the
+	// grant really does cover that directory, not one file inside it.
+	for (const directory of writableDirectoryScope(request)) push(WRITABLE_DIRECTORY_LABEL, directory);
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
 	for (const path of request.action.paths) {
 		if (request.cwd && path === request.cwd) continue;

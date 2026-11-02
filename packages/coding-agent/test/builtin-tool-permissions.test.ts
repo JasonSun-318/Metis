@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { initializeShellAnalysis } from "../src/core/permissions/shell-parser.ts";
 import { createToolIdentity, describeToolAction } from "../src/core/tool-permission-adapter.ts";
@@ -8,6 +8,9 @@ import { createAllToolDefinitions } from "../src/core/tools/index.ts";
 beforeAll(async () => initializeShellAnalysis());
 
 const cwd = join(process.cwd(), "builtin-permission-project");
+// Windows sandbox grants name directories, so a target whose existing parent is
+// the package directory is represented by that parent instead of the file.
+const writeRoot = (target: string) => (process.platform === "win32" ? dirname(target) : target);
 const definitions = createAllToolDefinitions(cwd, {
 	webSearch: {
 		getSettings: () => ({ enabled: true, provider: "brave" }),
@@ -124,10 +127,10 @@ describe("built-in tool permission descriptors", () => {
 		const target = join(cwd, "..", "outside.log");
 		const exact = describeToolAction(
 			definitions.bash,
-			{ command: `echo result > ${target}` },
+			{ command: `echo result > ${JSON.stringify(target)}` },
 			{ ...context, provenance: "builtin", toolIdentity: "builtin-bash-redirection" },
 		);
-		expect(exact.writePaths).toEqual([target]);
+		expect(exact.writePaths).toEqual([writeRoot(target)]);
 		expect(
 			describeToolAction(
 				definitions.bash,
@@ -151,30 +154,34 @@ describe("built-in tool permission descriptors", () => {
 				},
 			);
 
-		expect(describe(`touch ${outside}`, "builtin-bash-touch").writePaths).toContain(outside);
-		const copy = describe(`cp ./source.txt ${outside}`, "builtin-bash-copy");
+		expect(describe(`touch ${JSON.stringify(outside)}`, "builtin-bash-touch").writePaths).toContain(
+			writeRoot(outside),
+		);
+		const copy = describe(`cp ./source.txt ${JSON.stringify(outside)}`, "builtin-bash-copy");
 		expect(copy.readPaths).toContain(join(cwd, "source.txt"));
-		expect(copy.writePaths).toContain(outside);
-		const localCopy = describe(`cp ${outside} output.txt`, "builtin-bash-local-copy");
+		expect(copy.writePaths).toContain(writeRoot(outside));
+		const localCopy = describe(`cp ${JSON.stringify(outside)} output.txt`, "builtin-bash-local-copy");
 		expect(localCopy.readPaths).toContain(outside);
 		expect(localCopy.writePaths).not.toContain(outside);
 		const secondDirectory = join(cwd, "..", "outside-directory");
 		const installDirectories = describe(
-			`install -dv ${outside} ${secondDirectory}`,
+			`install -dv ${JSON.stringify(outside)} ${JSON.stringify(secondDirectory)}`,
 			"builtin-bash-install-directories",
 		);
-		expect(installDirectories.writePaths).toEqual(expect.arrayContaining([outside, secondDirectory]));
-		const read = describe(`cat ${outside}`, "builtin-bash-cat");
+		expect(installDirectories.writePaths).toEqual(
+			expect.arrayContaining([writeRoot(outside), writeRoot(secondDirectory)]),
+		);
+		const read = describe(`cat ${JSON.stringify(outside)}`, "builtin-bash-cat");
 		expect(read.readPaths).toContain(outside);
 		expect(read.writePaths).toEqual([]);
-		const python = describe(`python ./script.py ${outside}`, "builtin-bash-unknown-paths");
+		const python = describe(`python ./script.py ${JSON.stringify(outside)}`, "builtin-bash-unknown-paths");
 		expect(python.writePaths).toEqual([cwd]);
 		expect(python.effects).toContain("unknown");
 		expect(python.shellAnalysis?.complete).toBe(false);
 		expect(describe("touch $OUTPUT_PATH", "builtin-bash-dynamic-operand").effects).toContain("unknown");
-		const targetCopy = describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory");
+		const targetCopy = describe(`cp -t ${JSON.stringify(outside)} ./source.txt`, "builtin-bash-target-directory");
 		expect(targetCopy.shellAnalysis?.complete).toBe(false);
-		expect(targetCopy.writePaths).toContain(outside);
+		expect(targetCopy.writePaths).toContain(writeRoot(outside));
 		expect(targetCopy.readPaths).toContain(join(cwd, "source.txt"));
 		expect(targetCopy.effects).toContain("unknown");
 	});

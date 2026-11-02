@@ -136,6 +136,16 @@ describe("InteractionBroker", () => {
 		toolCallId,
 		result: { tool: "browser_observe", observation: browserObservation(revision) },
 	});
+	const withPlatform = <T>(platform: NodeJS.Platform, run: () => T): T => {
+		const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+		if (!descriptor) throw new Error("process.platform is not configurable");
+		Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+		try {
+			return run();
+		} finally {
+			Object.defineProperty(process, "platform", descriptor);
+		}
+	};
 
 	it("keeps simultaneous child approvals with the same provider action id separate", async () => {
 		const pendingChanges: boolean[] = [];
@@ -696,6 +706,72 @@ describe("InteractionBroker", () => {
 		const serialized = JSON.stringify(peer.requests[0]);
 		expect(serialized).not.toContain('"command": "curl https://example.test"');
 		expect(serialized).not.toMatch(/"presentation":"session_permission_approval"/);
+	});
+
+	it("shows the Windows sandbox directory write scope even at the working directory", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000340";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
+
+		await withPlatform("win32", () =>
+			broker.requestPermissionApproval(
+				SESSION_ID,
+				childApproval({
+					actor: undefined,
+					executionTarget: "sandbox",
+					action: {
+						actionId: "bash-write-directory",
+						toolName: "bash",
+						provenance: "builtin",
+						risks: ["workspace-write"],
+						paths: ["/tmp/work"],
+						networkTargets: [],
+						command: "printf x > new.txt",
+					},
+					args: { command: "printf x > new.txt", writePaths: ["/tmp/work"] },
+				}),
+			),
+		);
+
+		expect(permissionInteraction(peer).details).toEqual([
+			{ label: "Command", value: "printf x > new.txt" },
+			{ label: "Working directory", value: "/tmp/work" },
+			{ label: "Writable directory", value: "/tmp/work" },
+		]);
+	});
+
+	it("keeps Windows directory scope out of non-sandbox and non-Windows approvals", async () => {
+		const scoped = childApproval({
+			actor: undefined,
+			executionTarget: "host",
+			action: {
+				actionId: "bash-write-host",
+				toolName: "bash",
+				provenance: "builtin",
+				risks: ["workspace-write"],
+				paths: ["/tmp/work"],
+				networkTargets: [],
+				command: "printf x > new.txt",
+			},
+			args: { command: "printf x > new.txt", writePaths: ["/tmp/work"] },
+		});
+		for (const [platform, request] of [
+			["win32", scoped],
+			["darwin", { ...scoped, executionTarget: "sandbox" as const }],
+		] as const) {
+			const interactionId = `00000000-0000-4000-8000-${platform === "win32" ? "000000000341" : "000000000342"}`;
+			const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+			const peer = new FakePeer();
+			broker.assign(SESSION_ID, peer);
+			peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
+			await withPlatform(platform, () => broker.requestPermissionApproval(SESSION_ID, request));
+			expect(permissionInteraction(peer).details).not.toContainEqual({
+				label: "Writable directory",
+				value: "/tmp/work",
+			});
+		}
 	});
 
 	it.each(["deny", "unavailable"] as const)("projects a prior model %s without rationale", async (outcome) => {

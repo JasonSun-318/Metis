@@ -1,6 +1,7 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PermissionPolicy } from "../src/core/permissions/policy.ts";
 import { settingsForPreset } from "../src/core/permissions/settings.ts";
 import { initializeShellAnalysis } from "../src/core/permissions/shell-parser.ts";
@@ -12,6 +13,7 @@ import {
 	permissionDescriptor,
 } from "../src/core/tool-permission-adapter.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
+import { getShellConfig } from "../src/utils/shell.ts";
 import {
 	definitionWithoutPermission,
 	identityInput,
@@ -197,7 +199,9 @@ describe("tool permission adapter", () => {
 		const rm = describeBash(`rm -f "${file}"`);
 		expect(rm.effects).toContain("destructive");
 		expect(rm.effects).not.toContain("unknown");
-		expect(rm.writePaths).toEqual([file]);
+		// Windows intentionally grants the nearest existing directory instead of
+		// the exact file; the dedicated Windows scope tests cover that shape.
+		if (process.platform !== "win32") expect(rm.writePaths).toEqual([file]);
 
 		const listed = describeBash("ls ~/Desktop");
 		expect(listed.effects).not.toContain("unknown");
@@ -324,5 +328,108 @@ describe("tool permission adapter", () => {
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: homeDelete })).toMatchObject({
 			kind: "allow",
 		});
+	});
+});
+
+describe("Windows sandbox directory write scope", () => {
+	// Capture the host shell before any test replaces process.platform, since
+	// shell discovery itself is platform-dependent.
+	const shellPath = getShellConfig().shell;
+	const roots: string[] = [];
+	const workspace = () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "metis-write-scope-")));
+		roots.push(root);
+		return root;
+	};
+	const describeIn = (command: string, cwd: string) =>
+		describeToolAction(
+			bashDefinition,
+			{ command },
+			{
+				actionId: `bash-${command}`,
+				cwd,
+				workspaceRoots: [cwd],
+				shellPath,
+				provenance: "builtin",
+				toolIdentity: createToolIdentity(identityInput({ toolName: "bash" })),
+			},
+		);
+	const withPlatform = <T>(platform: NodeJS.Platform, run: () => T): T => {
+		const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+		if (!descriptor) throw new Error("process.platform is not configurable");
+		Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+		try {
+			return run();
+		} finally {
+			Object.defineProperty(process, "platform", descriptor);
+		}
+	};
+
+	afterEach(() => {
+		for (const root of roots.splice(0)) {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(`${dirname(root)}/metis-write-scope-outside`, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps exact macOS file targets untouched", () => {
+		const root = workspace();
+		const target = join(root, "src", "new-file.txt");
+		const action = withPlatform("darwin", () => describeIn(`printf x > "${target}"`, root));
+		expect(action.writePaths).toEqual([target]);
+	});
+
+	it("grants the nearest existing directory for new and recreated files", () => {
+		const root = workspace();
+		const source = join(root, "src");
+		mkdirSync(source);
+		writeFileSync(join(root, "existing.txt"), "old");
+
+		const cases = [
+			{ target: join(source, "new-file.txt"), expected: source },
+			// An existing file is still directory-scoped so atomic replace and
+			// delete-then-recreate keep the same grant.
+			{ target: join(root, "existing.txt"), expected: root },
+		];
+		for (const { target, expected } of cases) {
+			const action = withPlatform("win32", () => describeIn(`printf x > "${target}"`, root));
+			expect(action.writePaths).toEqual([expected]);
+		}
+	});
+
+	it("walks up through deep missing parents but never above the workspace", () => {
+		const root = workspace();
+		const target = join(root, "a", "b", "c", "new-file.txt");
+		const action = withPlatform("win32", () => describeIn(`printf x > "${target}"`, root));
+		expect(action.writePaths).toEqual([root]);
+
+		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("ask"), action });
+		expect(decision).toMatchObject({ kind: "review", grant: { writeRoots: [root] } });
+	});
+
+	it("keeps a workspace root target as that root", () => {
+		const root = workspace();
+		const action = withPlatform("win32", () => describeIn(`mkdir -p "${root}"`, root));
+		expect(action.writePaths).toEqual([root]);
+	});
+
+	it("widens an outside target only to its own existing directory", () => {
+		const root = workspace();
+		const outside = `${dirname(root)}/metis-write-scope-outside`;
+		mkdirSync(join(outside, "deep"), { recursive: true });
+		const target = join(outside, "deep", "new-file.txt");
+		const action = withPlatform("win32", () => describeIn(`printf x > "${target}"`, root));
+		expect(action.writePaths).toEqual([join(outside, "deep")]);
+	});
+
+	it("keeps protected workspace writes denied after directory widening", () => {
+		const root = workspace();
+		const git = join(root, ".git");
+		mkdirSync(git);
+		const target = join(git, "config");
+		const action = withPlatform("win32", () => describeIn(`printf x > "${target}"`, root));
+		expect(action.writePaths).toEqual([git]);
+		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
+		expect(decision.kind).toBe("deny");
 	});
 });

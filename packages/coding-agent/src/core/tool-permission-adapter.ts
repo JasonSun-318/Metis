@@ -1,4 +1,7 @@
+import { statSync } from "node:fs";
+import { dirname, parse } from "node:path";
 import type { Static, TSchema } from "typebox";
+import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
 import { getShellConfig } from "../utils/shell.ts";
 import type {
 	ToolDefinition,
@@ -86,6 +89,45 @@ export function exactNetworkEndpoint(value: string | URL): { readonly hostname: 
 	return Object.freeze({ hostname, port });
 }
 
+/**
+ * Windows sandbox grants apply to directories. The SDK drops a grant for a path
+ * that does not exist yet, so a claim for a future file could not create it.
+ * Grant the nearest existing ancestor directory instead. Files stay
+ * directory-scoped too so atomic replace, delete, and recreate keep working.
+ * The containing workspace root is a hard lower bound: a workspace target must
+ * never widen to the workspace parent or a drive root. macOS keeps exact
+ * targets because its sandbox accepts grants for paths that do not exist yet.
+ */
+function windowsDirectoryWriteRoots(paths: readonly string[], workspaceRoots: readonly string[]): readonly string[] {
+	const roots = workspaceRoots.map((root) => canonicalizeActionPath(root, root));
+	const widened = paths.map((path) => {
+		if (roots.includes(path)) return path;
+		const filesystemRoot = parse(path).root;
+		if (path === filesystemRoot) return path;
+		const boundary = roots.find((root) => isPathInside(root, path));
+		let current = path;
+		for (;;) {
+			try {
+				if (statSync(current).isDirectory()) {
+					// Never imply a grant for a whole filesystem root.
+					return current === filesystemRoot ? path : current;
+				}
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				// Only a missing component justifies widening to its parent. Any
+				// other failure keeps the exact target so the grant cannot broaden.
+				if (code !== "ENOENT" && code !== "ENOTDIR") return path;
+			}
+			const parent = dirname(current);
+			if (parent === current) return path;
+			// Never widen a workspace target beyond its own workspace root.
+			if (boundary !== undefined && !isPathInside(boundary, parent)) return path;
+			current = parent;
+		}
+	});
+	return [...new Set(widened)];
+}
+
 function claimFromAnalysis(
 	command: string,
 	context: ToolPermissionContext,
@@ -110,9 +152,11 @@ function claimFromAnalysis(
 	const writePaths = analysis.complete
 		? [...analysis.writePaths]
 		: [...new Set([...context.workspaceRoots, ...analysis.writePaths])];
+	const scopedWritePaths =
+		process.platform === "win32" ? windowsDirectoryWriteRoots(writePaths, context.workspaceRoots) : writePaths;
 	return permissionClaim({
 		readPaths: [...new Set([...workspaceReads, ...analysis.readPaths])],
-		writePaths,
+		writePaths: scopedWritePaths,
 		networkEndpoints: [...analysis.networkEndpoints],
 		command,
 		effects: [...effects],

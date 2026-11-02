@@ -127,6 +127,35 @@ describe("permission approval panel", () => {
 		expect(more(container)).toBeTruthy();
 	});
 
+	it("shows the Windows directory write scope and its subdirectory meaning", () => {
+		const directory = "C:\\Users\\dev\\project\\src";
+		const { container } = mount(
+			approval({
+				details: [
+					{ label: "Working directory", value: "C:\\Users\\dev\\project" },
+					{ label: "Writable directory", value: directory },
+					{ label: "Network", value: "10.0.0.1:8443" },
+				],
+			}),
+		);
+		const scope = container.querySelector<HTMLElement>(".permission-approval-scope");
+		expect(scope?.textContent).toContain("Writable directories");
+		expect(scope?.textContent).toContain(directory);
+		expect(scope?.textContent).toContain("Includes new files and subdirectories.");
+		const text = visibleText(container);
+		expect(text).not.toContain("Working directory");
+		expect(text).not.toContain("10.0.0.1:8443");
+	});
+
+	it("localizes the Windows directory write scope", async () => {
+		await setLocale("zh-CN");
+		const { container } = mount(approval({ details: [{ label: "Writable directory", value: "C:\\项目\\src" }] }));
+		const scope = container.querySelector<HTMLElement>(".permission-approval-scope");
+		expect(scope?.textContent).toContain("可写目录");
+		expect(scope?.textContent).toContain("C:\\项目\\src");
+		expect(scope?.textContent).toContain("包含新建文件和子目录。");
+	});
+
 	it("uses the agreed Chinese confirmation and compact remembered choices", async () => {
 		await setLocale("zh-CN");
 		const { container } = mount();

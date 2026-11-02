@@ -28,6 +28,22 @@
 	scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .permission-approval-command code { font: inherit; white-space: inherit; }
+.permission-approval-scope {
+	display: grid;
+	gap: 2px;
+	margin: 8px 0 0;
+	color: var(--text-muted);
+	font-size: 11px;
+	line-height: 1.45;
+}
+.permission-approval-scope-title { margin: 0; font-weight: 500; }
+.permission-approval-scope ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.permission-approval-scope code {
+	font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+.permission-approval-scope-note { margin: 2px 0 0; }
 .permission-approval-panel .permission-approval-body > footer {
 	display: flex;
 	align-items: center;

@@ -23,6 +23,10 @@ const CHOICE_LABELS: Record<PermissionChoice, string> = {
 	"always-deny-exact": "Deny for this project",
 };
 
+// Emitted by the app server only for Windows sandbox Bash approvals, where the
+// grant covers whole directories instead of one exact file.
+const WRITABLE_DIRECTORY_LABEL = "Writable directory";
+
 export function PermissionApprovalPanel({
 	interaction,
 	onRespond,
@@ -39,6 +43,7 @@ export function PermissionApprovalPanel({
 	const [dismissedInteractionId, setDismissedInteractionId] = useState<string | null>(null);
 	const titleId = useId();
 	const commandId = useId();
+	const scopeId = useId();
 	const statusId = useId();
 	const errorId = useId();
 	const interactionId = interaction.interactionId;
@@ -48,6 +53,14 @@ export function PermissionApprovalPanel({
 	const isShell = interaction.toolLabel === "bash";
 	const command = isShell ? interaction.command : undefined;
 	const missingCommand = isShell && command === undefined;
+	const writableDirectories = isShell
+		? [
+				...new Set(
+					interaction.details.filter((row) => row.label === WRITABLE_DIRECTORY_LABEL).map((row) => row.value),
+				),
+			]
+		: [];
+	const describedBy = writableDirectories.length > 0 ? `${commandId} ${scopeId}` : commandId;
 	const sandboxBlocked = sandboxHealth !== "healthy" && interaction.executionTarget === "sandbox";
 	const cannotAllow = disabled || busy || sandboxBlocked || missingCommand;
 	const canRemember =
@@ -193,7 +206,7 @@ export function PermissionApprovalPanel({
 		>
 			<section
 				aria-busy={busy}
-				aria-describedby={commandId}
+				aria-describedby={describedBy}
 				aria-labelledby={titleId}
 				className="permission-approval-panel"
 				onKeyDown={handleKeyDown}
@@ -221,6 +234,19 @@ export function PermissionApprovalPanel({
 						<p className="error-copy" id={commandId} role="alert">
 							{t("This approval is missing its complete command. Retry the action.")}
 						</p>
+					)}
+					{writableDirectories.length > 0 && (
+						<div className="permission-approval-scope" id={scopeId}>
+							<p className="permission-approval-scope-title">{t("Writable directories")}</p>
+							<ul>
+								{writableDirectories.map((directory) => (
+									<li key={directory}>
+										<code>{directory}</code>
+									</li>
+								))}
+							</ul>
+							<p className="permission-approval-scope-note">{t("Includes new files and subdirectories.")}</p>
+						</div>
 					)}
 					{sandboxBlocked && (
 						<p className="error-copy" role="alert">
