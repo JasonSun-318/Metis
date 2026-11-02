@@ -422,6 +422,27 @@ describe("Windows sandbox directory write scope", () => {
 		expect(action.writePaths).toEqual([join(outside, "deep")]);
 	});
 
+	it("does not mistake a home child deletion for deleting the whole home", () => {
+		const root = workspace();
+		const target = join(homedir(), "metis-scope-fixture-missing-child.txt");
+		const action = withPlatform("win32", () => describeIn(`rm -f ${JSON.stringify(target)}`, root));
+		expect(action.writePaths).toEqual([homedir()]);
+		expect(action.shellAnalysis?.writePaths).toEqual([target]);
+		withPlatform("win32", () => {
+			expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("ask"), action })).toMatchObject({
+				kind: "review",
+				minimumReviewer: "user",
+			});
+			const homeDelete = describeIn("rm -rf ~", root);
+			expect(
+				new PermissionPolicy().evaluate({ settings: settingsForPreset("ask"), action: homeDelete }),
+			).toMatchObject({
+				kind: "deny",
+				riskLevel: "critical",
+			});
+		});
+	});
+
 	it("keeps protected workspace writes denied after directory widening", () => {
 		const root = workspace();
 		const git = join(root, ".git");

@@ -199,6 +199,9 @@ function normalizeShellAnalysis(value: ShellAnalysisFacts, cwd: string): Readonl
 		...(value.readPaths === undefined
 			? {}
 			: { readPaths: normalizePathSet(value.readPaths, cwd, "shell analysis readPaths") }),
+		...(value.writePaths === undefined
+			? {}
+			: { writePaths: normalizePathSet(value.writePaths, cwd, "shell analysis writePaths") }),
 	});
 }
 
@@ -311,6 +314,7 @@ export function assertWellFormedAction(action: NormalizedPermissionAction): void
 						node.networkEndpoints.every(Object.isFrozen),
 				) &&
 				(action.shellAnalysis!.readPaths === undefined || Object.isFrozen(action.shellAnalysis!.readPaths)) &&
+				(action.shellAnalysis!.writePaths === undefined || Object.isFrozen(action.shellAnalysis!.writePaths)) &&
 				canonicalJson(action.shellAnalysis) ===
 					canonicalJson(normalizeShellAnalysis(action.shellAnalysis!, action.cwd));
 		} catch {

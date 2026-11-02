@@ -57,6 +57,8 @@ export interface ShellAnalysisFacts {
 	 * directory-scoped rule can judge what the command really reads.
 	 */
 	readonly readPaths?: readonly string[];
+	/** Original write targets before Windows directory-scoped grants are derived. */
+	readonly writePaths?: readonly string[];
 }
 
 export interface NormalizePermissionActionInput {

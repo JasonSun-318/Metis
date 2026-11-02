@@ -198,7 +198,13 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 	if (!recursive) return undefined;
 
 	const home = resolve(homedir());
-	for (const target of action.writePaths) {
+	// Windows grants the containing directory, but that is not necessarily the
+	// deletion target. Incomplete or older facts retain the fail-closed check.
+	const targets =
+		process.platform === "win32" && analysis?.complete && analysis.writePaths !== undefined
+			? analysis.writePaths
+			: action.writePaths;
+	for (const target of targets) {
 		if (target === parse(target).root) return "Recursive deletion of a filesystem root is forbidden";
 		if (target === home) return "Recursive deletion of the user home is forbidden";
 	}

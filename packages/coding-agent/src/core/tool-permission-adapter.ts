@@ -165,6 +165,7 @@ function claimFromAnalysis(
 			complete: analysis.complete,
 			commands: analysis.commands,
 			readPaths: analysis.readPaths,
+			...(process.platform === "win32" ? { writePaths: analysis.writePaths } : {}),
 		},
 	});
 }

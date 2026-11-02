@@ -116,6 +116,20 @@ describe("permission action normalization", () => {
 		expect(digestPermissionAction(action)).not.toBe(digestPermissionAction(elsewhere));
 	});
 
+	it("normalizes original write targets and binds them to the reviewed digest", () => {
+		const input = actionInput({
+			shellAnalysis: { disposition: "user", complete: true, commands: [], writePaths: ["./note.txt", "./note.txt"] },
+		});
+		const action = normalizePermissionAction(input);
+		expect(action.shellAnalysis?.writePaths).toEqual([canonicalizeActionPath("./note.txt", projectDir)]);
+		expect(Object.isFrozen(action.shellAnalysis?.writePaths)).toBe(true);
+		const changed = normalizePermissionAction({
+			...input,
+			shellAnalysis: { ...input.shellAnalysis!, writePaths: ["./other.txt"] },
+		});
+		expect(digestPermissionAction(changed)).not.toBe(digestPermissionAction(action));
+	});
+
 	it("rejects ambiguous canonical inputs instead of hashing partial data", () => {
 		const cyclic: Record<string, unknown> = {};
 		cyclic.self = cyclic;
