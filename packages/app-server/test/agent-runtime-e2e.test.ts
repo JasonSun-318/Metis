@@ -402,147 +402,153 @@ describe("agent runtime e2e", () => {
 		30_000,
 	);
 
-	it("pages a 105-agent durable tree and replays an agent mutation exactly once", async () => {
-		const root = mkdtempSync(join(tmpdir(), "app-server-agent-pagination-e2e-"));
-		temporaryRoots.push(root);
-		const agentDir = join(root, "agent");
-		const projectDir = join(root, "project");
-		const sessionsRoot = join(agentDir, "sessions");
-		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(projectDir, { recursive: true });
-		writeFileSync(
-			join(agentDir, "models.json"),
-			JSON.stringify({
-				providers: {
-					local: {
-						baseUrl: "http://127.0.0.1:9/v1",
-						apiKey: "test-key",
-						api: "openai-completions",
-						models: [
-							{
-								id: "agent-e2e",
-								name: "Agent E2E",
-								contextWindow: 32_000,
-								maxTokens: 1_024,
-								reasoning: false,
-							},
-						],
+	it(
+		"pages a 105-agent durable tree and replays an agent mutation exactly once",
+		async () => {
+			const root = mkdtempSync(join(tmpdir(), "app-server-agent-pagination-e2e-"));
+			temporaryRoots.push(root);
+			const agentDir = join(root, "agent");
+			const projectDir = join(root, "project");
+			const sessionsRoot = join(agentDir, "sessions");
+			mkdirSync(agentDir, { recursive: true });
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(
+				join(agentDir, "models.json"),
+				JSON.stringify({
+					providers: {
+						local: {
+							baseUrl: "http://127.0.0.1:9/v1",
+							apiKey: "test-key",
+							api: "openai-completions",
+							models: [
+								{
+									id: "agent-e2e",
+									name: "Agent E2E",
+									contextWindow: 32_000,
+									maxTokens: 1_024,
+									reasoning: false,
+								},
+							],
+						},
 					},
-				},
-			}),
-		);
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ defaultProvider: "local", defaultModel: "agent-e2e", retry: { enabled: false } }),
-		);
-		const rootManager = SessionManager.create(projectDir, sessionsRoot, {
-			id: SESSION_ID,
-			mode: "code",
-			permissionPreset: "full",
-		});
-		for (let index = 0; index < 105; index++) {
-			const agentId = `00000000-0000-4000-8000-${String(index + 300).padStart(12, "0")}`;
-			const child = SessionManager.create(projectDir, getSessionAgentDir(agentDir, SESSION_ID), {
-				id: agentId,
+				}),
+			);
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ defaultProvider: "local", defaultModel: "agent-e2e", retry: { enabled: false } }),
+			);
+			const rootManager = SessionManager.create(projectDir, sessionsRoot, {
+				id: SESSION_ID,
 				mode: "code",
 				permissionPreset: "full",
-				agent: {
-					agentId,
-					name: `Worker ${String(index + 1).padStart(3, "0")}`,
-					agentType: "worker",
-					initialTask: `Task ${index + 1}`,
-					tools: ["read"],
-					writePolicy: "inherit",
+			});
+			for (let index = 0; index < 105; index++) {
+				const agentId = `00000000-0000-4000-8000-${String(index + 300).padStart(12, "0")}`;
+				const child = SessionManager.create(projectDir, getSessionAgentDir(agentDir, SESSION_ID), {
+					id: agentId,
+					mode: "code",
 					permissionPreset: "full",
-					model: { provider: "local", modelId: "agent-e2e" },
-					thinkingLevel: "off",
-					cwd: projectDir,
-					forkTurns: 0,
-					timeoutSeconds: 60,
-					mayDelegate: false,
-					parentSessionId: SESSION_ID,
-					rootSessionId: SESSION_ID,
-					agentPath: [agentId],
-				},
-			});
-			child.appendAgentControl({
-				type: "agent_task",
-				agentId,
-				taskId: `task-${index + 1}`,
-				text: `Task ${index + 1}`,
-				taskSummary: `Task ${index + 1}`,
-				status: "done",
-				reason: "completed",
-				finalMessage: `Done ${index + 1}`,
-			});
-			child.close();
-		}
-		rootManager.close();
+					agent: {
+						agentId,
+						name: `Worker ${String(index + 1).padStart(3, "0")}`,
+						agentType: "worker",
+						initialTask: `Task ${index + 1}`,
+						tools: ["read"],
+						writePolicy: "inherit",
+						permissionPreset: "full",
+						model: { provider: "local", modelId: "agent-e2e" },
+						thinkingLevel: "off",
+						cwd: projectDir,
+						forkTurns: 0,
+						timeoutSeconds: 60,
+						mayDelegate: false,
+						parentSessionId: SESSION_ID,
+						rootSessionId: SESSION_ID,
+						agentPath: [agentId],
+					},
+				});
+				child.appendAgentControl({
+					type: "agent_task",
+					agentId,
+					taskId: `task-${index + 1}`,
+					text: `Task ${index + 1}`,
+					taskSummary: `Task ${index + 1}`,
+					status: "done",
+					reason: "completed",
+					finalMessage: `Done ${index + 1}`,
+				});
+				child.close();
+			}
+			rootManager.close();
 
-		const server = await AppServer.create({
-			agentDir,
-			sessionsRoot,
-			titleGenerator: { generate: async () => undefined },
-		});
-		const connection = server.connect();
-		try {
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "initialize-pagination",
-				method: "initialize",
-				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+			const server = await AppServer.create({
+				agentDir,
+				sessionsRoot,
+				titleGenerator: { generate: async () => undefined },
 			});
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "open-pagination",
-				method: "session/open",
-				params: { sessionId: SESSION_ID },
-			});
-			const first = await connection.handle({
-				jsonrpc: "2.0",
-				id: "agents-first",
-				method: "agent/list",
-				params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
-			});
-			expect(first).toMatchObject({ result: { agents: expect.any(Array), nextAfterAgentId: expect.any(String) } });
-			if (!("result" in first) || !("agents" in first.result)) throw new Error("Expected first agent page");
-			expect(first.result.agents).toHaveLength(100);
-			const second = await connection.handle({
-				jsonrpc: "2.0",
-				id: "agents-second",
-				method: "agent/list",
-				params: {
-					sessionId: SESSION_ID,
-					includeArchived: true,
-					afterAgentId: first.result.nextAfterAgentId,
-					limit: 100,
-				},
-			});
-			if (!("result" in second) || !("agents" in second.result)) throw new Error("Expected second agent page");
-			expect(second.result.agents).toHaveLength(5);
-			expect(second.result.nextAfterAgentId).toBeNull();
-			expect(new Set([...first.result.agents, ...second.result.agents].map((agent) => agent.agentId)).size).toBe(
-				105,
-			);
+			const connection = server.connect();
+			try {
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "initialize-pagination",
+					method: "initialize",
+					params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+				});
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "open-pagination",
+					method: "session/open",
+					params: { sessionId: SESSION_ID },
+				});
+				const first = await connection.handle({
+					jsonrpc: "2.0",
+					id: "agents-first",
+					method: "agent/list",
+					params: { sessionId: SESSION_ID, includeArchived: true, afterAgentId: null, limit: 100 },
+				});
+				expect(first).toMatchObject({
+					result: { agents: expect.any(Array), nextAfterAgentId: expect.any(String) },
+				});
+				if (!("result" in first) || !("agents" in first.result)) throw new Error("Expected first agent page");
+				expect(first.result.agents).toHaveLength(100);
+				const second = await connection.handle({
+					jsonrpc: "2.0",
+					id: "agents-second",
+					method: "agent/list",
+					params: {
+						sessionId: SESSION_ID,
+						includeArchived: true,
+						afterAgentId: first.result.nextAfterAgentId,
+						limit: 100,
+					},
+				});
+				if (!("result" in second) || !("agents" in second.result)) throw new Error("Expected second agent page");
+				expect(second.result.agents).toHaveLength(5);
+				expect(second.result.nextAfterAgentId).toBeNull();
+				expect(new Set([...first.result.agents, ...second.result.agents].map((agent) => agent.agentId)).size).toBe(
+					105,
+				);
 
-			const target = second.result.agents[0]!;
-			const request = {
-				jsonrpc: "2.0" as const,
-				id: "archive-agent",
-				method: "agent/archive" as const,
-				params: {
-					sessionId: SESSION_ID,
-					agentId: target.agentId,
-					archived: true,
-					requestId: "00000000-0000-4000-8000-000000000205",
-				},
-			};
-			const archived = await connection.handle(request);
-			const replayed = await connection.handle({ ...request, id: "archive-agent-replay" });
-			expect(replayed).toEqual({ ...archived, id: "archive-agent-replay" });
-		} finally {
-			server.beginShutdown();
-			await server.waitForShutdown();
-		}
-	}, 90_000);
+				const target = second.result.agents[0]!;
+				const request = {
+					jsonrpc: "2.0" as const,
+					id: "archive-agent",
+					method: "agent/archive" as const,
+					params: {
+						sessionId: SESSION_ID,
+						agentId: target.agentId,
+						archived: true,
+						requestId: "00000000-0000-4000-8000-000000000205",
+					},
+				};
+				const archived = await connection.handle(request);
+				const replayed = await connection.handle({ ...request, id: "archive-agent-replay" });
+				expect(replayed).toEqual({ ...archived, id: "archive-agent-replay" });
+			} finally {
+				server.beginShutdown();
+				await server.waitForShutdown();
+			}
+		},
+		process.env.CI ? 180_000 : 90_000,
+	);
 });
