@@ -3534,15 +3534,33 @@ reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folde
 		// >0/<178 pair alone would also pass if the window shrank to one row.
 		// The row height is measured from the rendered list so no ReviewPanel
 		// layout constant is duplicated in this spec.
+		// Virtualization must mount the rows covering the scroll viewport; the
+		// >0/<178 pair alone would also pass if the window shrank to one row.
+		// Lists shorter than one viewport must have every row mounted instead, and
+		// the row height is measured from the rendered header so no ReviewPanel
+		// layout constant is duplicated in this spec.
 		const expectReviewWindow = async () => {
-			const viewport = await page!.evaluate(() => {
-				const scroll = document.querySelector<HTMLElement>(".review-content");
-				const row = document.querySelector<HTMLElement>(".review-file");
-				if (!scroll || !row) throw new Error("Review file list is not mounted");
-				return { height: scroll.clientHeight, row: row.getBoundingClientRect().height };
-			});
-			expect(viewport.row).toBeGreaterThan(0);
-			expect(await fileHeaders.count()).toBeGreaterThanOrEqual(Math.floor(viewport.height / viewport.row));
+			await expect
+				.poll(
+					async () => {
+						const metrics = await page!.evaluate(() => {
+							const scroll = document.querySelector<HTMLElement>(".review-content");
+							const header = document.querySelector<HTMLElement>(".review-file-header");
+							if (!scroll || !header) return null;
+							return {
+								viewport: scroll.clientHeight,
+								row: header.getBoundingClientRect().height,
+								mounted: document.querySelectorAll(".review-file-header").length,
+								overflows: scroll.scrollHeight > scroll.clientHeight + 1,
+							};
+						});
+						if (!metrics || metrics.row <= 0) return false;
+						if (!metrics.overflows) return metrics.mounted > 0;
+						return metrics.mounted >= Math.floor(metrics.viewport / metrics.row);
+					},
+					{ timeout: 15_000 },
+				)
+				.toBe(true);
 		};
 		await expect(page.locator(".review-details")).toHaveCount(0);
 		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);

@@ -334,7 +334,10 @@ describe("main window recovery", () => {
 		expect(state.windows).toHaveLength(1);
 	});
 
-	it("does not register a second-instance listener outside Windows", async () => {
+	it("does not register a second-instance listener outside Windows", async (context) => {
+		// Windows registration is covered by the tests above; this branch only
+		// exists on the other platforms.
+		if (process.platform === "win32") context.skip();
 		await importLaunch();
 		expect(state.appHandlers.has("second-instance")).toBe(false);
 	});
