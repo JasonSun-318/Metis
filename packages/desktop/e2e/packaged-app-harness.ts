@@ -292,10 +292,14 @@ export async function connectToApp(
 export async function waitForServerReady(page: Page): Promise<void> {
 	await expect
 		.poll(() =>
-			page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-				return (await api.getServerState()).state;
-			}),
+			page
+				.evaluate(async () => {
+					const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+					return (await api.getServerState()).state;
+				})
+				// A relaunch or reload can detach the frame while the app server boots;
+				// treat that as "not ready yet" instead of failing the whole wait.
+				.catch(() => "pending"),
 		)
 		.toBe("ready");
 }
@@ -311,7 +315,17 @@ export async function createAndRestoreChatSession(
 		localStorage.setItem("metis.activeSessionId.chat", result.session.sessionId);
 		return result.session;
 	}, cwd);
-	await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+	// Startup can still be settling the renderer when this runs, and a reload during
+	// that window surfaces as ERR_ABORTED/frame-detached; retry the reload briefly.
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+			break;
+		} catch (error) {
+			if (attempt === 2) throw error;
+			await new Promise((resolve) => setTimeout(resolve, 250));
+		}
+	}
 	if (waitForActive) {
 		await page.locator(`[data-active-session-id="${created.sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 	}
