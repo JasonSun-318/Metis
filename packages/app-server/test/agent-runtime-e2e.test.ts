@@ -384,17 +384,11 @@ describe("agent runtime e2e", () => {
 						deletedAgentIds: expect.arrayContaining([coordinator.agentId, leaf.agentId]),
 					}),
 				);
-			} catch (error) {
-				console.dir(error, { depth: 12 });
-				throw error;
 			} finally {
 				deleteSession.mockRestore();
 				leafResponse?.end("data: [DONE]\n\n");
 				server.beginShutdown();
-				await server.waitForShutdown().catch((error: unknown) => {
-					console.dir(error, { depth: 12 });
-					throw error;
-				});
+				await server.waitForShutdown();
 				provider.closeAllConnections();
 				await new Promise<void>((resolve) => provider.close(() => resolve()));
 			}
