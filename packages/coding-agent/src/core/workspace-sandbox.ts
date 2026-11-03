@@ -44,6 +44,9 @@ import {
 } from "./workspace-sandbox-protocol.ts";
 
 const CONTROL_TIMEOUT_MS = 5_000;
+// Installed Windows startup performs native egress checks before reporting ready,
+// which can exceed the control-plane timeout.
+const WINDOWS_INIT_TIMEOUT_MS = 30_000;
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
@@ -301,7 +304,7 @@ class SandboxBroker {
 			await controlTimeout(
 				broker.readyPromise,
 				"Sandbox initialization timed out",
-				process.platform === "win32" ? 30_000 : CONTROL_TIMEOUT_MS,
+				process.platform === "win32" ? WINDOWS_INIT_TIMEOUT_MS : CONTROL_TIMEOUT_MS,
 			);
 			return broker;
 		} catch (error) {

@@ -862,12 +862,9 @@ export class SubagentManager implements SubagentManagerApi {
 			// target task's sequence instead of reusing the queued task's numbering.
 			const instructionRevision =
 				input.delivery === "steer"
-					? Math.max(
-							0,
-							...record.inputs
-								.filter((entry) => entry.taskId === hot!.taskId)
-								.map((entry) => entry.instructionRevision),
-						) + 1
+					? record.inputs
+							.filter((entry) => entry.taskId === hot!.taskId)
+							.reduce((max, entry) => Math.max(max, entry.instructionRevision), 0) + 1
 					: payload.instructionRevision;
 			const sending: Omit<AgentInputEntry, "id" | "parentId" | "timestamp"> = {
 				...payload,
