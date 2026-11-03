@@ -691,12 +691,18 @@ export function agentStatusFromTasks(tasks: readonly AgentTaskSummary[]): AgentS
 	if (running) return "running";
 	const queued = tasks.find((task) => task.status === "queued");
 	if (queued) return "queued";
-	// Task creation order is not lifecycle order: a queued Guide placeholder is
-	// stopped before the active task completes, so the last state change
-	// decides the terminal status (later-created tasks win timestamp ties).
+	return latestTaskByUpdatedAt(tasks)?.status ?? "queued";
+}
+
+/**
+ * Task creation order is not lifecycle order: a queued Guide placeholder is
+ * stopped before the active task completes, so the last state change decides
+ * the latest task (later-created tasks win timestamp ties).
+ */
+export function latestTaskByUpdatedAt(tasks: readonly AgentTaskSummary[]): AgentTaskSummary | undefined {
 	let latest: AgentTaskSummary | undefined;
 	for (const task of tasks) if (!latest || task.updatedAt >= latest.updatedAt) latest = task;
-	return latest?.status ?? "queued";
+	return latest;
 }
 
 export type { AgentTaskEntry, AgentArchivedEntry };

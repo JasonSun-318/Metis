@@ -38,6 +38,7 @@ import {
 	AgentStore,
 	type AgentStoreApi,
 	agentStatusFromTasks,
+	latestTaskByUpdatedAt,
 	summarizeAgentTask,
 } from "./store.ts";
 import { agentTaskWindow, projectAgentTrace, utf8Length, utf8Prefix } from "./trace.ts";
@@ -2551,11 +2552,7 @@ export function agentSummaryFromRecord(
 	const hot = options.hotTaskId ? { taskId: options.hotTaskId } : undefined;
 	const running = tasks.find((task) => task.taskId === hot?.taskId) ?? tasks.find((task) => task.status === "running");
 	const current = running ?? tasks.find((task) => task.status === "queued");
-	// Task creation order is not lifecycle order: a queued Guide placeholder is
-	// stopped before the active task completes, so the last state change
-	// decides the latest task (later-created tasks win timestamp ties).
-	let latest: AgentTaskSummary | undefined;
-	for (const task of tasks) if (!latest || task.updatedAt >= latest.updatedAt) latest = task;
+	const latest = latestTaskByUpdatedAt(tasks);
 	const status = hot ? "running" : agentStatusFromTasks(tasks);
 	const createdAt = tasks[0]?.createdAt ?? new Date(options.now ?? Date.now()).toISOString();
 	const updatedAt = tasks.reduce(
