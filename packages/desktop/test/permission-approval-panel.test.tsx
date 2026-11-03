@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
+import {
+	type InteractionResponseInput,
+	type InteractionView,
+	type SessionSnapshot,
+	WRITABLE_DIRECTORY_LABEL,
+} from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,7 +138,7 @@ describe("permission approval panel", () => {
 			approval({
 				details: [
 					{ label: "Working directory", value: "C:\\Users\\dev\\project" },
-					{ label: "Writable directory", value: directory },
+					{ label: WRITABLE_DIRECTORY_LABEL, value: directory },
 					{ label: "Network", value: "10.0.0.1:8443" },
 				],
 			}),
@@ -149,7 +154,7 @@ describe("permission approval panel", () => {
 
 	it("localizes the Windows directory write scope", async () => {
 		await setLocale("zh-CN");
-		const { container } = mount(approval({ details: [{ label: "Writable directory", value: "C:\\项目\\src" }] }));
+		const { container } = mount(approval({ details: [{ label: WRITABLE_DIRECTORY_LABEL, value: "C:\\项目\\src" }] }));
 		const scope = container.querySelector<HTMLElement>(".permission-approval-scope");
 		expect(scope?.textContent).toContain("可写目录");
 		expect(scope?.textContent).toContain("C:\\项目\\src");

@@ -2645,6 +2645,7 @@
 							"UuidSchema",
 							"VisionApiViewSchema",
 							"VisionSettingsViewSchema",
+							"WRITABLE_DIRECTORY_LABEL",
 							"WebSearchCredentialRevealParamsSchema",
 							"WebSearchCredentialRevealResultSchema",
 							"WebSearchGetParamsSchema",

@@ -20,6 +20,7 @@ import {
 	type ServerRpcRequest,
 	validateResponseFor,
 	validateServerRequest,
+	WRITABLE_DIRECTORY_LABEL,
 } from "@metis/app-protocol";
 import {
 	type AskUserRequest,
@@ -189,8 +190,6 @@ function priorReviewFields(
 	return {};
 }
 
-const WRITABLE_DIRECTORY_LABEL = "Writable directory";
-
 /**
  * Windows sandbox grants cover directories, so the approval card must show the
  * actual write roots rather than the exact file the command named. These come
@@ -223,12 +222,18 @@ function permissionOperation(request: PermissionApprovalRequest) {
 	}
 	if (request.action.command) push("Command", redactPermissionCommand(request.action.command));
 	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
+	const writableDirectories = writableDirectoryScope(request);
 	// Keep the directory scope even when it equals the working directory: the
 	// grant really does cover that directory, not one file inside it.
-	for (const directory of writableDirectoryScope(request)) push(WRITABLE_DIRECTORY_LABEL, directory);
+	for (const directory of writableDirectories) push(WRITABLE_DIRECTORY_LABEL, directory);
+	const writableDirectorySet = new Set(writableDirectories);
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
 	for (const path of request.action.paths) {
 		if (request.cwd && path === request.cwd) continue;
+		// action.paths also contains the write roots; the directory grant above
+		// already discloses the wider scope, so listing the same path again as an
+		// exact target would suggest a narrower grant than was approved.
+		if (writableDirectorySet.has(path)) continue;
 		push(pathLabel, path);
 	}
 

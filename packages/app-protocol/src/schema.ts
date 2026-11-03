@@ -16,6 +16,13 @@ export const MAX_HISTORY_ITEMS = 200;
 export const MAX_EVENT_BATCH = 256;
 export const MAX_INTERACTION_CHOICES = 100;
 export const MAX_PERMISSION_OPERATION_ROWS = 64;
+/**
+ * Detail-row label for a Windows sandbox grant that covers a whole directory
+ * instead of one exact path. The app server emits it and clients match on it to
+ * disclose the directory scope, so it is a protocol marker shared by both sides
+ * rather than localizable display copy.
+ */
+export const WRITABLE_DIRECTORY_LABEL = "Writable directory";
 export const MAX_ASK_USER_QUESTIONS = 4;
 export const MAX_ASK_USER_OPTIONS = 4;
 export const MAX_ASK_USER_CUSTOM_ANSWER_UTF8_BYTES = 16 * 1024;

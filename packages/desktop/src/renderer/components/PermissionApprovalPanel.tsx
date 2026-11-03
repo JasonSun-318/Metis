@@ -1,4 +1,9 @@
-import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
+import {
+	type InteractionResponseInput,
+	type InteractionView,
+	type SessionSnapshot,
+	WRITABLE_DIRECTORY_LABEL,
+} from "@metis/app-protocol";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { approvalErrorMessage } from "../approval-error.ts";
@@ -22,10 +27,6 @@ const CHOICE_LABELS: Record<PermissionChoice, string> = {
 	"always-allow-exact": "Remember for this project",
 	"always-deny-exact": "Deny for this project",
 };
-
-// Emitted by the app server only for Windows sandbox Bash approvals, where the
-// grant covers whole directories instead of one exact file.
-const WRITABLE_DIRECTORY_LABEL = "Writable directory";
 
 export function PermissionApprovalPanel({
 	interaction,

@@ -11,6 +11,7 @@ import {
 	type ServerRequestMethod,
 	type ServerResult,
 	type ServerRpcRequest,
+	WRITABLE_DIRECTORY_LABEL,
 } from "@metis/app-protocol";
 import {
 	type AskUserInput,
@@ -738,7 +739,45 @@ describe("InteractionBroker", () => {
 		expect(permissionInteraction(peer).details).toEqual([
 			{ label: "Command", value: "printf x > new.txt" },
 			{ label: "Working directory", value: "/tmp/work" },
-			{ label: "Writable directory", value: "/tmp/work" },
+			{ label: WRITABLE_DIRECTORY_LABEL, value: "/tmp/work" },
+		]);
+	});
+
+	it("shows an expanded Windows write root once as a directory scope", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000343";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
+
+		await withPlatform("win32", () =>
+			broker.requestPermissionApproval(
+				SESSION_ID,
+				childApproval({
+					actor: undefined,
+					executionTarget: "sandbox",
+					action: {
+						actionId: "bash-expanded-write-root",
+						toolName: "bash",
+						provenance: "builtin",
+						risks: ["workspace-write"],
+						paths: ["/tmp/work", "/tmp/work/generated", "/tmp/work/input.txt"],
+						networkTargets: [],
+						command: "printf x > generated/new.txt",
+					},
+					args: {
+						command: "printf x > generated/new.txt",
+						writePaths: ["/tmp/work/generated"],
+					},
+				}),
+			),
+		);
+
+		expect(permissionInteraction(peer).details).toEqual([
+			{ label: "Command", value: "printf x > generated/new.txt" },
+			{ label: "Working directory", value: "/tmp/work" },
+			{ label: WRITABLE_DIRECTORY_LABEL, value: "/tmp/work/generated" },
+			{ label: "Path", value: "/tmp/work/input.txt" },
 		]);
 	});
 
@@ -768,7 +807,7 @@ describe("InteractionBroker", () => {
 			peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
 			await withPlatform(platform, () => broker.requestPermissionApproval(SESSION_ID, request));
 			expect(permissionInteraction(peer).details).not.toContainEqual({
-				label: "Writable directory",
+				label: WRITABLE_DIRECTORY_LABEL,
 				value: "/tmp/work",
 			});
 		}
