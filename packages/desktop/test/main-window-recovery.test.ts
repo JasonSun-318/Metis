@@ -284,7 +284,59 @@ describe("main window recovery", () => {
 		expect(state.app.requestSingleInstanceLock).toHaveBeenCalledOnce();
 		expect(state.app.quit).toHaveBeenCalledOnce();
 		expect(state.app.whenReady).not.toHaveBeenCalled();
+		expect(state.appHandlers.has("second-instance")).toBe(false);
 		expect(state.windows).toHaveLength(0);
+	});
+
+	it("registers the Windows second-instance listener before the app is ready", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		let finishReady!: () => void;
+		state.app.whenReady.mockImplementationOnce(
+			() =>
+				new Promise<undefined>((resolve) => {
+					finishReady = () => resolve(undefined);
+				}),
+		);
+		(globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY = "http://localhost/index.html";
+		(globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL = null;
+		await import("../src/main/main.ts");
+
+		// The listener must exist while `launch()` is still awaiting `ready`.
+		expect(state.appHandlers.has("second-instance")).toBe(true);
+		expect(state.app.whenReady).toHaveBeenCalledOnce();
+		expect(state.windows).toHaveLength(0);
+
+		finishReady();
+		await vi.waitFor(() => expect(state.appHandlers.has("activate")).toBe(true));
+		expect(state.windows).toHaveLength(1);
+	});
+
+	it("replays a Windows second-instance event that arrives during cold start", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		let finishReady!: () => void;
+		state.app.whenReady.mockImplementationOnce(
+			() =>
+				new Promise<undefined>((resolve) => {
+					finishReady = () => resolve(undefined);
+				}),
+		);
+		(globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY = "http://localhost/index.html";
+		(globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL = null;
+		await import("../src/main/main.ts");
+
+		state.appHandlers.get("second-instance")?.();
+		expect(state.windows).toHaveLength(0);
+
+		finishReady();
+		await vi.waitFor(() => expect(state.windows).toHaveLength(1));
+		await vi.waitFor(() => expect(state.windows[0].focus).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(state.appHandlers.has("activate")).toBe(true));
+		expect(state.windows).toHaveLength(1);
+	});
+
+	it("does not register a second-instance listener outside Windows", async () => {
+		await importLaunch();
+		expect(state.appHandlers.has("second-instance")).toBe(false);
 	});
 
 	it("restores the existing Windows window for a repeated launch", async () => {
@@ -320,7 +372,7 @@ describe("main window recovery", () => {
 		(globalThis as Record<string, unknown>).MAIN_WINDOW_WEBPACK_ENTRY = "http://localhost/index.html";
 		(globalThis as Record<string, unknown>).METIS_UPDATE_BASE_URL = null;
 		await import("../src/main/main.ts");
-		await vi.waitFor(() => expect(state.appHandlers.has("second-instance")).toBe(true));
+		await vi.waitFor(() => expect(state.supervisorStart).toHaveBeenCalledOnce());
 		expect(state.windows).toHaveLength(0);
 		state.appHandlers.get("second-instance")?.();
 		state.appHandlers.get("second-instance")?.();

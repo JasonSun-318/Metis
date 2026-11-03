@@ -62,6 +62,13 @@ let allowQuit = false;
 let workspaceEditState: DesktopWorkspaceEditState = { dirty: false, language: "en", visibleSessionId: null };
 const scheduleKeepAwake = createScheduleKeepAwake(powerSaveBlocker);
 
+// Electron does not buffer `second-instance`: the listener must be registered
+// synchronously once the single-instance lock is held, or a repeated launch
+// during the cold-start awaits is dropped. Window recovery needs the runtime
+// that `launch()` builds, so events seen before then are coalesced and replayed.
+let pendingSecondInstanceRestore = false;
+let restoreWindowFromSecondInstance: (() => void) | undefined;
+
 // app.isActive() is macOS-only; on other platforms treat a focused window as active.
 function isAppActive(): boolean {
 	if (process.platform === "darwin") return app.isActive();
@@ -323,10 +330,13 @@ async function launch(): Promise<void> {
 		mainWindow.focus();
 	}
 
-	if (process.platform === "win32") {
-		app.on("second-instance", () => {
-			void restoreMainWindow().catch((error) => reportWindowReopenFailure("from second instance", error));
-		});
+	const restoreFromSecondInstance = () => {
+		void restoreMainWindow().catch((error) => reportWindowReopenFailure("from second instance", error));
+	};
+	restoreWindowFromSecondInstance = restoreFromSecondInstance;
+	if (pendingSecondInstanceRestore) {
+		pendingSecondInstanceRestore = false;
+		restoreFromSecondInstance();
 	}
 
 	await supervisor.start().catch(() => supervisor.view());
@@ -364,9 +374,18 @@ async function launch(): Promise<void> {
 	});
 }
 
-if (squirrelStartup || (process.platform === "win32" && !app.requestSingleInstanceLock())) app.quit();
-else
+if (squirrelStartup || (process.platform === "win32" && !app.requestSingleInstanceLock())) {
+	app.quit();
+} else {
+	// Register before any `await` so launches racing the cold start are captured.
+	if (process.platform === "win32") {
+		app.on("second-instance", () => {
+			if (restoreWindowFromSecondInstance) restoreWindowFromSecondInstance();
+			else pendingSecondInstanceRestore = true;
+		});
+	}
 	void launch().catch(() => {
 		console.error("Metis desktop failed to start.");
 		app.quit();
 	});
+}
