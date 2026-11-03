@@ -165,11 +165,12 @@ async function openNotifications(container: HTMLElement): Promise<void> {
 }
 
 function activeWorkspace(container: HTMLElement): HTMLElement {
-	// The top row's tab strips are portaled into the titlebar. On Windows that
-	// row sits outside main.workspace and spans the window, so queries need the
-	// whole app rather than the workspace column.
-	if (!container.querySelector("main.workspace")) throw new Error("Missing visible workspace");
-	return container;
+	// The top row's tab strips are portaled into the titlebar, which is mounted
+	// inside main.workspace on every platform, so this root contains both the
+	// titlebar row and the pane content while the sessions sidebar stays out.
+	const workspace = container.querySelector<HTMLElement>("main.workspace");
+	if (!workspace) throw new Error("Missing visible workspace");
+	return workspace;
 }
 
 async function openToolStartPage(container: HTMLElement): Promise<HTMLElement> {
@@ -5382,9 +5383,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const row = container.querySelector<HTMLElement>(".workspace-titlebar.windows-titlebar-row")!;
+		const row = container.querySelector<HTMLElement>("main.workspace > .workspace-titlebar.windows-titlebar-row")!;
 		expect(row).not.toBeNull();
-		expect(row.closest("main.workspace")).toBeNull();
 		expect(row.querySelector(".windows-titlebar-navigation")).toBeNull();
 		expect(container.querySelectorAll(".sessions-sidebar-toggle-fixed")).toHaveLength(1);
 		expect(row.querySelector(".workspace-titlebar-tabs [role='tablist']")).not.toBeNull();

@@ -121,6 +121,33 @@ function loadToolsSidebarPreferredWidth(sessionId?: string): number | undefined 
 	return undefined;
 }
 
+/**
+ * Sessions-sidebar toggle shared by the macOS titlebar and the Windows
+ * navigation row; the icon is one pixel smaller in the 32px overlay.
+ */
+function SessionsSidebarToggle({
+	onToggle,
+	open,
+	size,
+}: {
+	readonly onToggle: () => void;
+	readonly open: boolean;
+	readonly size: number;
+}) {
+	const { t } = useTranslation();
+	return (
+		<button
+			aria-label={t(open ? "Hide sessions sidebar" : "Show sessions sidebar")}
+			aria-pressed={open}
+			className="sessions-sidebar-toggle-fixed"
+			onClick={onToggle}
+			type="button"
+		>
+			<SidebarSimple aria-hidden="true" size={size} />
+		</button>
+	);
+}
+
 export function App({ api, store }: AppProps) {
 	const { i18n, t } = useTranslation();
 	const state = useAppStore(store);
@@ -1729,10 +1756,12 @@ export function App({ api, store }: AppProps) {
 		</>
 	) : null;
 
-	// Windows keeps navigation in the native 32px overlay. A separate 40px
-	// row spans the window for session and tool tabs.
-	// The row starts where the workspace does so the tab cells
-	// stay above their panes; macOS keeps the single in-workspace row below.
+	// Windows keeps navigation in the native 32px overlay. A separate 40px row
+	// spans the window for session and tool tabs. It is mounted inside the
+	// workspace on every platform so there is a single mount point; because it is
+	// fixed, its geometry stays independent of that column. The row starts where
+	// the workspace does so the tab cells stay above their panes; macOS keeps the
+	// single in-workspace row below.
 	const isWindows = api.platform === "win32";
 	const winTitlebarSidebarOffset = isCollapsed ? 0 : sessionSidebarWidth;
 	const titlebar = (
@@ -1743,19 +1772,7 @@ export function App({ api, store }: AppProps) {
 				isWindows ? ({ "--windows-sidebar-offset": `${winTitlebarSidebarOffset}px` } as CSSProperties) : undefined
 			}
 		>
-			{!isWindows && (
-				<button
-					aria-label={t(
-						sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
-					)}
-					aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-					className="sessions-sidebar-toggle-fixed"
-					onClick={toggleSessionsSidebar}
-					type="button"
-				>
-					<SidebarSimple aria-hidden="true" size={17} />
-				</button>
-			)}
+			{!isWindows && <SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={17} />}
 			<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} style={{ right: toolsTitlebarReserved }} />
 			{toolsSidebarAvailable && (
 				<div
@@ -1793,7 +1810,7 @@ export function App({ api, store }: AppProps) {
 					inert={settingsOpen || undefined}
 					style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
 				>
-					{api.platform === "win32" && (
+					{isWindows && (
 						<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
 							<button
 								aria-label={t("Go back")}
@@ -1811,17 +1828,7 @@ export function App({ api, store }: AppProps) {
 							>
 								<ArrowRight aria-hidden="true" size={16} />
 							</button>
-							<button
-								aria-label={t(
-									sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
-								)}
-								aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-								className="sessions-sidebar-toggle-fixed"
-								onClick={toggleSessionsSidebar}
-								type="button"
-							>
-								<SidebarSimple aria-hidden="true" size={16} />
-							</button>
+							<SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={16} />
 						</nav>
 					)}
 					{sessionsSidebarOpen && (
@@ -1847,9 +1854,8 @@ export function App({ api, store }: AppProps) {
 							workspace={sidebarWorkspace}
 						/>
 					)}
-					{api.platform === "win32" ? titlebar : null}
 					<main className="workspace">
-						{api.platform !== "win32" ? titlebar : null}
+						{titlebar}
 						<div className="system-notice-stack">
 							{state.supervisor.state === "failed" && (
 								<SystemNotice
