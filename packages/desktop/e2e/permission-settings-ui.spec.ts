@@ -182,7 +182,7 @@ test("global commands remain compact and preserve non-command permissions", asyn
 		await sandbox.getByRole("button", {name: "Run sandbox self-test"}).click();
 		await expect(sandbox.locator(".sandbox-environment-status")).toHaveText("Available", {timeout: 30000});
 		expect((await sandbox.boundingBox())!.height).toBeCloseTo(before!.height, 0);
-		await expect(sandbox.locator("details, ul, .sandbox-environment-notice")).toHaveCount(0);
+		await expect(sandbox.locator("details, ul, .sandbox-environment-notice, .sandbox-environment-issue")).toHaveCount(0);
 		await page.screenshot({path: testInfo.outputPath("sandbox-available.png")});
 
 	} finally {

@@ -3517,9 +3517,24 @@ reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folde
 		await openTool(page, "Review");
 		const panel = visibleToolPanel(page);
 		const fileHeaders = page.locator(".review-file-header");
+		// Virtualization must mount the rows covering the scroll viewport; the
+		// >0/<178 pair alone would also pass if the window shrank to one row.
+		// The row height is measured from the rendered list so no ReviewPanel
+		// layout constant is duplicated in this spec.
+		const expectReviewWindow = async () => {
+			const viewport = await page!.evaluate(() => {
+				const scroll = document.querySelector<HTMLElement>(".review-content");
+				const row = document.querySelector<HTMLElement>(".review-file");
+				if (!scroll || !row) throw new Error("Review file list is not mounted");
+				return { height: scroll.clientHeight, row: row.getBoundingClientRect().height };
+			});
+			expect(viewport.row).toBeGreaterThan(0);
+			expect(await fileHeaders.count()).toBeGreaterThanOrEqual(Math.floor(viewport.height / viewport.row));
+		};
 		await expect(page.locator(".review-details")).toHaveCount(0);
 		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
 		expect(await fileHeaders.count()).toBeLessThan(178);
+		await expectReviewWindow();
 		await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
 		await expect(page.locator(".review-patch")).toHaveCount(0);
 		const contextHeader = fileHeaders.filter({ hasText: "context.md" });
@@ -3632,6 +3647,7 @@ reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folde
 		await reviewHistory.getByRole("button", { name: "All Changes", exact: true }).click();
 		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
 		expect(await fileHeaders.count()).toBeLessThan(178);
+		await expectReviewWindow();
 		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
 		await page.locator(".review-tree button").filter({ hasText: "current.ts" }).click();
 		await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).isVisible()).toBe(true);

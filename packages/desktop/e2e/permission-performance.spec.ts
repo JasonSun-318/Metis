@@ -6,20 +6,6 @@ import { messageText } from "./packaged-app-harness.ts";
 
 test.describe.configure({ timeout: 180_000 });
 
-test("packaged settings completes the sandbox self-test", async () => {
-	const app = await launchPermissionApp({ preset: "auto", tools: () => undefined });
-	try {
-		await app.openSettings("Permissions");
-		const card = app.page.locator(".sandbox-environment-card");
-		await card.getByRole("button", { name: "Run sandbox self-test", exact: true }).click();
-		await expect(card.locator(".sandbox-environment-status")).toHaveText("Available", { timeout: 60_000 });
-		await expect(card.locator(".sandbox-environment-issue")).toHaveCount(0);
-		await card.screenshot({ path: test.info().outputPath("sandbox-selftest.png") });
-	} finally {
-		await app.close();
-	}
-});
-
 test("packaged sandbox executes an actual shell command", async () => {
 	const marker = "case-perf-shell-command";
 	const app = await launchPermissionApp({

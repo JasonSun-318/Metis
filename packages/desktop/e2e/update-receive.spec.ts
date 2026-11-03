@@ -217,3 +217,63 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		await stopProcess(app);
 	}
 });
+
+// Default CI leaves METIS_UPDATE_ONLINE unset: the real-IPC case above accepts an
+// offline result so CDN reachability cannot red every run. Set
+// METIS_UPDATE_ONLINE=1 in a release/nightly gate to require that the packaged
+// build actually reaches the published update service.
+test("packaged build reaches the published update service", async ({}, testInfo) => {
+	test.skip(process.env.METIS_UPDATE_ONLINE !== "1", "Set METIS_UPDATE_ONLINE=1 to require a live update check");
+	test.skip(!executable, "Set METIS_UPDATE_E2E_APP to a packaged Metis executable or run npm run package first");
+	test.skip(process.platform === "linux", "The updater has no standalone Linux update target");
+	test.setTimeout(90_000);
+	expect(existsSync(executable!), `Missing packaged executable: ${executable}`).toBe(true);
+
+	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-update-online-e2e-"));
+	const agentDir = path.join(tempRoot, "agent");
+	const homeDir = path.join(tempRoot, "home");
+	const projectDir = path.join(tempRoot, "project");
+	const userDataDir = path.join(tempRoot, "electron");
+	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+
+	const debuggingPort = await reservePort();
+	const diagnostics: string[] = [];
+	const app = launchPackagedDesktop({
+		agentDir,
+		debuggingPort,
+		diagnostics,
+		executable: executable!,
+		homeDir,
+		projectDir,
+		userDataDir,
+	});
+
+	let browser: Browser | undefined;
+	let page: Page | undefined;
+	try {
+		({ browser, page } = await connectToApp(debuggingPort));
+		page.setDefaultTimeout(20_000);
+		await waitForServerReady(page);
+
+		// The IPC call only resolves after the manifest was fetched and parsed; a
+		// network or manifest failure rejects instead of degrading to "unavailable".
+		const updateState = await page.evaluate(async () => {
+			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+			return api.checkForUpdate();
+		});
+		await testInfo.attach("online-update-result", {
+			body: JSON.stringify(updateState, null, 2),
+			contentType: "application/json",
+		});
+		expect(["available", "unavailable"]).toContain(updateState.status);
+	} catch (error) {
+		const logPath = path.join(homeDir, "Library", "Logs", "Metis", "app-server.log");
+		const log = existsSync(logPath) ? await readFile(logPath, "utf8") : "";
+		await testInfo.attach("diagnostics", { body: diagnostics.join(""), contentType: "text/plain" });
+		if (log) await testInfo.attach("app-server.log", { body: log, contentType: "text/plain" });
+		throw error;
+	} finally {
+		await browser?.close().catch(() => undefined);
+		await stopProcess(app);
+	}
+});
