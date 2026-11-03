@@ -162,7 +162,6 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 			return api.getUpdateState();
 		});
 
-		console.log("[E2E] Packaged manual update check result:", JSON.stringify(updateState));
 		await testInfo.attach("manual-update-result", {
 			body: JSON.stringify(updateState, null, 2),
 			contentType: "application/json",
@@ -196,11 +195,17 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		} else {
 			await expect(toast).toHaveText(/^(已是最新版本|Metis is up to date)$/u);
 		}
-		console.log(
-			"[E2E] Real IPC update check outcome:",
-			updateState.status,
-			updateState.status === "unavailable" ? await toast.textContent() : updateState.status,
-		);
+		await testInfo.attach("manual-update-check-outcome", {
+			body: JSON.stringify(
+				{
+					status: updateState.status,
+					detail: updateState.status === "unavailable" ? await toast.textContent() : updateState.status,
+				},
+				null,
+				2,
+			),
+			contentType: "application/json",
+		});
 	} catch (error) {
 		const logPath = path.join(homeDir, "Library", "Logs", "Metis", "app-server.log");
 		const log = existsSync(logPath) ? await readFile(logPath, "utf8") : "";

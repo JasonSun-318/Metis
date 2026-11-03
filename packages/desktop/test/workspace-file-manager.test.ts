@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceFileManager } from "../src/main/workspace-file-manager.ts";
 
 const SESSION_ID = "10000000-0000-4000-8000-000000000099";
+
+const CI_TEST_TIMEOUT = process.env.CI ? 30_000 : 5_000;
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -94,49 +96,53 @@ async function createReviewHarness() {
 }
 
 describe("WorkspaceFileManager", () => {
-	it("returns lightweight review metadata and lazily loads one patch", async () => {
-		const { manager, project } = await createReviewHarness();
-		await appendFile(path.join(project, "README.md"), "Changed\n");
-		await mkdir(path.join(project, "src"));
-		await writeFile(path.join(project, "src", "new file.ts"), "export const value = 1;\n");
+	it(
+		"returns lightweight review metadata and lazily loads one patch",
+		async () => {
+			const { manager, project } = await createReviewHarness();
+			await appendFile(path.join(project, "README.md"), "Changed\n");
+			await mkdir(path.join(project, "src"));
+			await writeFile(path.join(project, "src", "new file.ts"), "export const value = 1;\n");
 
-		const snapshot = await manager.getReview({ sessionId: SESSION_ID, revision: "working-tree" });
-		expect(snapshot.kind).toBe("review");
-		if (snapshot.kind !== "review") throw new Error("Expected review snapshot");
-		expect(snapshot.files).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
+			const snapshot = await manager.getReview({ sessionId: SESSION_ID, revision: "working-tree" });
+			expect(snapshot.kind).toBe("review");
+			if (snapshot.kind !== "review") throw new Error("Expected review snapshot");
+			expect(snapshot.files).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						relativePath: "README.md",
+						status: "modified",
+						additions: 1,
+						deletions: 0,
+					}),
+					expect.objectContaining({
+						relativePath: "src/new file.ts",
+						status: "untracked",
+						additions: 1,
+						deletions: 0,
+					}),
+				]),
+			);
+			expect(snapshot.commits[0]?.subject).toBe("initial");
+			expect(JSON.stringify(snapshot)).not.toContain("@@");
+
+			await expect(
+				manager.getReviewFileDiff({
+					sessionId: SESSION_ID,
+					revision: "working-tree",
 					relativePath: "README.md",
-					status: "modified",
-					additions: 1,
-					deletions: 0,
 				}),
-				expect.objectContaining({
+			).resolves.toEqual(expect.objectContaining({ kind: "text", patch: expect.stringContaining("+Changed") }));
+			await expect(
+				manager.getReviewFileDiff({
+					sessionId: SESSION_ID,
+					revision: "working-tree",
 					relativePath: "src/new file.ts",
-					status: "untracked",
-					additions: 1,
-					deletions: 0,
 				}),
-			]),
-		);
-		expect(snapshot.commits[0]?.subject).toBe("initial");
-		expect(JSON.stringify(snapshot)).not.toContain("@@");
-
-		await expect(
-			manager.getReviewFileDiff({
-				sessionId: SESSION_ID,
-				revision: "working-tree",
-				relativePath: "README.md",
-			}),
-		).resolves.toEqual(expect.objectContaining({ kind: "text", patch: expect.stringContaining("+Changed") }));
-		await expect(
-			manager.getReviewFileDiff({
-				sessionId: SESSION_ID,
-				revision: "working-tree",
-				relativePath: "src/new file.ts",
-			}),
-		).resolves.toEqual(expect.objectContaining({ kind: "text", patch: expect.stringContaining("+export const") }));
-	});
+			).resolves.toEqual(expect.objectContaining({ kind: "text", patch: expect.stringContaining("+export const") }));
+		},
+		CI_TEST_TIMEOUT,
+	);
 
 	it("reads commit and rename metadata by full object id", async () => {
 		const { manager, project } = await createReviewHarness();

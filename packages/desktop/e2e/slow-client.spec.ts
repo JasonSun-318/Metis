@@ -61,7 +61,7 @@ function respondTitle(response: ServerResponse): void {
 test("a blocked renderer catches up with 10,000 deltas without losing its app server", async () => {
 	// A blocked renderer plus 10k streamed deltas is the slowest path in the suite;
 	// on a loaded CI runner the catch-up alone can outlast the 45s default timeout.
-	test.setTimeout(180_000);
+	test.setTimeout(120_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 

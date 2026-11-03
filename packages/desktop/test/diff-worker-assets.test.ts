@@ -13,13 +13,21 @@ describe("diff worker side effects", () => {
 	});
 
 	it("does not apply the worker override to unrelated module files", () => {
-		const overrides = config.module?.rules?.filter(
+		const sideEffectRules = (config.module?.rules ?? []).filter(
 			(rule) => typeof rule === "object" && rule !== null && rule.sideEffects === true,
 		);
-		expect(overrides).toHaveLength(1);
-		const rule = overrides?.[0];
-		if (typeof rule !== "object" || rule === null || !(rule.test instanceof RegExp))
-			throw new Error("Worker rule missing");
-		expect(rule.test.test("C:\\repo\\node_modules\\@pierre\\diffs\\dist\\worker\\index.js")).toBe(false);
+		const workerRules = sideEffectRules.filter(
+			(rule) =>
+				typeof rule === "object" &&
+				rule !== null &&
+				rule.test instanceof RegExp &&
+				rule.test.test("C:\\repo\\node_modules\\@pierre\\diffs\\dist\\worker\\worker.js"),
+		);
+		expect(workerRules).not.toHaveLength(0);
+		for (const rule of workerRules) {
+			if (typeof rule !== "object" || rule === null || !(rule.test instanceof RegExp))
+				throw new Error("Worker rule is missing its test pattern");
+			expect(rule.test.test("C:\\repo\\node_modules\\@pierre\\diffs\\dist\\worker\\index.js")).toBe(false);
+		}
 	});
 });

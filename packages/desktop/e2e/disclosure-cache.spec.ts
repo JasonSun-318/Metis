@@ -47,25 +47,26 @@ test("answers animate in both directions, support keyboard, and respect reduced 
 			const body = document.querySelector(".ask-user-answer-summary .transcript-drawer");
 			if (!body) throw new Error("Missing answer drawer");
 			const state = window as typeof window & {
-				__drawerTransitions?: Array<{ type: string; property: string }>;
+				__drawerTransitions?: Array<{ property: string }>;
 				__drawerListeners?: Array<{ target: Element; type: string; listener: EventListener }>;
 			};
 			state.__drawerTransitions = [];
 			state.__drawerListeners = [];
-			for (const type of ["transitionrun", "transitionstart", "transitionend"]) {
-				const listener: EventListener = (event) => {
-					const transition = event as TransitionEvent;
-					if (transition.target !== body) return;
-					state.__drawerTransitions?.push({ type, property: transition.propertyName });
-				};
-				body.addEventListener(type, listener);
-				state.__drawerListeners.push({ target: body, type, listener });
-			}
+			// Only transitionstart feeds the assertion below; the other lifecycle
+			// events recorded data that nothing read.
+			const type = "transitionstart";
+			const listener: EventListener = (event) => {
+				const transition = event as TransitionEvent;
+				if (transition.target !== body) return;
+				state.__drawerTransitions?.push({ property: transition.propertyName });
+			};
+			body.addEventListener(type, listener);
+			state.__drawerListeners.push({ target: body, type, listener });
 		});
 	const readTransitions = () =>
 		page.evaluate(
 			() =>
-				(window as typeof window & { __drawerTransitions?: Array<{ type: string; property: string }> })
+				(window as typeof window & { __drawerTransitions?: Array<{ property: string }> })
 					.__drawerTransitions ?? [],
 		);
 	const stopRecording = () =>
@@ -80,9 +81,7 @@ test("answers animate in both directions, support keyboard, and respect reduced 
 		await expect
 			.poll(
 				async () =>
-					(await readTransitions()).some(
-						(entry) => entry.type === "transitionstart" && entry.property === "grid-template-rows",
-					),
+					(await readTransitions()).some((entry) => entry.property === "grid-template-rows"),
 				{ timeout: 5_000 },
 			)
 			.toBe(true);

@@ -8,6 +8,8 @@ import { ChromiumBrowserImporter } from "../src/main/chromium-browser-import.ts"
 
 const CHROMIUM_EPOCH_MICROSECONDS = 11_644_473_600_000_000n;
 
+const CI_TEST_TIMEOUT = process.env.CI ? 30_000 : 5_000;
+
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -641,10 +643,12 @@ describe("ChromiumBrowserImporter", () => {
 		expect(readSafeStoragePassword).not.toHaveBeenCalled();
 	});
 
-	it("decrypts valid v10 cookies and skips expired, partitioned, and mismatched rows", async () => {
-		const { importer, profile, readSafeStoragePassword } = await fixture();
-		const database = new DatabaseSync(join(profile, "Network", "Cookies"));
-		database.exec(`
+	it(
+		"decrypts valid v10 cookies and skips expired, partitioned, and mismatched rows",
+		async () => {
+			const { importer, profile, readSafeStoragePassword } = await fixture();
+			const database = new DatabaseSync(join(profile, "Network", "Cookies"));
+			database.exec(`
 			CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 			INSERT INTO meta VALUES ('version', '24');
 			CREATE TABLE cookies (
@@ -653,36 +657,38 @@ describe("ChromiumBrowserImporter", () => {
 				has_expires INTEGER, samesite INTEGER
 			);
 		`);
-		const insert = database.prepare("INSERT INTO cookies VALUES (?, ?, ?, '', ?, '/', ?, 1, 1, 1, 1)");
-		const future = CHROMIUM_EPOCH_MICROSECONDS + BigInt(Date.now() + 3_600_000) * 1_000n;
-		insert.run(".example.com", "", "session", encryptedCookie(".example.com", "secret"), future);
-		insert.run(".expired.example", "", "old", encryptedCookie(".expired.example", "old"), 1n);
-		insert.run(
-			".partitioned.example",
-			"https://top.example",
-			"chip",
-			encryptedCookie(".partitioned.example", "chip"),
-			future,
-		);
-		insert.run(".wrong.example", "", "bad", encryptedCookie("different.example", "bad"), future);
-		database.close();
+			const insert = database.prepare("INSERT INTO cookies VALUES (?, ?, ?, '', ?, '/', ?, 1, 1, 1, 1)");
+			const future = CHROMIUM_EPOCH_MICROSECONDS + BigInt(Date.now() + 3_600_000) * 1_000n;
+			insert.run(".example.com", "", "session", encryptedCookie(".example.com", "secret"), future);
+			insert.run(".expired.example", "", "old", encryptedCookie(".expired.example", "old"), 1n);
+			insert.run(
+				".partitioned.example",
+				"https://top.example",
+				"chip",
+				encryptedCookie(".partitioned.example", "chip"),
+				future,
+			);
+			insert.run(".wrong.example", "", "bad", encryptedCookie("different.example", "bad"), future);
+			database.close();
 
-		const data = await importer.readProfile({
-			sourceId: "chrome",
-			sourceProfileId: "Default",
-			dataTypes: { cookies: true, history: false },
-		});
-		expect(data.cookies).toEqual([
-			expect.objectContaining({
-				name: "session",
-				value: "secret",
-				domain: ".example.com",
-				secure: true,
-			}),
-		]);
-		expect(data.cookieSkipped).toBe(3);
-		expect(readSafeStoragePassword).toHaveBeenCalledOnce();
-	});
+			const data = await importer.readProfile({
+				sourceId: "chrome",
+				sourceProfileId: "Default",
+				dataTypes: { cookies: true, history: false },
+			});
+			expect(data.cookies).toEqual([
+				expect.objectContaining({
+					name: "session",
+					value: "secret",
+					domain: ".example.com",
+					secure: true,
+				}),
+			]);
+			expect(data.cookieSkipped).toBe(3);
+			expect(readSafeStoragePassword).toHaveBeenCalledOnce();
+		},
+		CI_TEST_TIMEOUT,
+	);
 
 	it("imports history without reading Keychain", async () => {
 		const { importer, profile, readSafeStoragePassword } = await fixture();

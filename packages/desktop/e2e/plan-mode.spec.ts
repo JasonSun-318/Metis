@@ -404,7 +404,14 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		// The path appears before the tool finishes writing its content; poll the
 		// content instead of sampling the file once.
 		await expect
-			.poll(() => readFile(acceptedWritePath, "utf8").catch(() => ""), { timeout: 20_000 })
+			.poll(
+				() =>
+					readFile(acceptedWritePath, "utf8").catch((error: NodeJS.ErrnoException) => {
+						if (error.code === "ENOENT") return "";
+						throw error;
+					}),
+				{ timeout: 20_000 },
+			)
 			.toBe("Hello, friend!\n");
 		await expect(page.getByText("Execution received the accepted revision.", { exact: true })).toBeVisible();
 		await expect(page.locator(".permission-approval-panel")).toHaveCount(0);

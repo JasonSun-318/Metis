@@ -40,9 +40,9 @@ const CODE_ID = "10000000-0000-4000-8000-000000000003";
 const SCHEDULE_ID = "10000000-0000-4000-8000-000000000004";
 // Long Task entries are only reported above 50ms, and a shared CI runner
 // occasionally adds tens of milliseconds to one task that never reproduces on
-// a developer machine. Keep the strict local budget and allow the documented
-// CI variance instead of failing on a single 1ms overshoot.
-const LONG_TASK_BUDGET_MS = process.env.CI ? 200 : 100;
+// a developer machine. Keep the strict local budget and allow a bounded 50ms
+// CI allowance instead of failing on a single overshoot.
+const LONG_TASK_BUDGET_MS = process.env.CI ? 150 : 100;
 const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 const TEMP_REMOVE_OPTIONS = { force: true, maxRetries: 10, recursive: true, retryDelay: 200 } as const;
@@ -4555,6 +4555,11 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 					} else {
 						await expect(importDialog.locator(".browser-import-warning, .browser-import-empty")).toHaveCount(1);
 					}
+				} else {
+					// Profiles were discovered: the dialog must offer the discovered
+					// profile and importable data instead of empty-state guidance.
+					await expect(importDialog.getByRole("group", { name: "Data to import", exact: true })).toBeVisible();
+					await expect(importDialog.getByRole("button", { name: "Source profile", exact: true })).toBeEnabled();
 				}
 			}
 			await importDialog.getByRole("button", { name: "Close", exact: true }).click();

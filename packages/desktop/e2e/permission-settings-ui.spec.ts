@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchPermissionApp } from "./fixtures/permission-app.ts";
+import { latestToolResult } from "./packaged-app-harness.ts";
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -38,8 +39,9 @@ function lastToolResult(app: Awaited<ReturnType<typeof launchPermissionApp>>): s
 	const payload = JSON.parse(
 		[...app.provider.calls].reverse().find((call) => call.kind === "primary")?.payload ?? "{}",
 	) as { messages?: readonly { role?: string; content?: unknown }[] };
-	const tool = [...(payload.messages ?? [])].reverse().find((message) => message.role === "tool");
-	return typeof tool?.content === "string" ? tool.content : JSON.stringify(tool?.content ?? null);
+	// The OpenAI wire format sends tool results as strings, so this matches the
+	// harness helper exactly instead of duplicating it here.
+	return latestToolResult(payload.messages ?? []);
 }
 
 test("global commands remain compact and preserve non-command permissions", async ({}, testInfo) => {

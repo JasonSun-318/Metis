@@ -298,8 +298,20 @@ export async function waitForServerReady(page: Page): Promise<void> {
 					return (await api.getServerState()).state;
 				})
 				// A relaunch or reload can detach the frame while the app server boots;
-				// treat that as "not ready yet" instead of failing the whole wait.
-				.catch(() => "pending"),
+				// treat only those transient failures as "not ready yet" so genuine
+				// failures (missing preload, IPC errors) keep their diagnostics.
+				.catch((error: unknown) => {
+					const message = error instanceof Error ? error.message : String(error);
+					if (
+						message.includes("ERR_ABORTED") ||
+						message.includes("frame was detached") ||
+						message.includes("Execution context was destroyed") ||
+						message.includes("Target closed")
+					) {
+						return "pending";
+					}
+					throw error;
+				}),
 		)
 		.toBe("ready");
 }
@@ -340,7 +352,13 @@ export async function quitPackagedApp({ app, browser }: { app: ChildProcess; bro
 			void session.send("Browser.close").catch(() => undefined);
 			// The application's own shutdown may take five seconds. Wait for its
 			// exit instead of racing that deadline and killing Chromium mid-flush.
-			await expect.poll(() => app.exitCode !== null || app.signalCode !== null).toBe(true);
+			// This runs from test teardown, so a failed wait must not mask the
+			// original test error; fall through to the forced stop below.
+			try {
+				await expect.poll(() => app.exitCode !== null || app.signalCode !== null).toBe(true);
+			} catch {
+				// Let stopProcess reap the child.
+			}
 		}
 	} finally {
 		await browser.close().catch(() => undefined);

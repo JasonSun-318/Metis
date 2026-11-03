@@ -169,7 +169,12 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 		const titlebar = document.querySelector(".workspace-titlebar");
 		if (!titlebar) return false;
 		if (document.querySelector('.tool-tabs-scroll[data-tab-motion-animating="true"]')) return false;
-		return titlebar.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
+		return titlebar.getAnimations({ subtree: true }).every(
+			// Infinite loop animations (running tool-tab status) never settle; they
+			// must not hold static geometry measurements hostage.
+			(animation) =>
+				animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity,
+		);
 	});
 	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 	const platform = await page.locator("html").getAttribute("data-platform");
@@ -872,6 +877,9 @@ test("project tab groups collapse from their label and move as one", async () =>
 		// commit before asserting the derived selection, and retry the toggle once from the
 		// settled state instead of failing on a lost click.
 		for (let attempt = 0; attempt < 2; attempt += 1) {
+			// Re-read the committed state before every click: retrying an already
+			// collapsed group would toggle it back open.
+			if ((await projectLabel.getAttribute("aria-expanded")) === "false") break;
 			await projectLabel.click();
 			try {
 				await expect(projectLabel).toHaveAttribute("aria-expanded", "false", { timeout: 5_000 });
