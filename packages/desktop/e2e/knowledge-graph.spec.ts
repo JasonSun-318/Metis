@@ -237,6 +237,8 @@ for (const theme of ["dark", "light"]) {
 }
 
 test("two thousand notes keep controls usable and budget labels in the crowded overview", async ({ page }, info) => {
+	// Software-rendered CI runners need a wider bound for 2,000 nodes to settle.
+	if (process.env.CI) test.setTimeout(150_000);
 	const errors = errorsOn(page);
 	await page.setViewportSize({ width: 520, height: 780 });
 	await page.goto(`${url}/?count=2000`);
@@ -255,8 +257,12 @@ test("two thousand notes keep controls usable and budget labels in the crowded o
 	const zoomed = await viewport.getAttribute("transform");
 	await controls.getByRole("button", { name: "Reset view" }).click();
 	await expect(viewport).not.toHaveAttribute("transform", zoomed!);
-	// Capture the live graph: this case checks controls during simulation.
-	// Dense-layout convergence is asserted with bounded ticks in unit tests.
+	// Controls must stay usable while the simulation runs, but the dense layout
+	// still has to converge: once the animation frames stop moving nodes their
+	// transforms stay fixed, so the render loop has parked. The bounded-tick unit
+	// test cannot observe whether the application's animation loop stops. A dev
+	// machine settles 2,000 nodes in ~15s; CI software rendering needs more room.
+	await settle(page, process.env.CI ? 90_000 : 20_000);
 	await page.screenshot({ path: info.outputPath("2000-notes.png") });
 	expect(errors).toEqual([]);
 });
