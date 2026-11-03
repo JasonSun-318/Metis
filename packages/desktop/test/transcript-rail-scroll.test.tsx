@@ -89,7 +89,10 @@ const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototyp
 beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 	// virtual-core uses the owning window, which jsdom keeps separate from
-	// Vitest's global timer bindings. Share the same controlled clock.
+	// Vitest's global timer bindings. Share the same controlled clock. This
+	// depends on Vitest swapping globalThis timers while jsdom keeps its own
+	// window timers; re-check after a Vitest/jsdom upgrade (vi.stubGlobal or
+	// injecting the clock into virtual-core would be the stable alternative).
 	const setWindowTimeout = globalThis.setTimeout;
 	const clearWindowTimeout = globalThis.clearTimeout;
 	vi.spyOn(window, "setTimeout").mockImplementation(setWindowTimeout);

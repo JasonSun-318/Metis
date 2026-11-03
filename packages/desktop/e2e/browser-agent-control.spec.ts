@@ -36,6 +36,16 @@ function p95(values: readonly number[]): number {
 	return ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)]!;
 }
 
+/**
+ * Rejects a completely unthrottled emitter: the arrivals sampled here can bunch
+ * inside an arbitrary window, so this is only an upper bound rather than the
+ * strict 20-per-second spacing asserted with fake timers in
+ * browser-manager.test.ts. One initial event is allowed.
+ */
+function expectNoUnthrottledBurst(count: number, elapsedMs: number): void {
+	expect(count).toBeLessThanOrEqual(Math.ceil(elapsedMs * 20 / 1_000) + 1);
+}
+
 const PERFORMANCE_WARMUPS = 5;
 const PERFORMANCE_OBSERVATIONS = 35;
 const PERFORMANCE_ACTIONS = 100;
@@ -448,10 +458,8 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 			const progress = (window as typeof window & { __browserProgress?: BrowserProgressMeasurement }).__browserProgress!;
 			return { count: progress.count, elapsed: performance.now() - progress.startedAt };
 		});
-		// Measure the complete stimulus through its final delivered state: IPC can bunch
-		// arrivals inside an arbitrary sliding window. The emitter's strict 20/s spacing
-		// is checked with fake timers in browser-manager.test.ts; one initial event is allowed here.
-		expect(burstProgress.count).toBeLessThanOrEqual(Math.ceil(burstProgress.elapsed * 20 / 1_000) + 1);
+		// Measure the complete stimulus through its final delivered state.
+		expectNoUnthrottledBurst(burstProgress.count, burstProgress.elapsed);
 		await waitForDone(app, "performance-cycle");
 		const performanceCalls = fixture.calls.filter((call) => call.marker === "performance-cycle");
 		expect(performanceCalls.every((call) => call.completedAt !== undefined)).toBe(true);

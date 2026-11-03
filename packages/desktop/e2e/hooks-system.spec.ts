@@ -81,8 +81,9 @@ test.describe("Desktop Declarative Hooks System", () => {
 			await expect(page.getByText("No Hooks configured yet.")).toBeVisible();
 
 			// 2. Open New Hook Dialog and create a UserPromptSubmit blocking hook.
-			// The header and the empty Hooks section both expose a create action.
-			await page.locator("button.plugins-new-btn").click();
+			// The header and the empty Hooks section both expose a create action;
+			// the header's comes first in DOM order.
+			await page.getByRole("button", { name: "New Hook", exact: true }).first().click();
 			await expect(page.getByRole("heading", { name: "New Hook" })).toBeVisible();
 			const dialog = page.getByRole("dialog");
 			// The dialog entrance animation (modal-card-in, 200ms) briefly scales
@@ -199,7 +200,7 @@ test.describe("Desktop Declarative Hooks System", () => {
 			await waitForServerReady(page);
 			await page.getByRole("button", { name: "自定义", exact: true }).click();
 			await page.getByRole("tab", { name: "钩子", exact: true }).click();
-			await page.locator("button.plugins-new-btn").click();
+			await page.getByRole("button", { name: "新建钩子", exact: true }).first().click();
 			await expect(page.getByText("何时触发", { exact: true })).toBeVisible();
 			await expect(page.getByText("执行什么", { exact: true })).toBeVisible();
 			await page.screenshot({ animations: "disabled", path: testInfo.outputPath("hook-zh-form.png") });

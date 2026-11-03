@@ -514,7 +514,9 @@ test("content updates preserve entering header and exiting remnant opacity anima
 				if (!header) throw new Error("Expected a real entering header or exiting remnant");
 				if (!animation || animation.startTime === null) throw new Error("Expected a real running opacity animation");
 				// Pause and seek the real animation so a slow frame cannot finish it
-				// between the content update and the continuity assertions.
+				// between the content update and the continuity assertions. This is
+				// coupled to Web Animations: a JS-driven replacement would ignore
+				// pause()/currentTime and invalidate the mid-flight samples.
 				const timing = animation.effect!.getTiming();
 				animation.pause();
 				animation.currentTime = Number(timing.delay) + Number(timing.duration) * 0.25;

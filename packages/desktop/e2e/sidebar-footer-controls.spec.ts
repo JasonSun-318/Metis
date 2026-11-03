@@ -63,7 +63,10 @@ async function settleMenu(page: Page) {
  * Toggles the menu and samples its live CSS transition at a fixed fraction of
  * its own duration. Polling computed opacity races the 140/160ms transitions
  * against CI scheduling, so pause and seek the exported Animation instead; the
- * returned state is read while the transition is still mid-flight.
+ * returned state is read while the transition is still mid-flight. This only
+ * works while the menu is animated by CSS transitions exposed as Web
+ * Animations; a JS-driven animation (rAF/style mutation) would ignore
+ * pause()/currentTime, and the sampler would have to be rewritten.
  */
 async function sampleMenuTransition(page: Page) {
 	return account(page).evaluate(async (button) => {

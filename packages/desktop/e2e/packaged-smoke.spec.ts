@@ -46,6 +46,12 @@ const LONG_TASK_BUDGET_MS = process.env.CI ? 150 : 100;
 const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
 const TEMP_REMOVE_OPTIONS = { force: true, maxRetries: 10, recursive: true, retryDelay: 200 } as const;
+// SessionWorkspace clamps the tools sidebar to the workspace width minus a
+// minimum chat pane and the divider. Keep these in sync with
+// TOOLS_SIDEBAR_MAIN_MIN_WIDTH / TOOLS_SIDEBAR_SEPARATOR_WIDTH in
+// src/renderer/components/SessionWorkspace.tsx.
+const TOOLS_SIDEBAR_MAIN_MIN_WIDTH = 560;
+const TOOLS_SIDEBAR_SEPARATOR_WIDTH = 8;
 
 function cssGridTrackCount(template: string): number {
 	const repeat = /^repeat\((\d+)/u.exec(template.trim());
@@ -296,9 +302,14 @@ async function resizeWorkspacePanel(page: Page, targetWidth: number): Promise<vo
 	});
 	const workspaceX = Math.round((await page.locator(".workspace").boundingBox())?.x ?? 0);
 	const sidebarWidth = targetWidth + 1;
-	// SessionWorkspace clamps the tools sidebar to `workspace - 560 - 8`; widen
-	// the viewport when the requested width would otherwise be unreachable.
-	await page.setViewportSize({ width: Math.max(viewport.width, workspaceX + sidebarWidth + 568), height: viewport.height });
+	// Widen the viewport when the requested width would otherwise be unreachable.
+	await page.setViewportSize({
+		width: Math.max(
+			viewport.width,
+			workspaceX + sidebarWidth + TOOLS_SIDEBAR_MAIN_MIN_WIDTH + TOOLS_SIDEBAR_SEPARATOR_WIDTH,
+		),
+		height: viewport.height,
+	});
 	const current = await page.locator(".tool-sidebar").boundingBox();
 	const divider = await page.getByRole("separator", { name: "Resize tools sidebar", exact: true }).boundingBox();
 	if (!current || !divider) throw new Error("Missing tool sidebar divider");
@@ -652,9 +663,9 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		expect(composerBoxBefore).not.toBeNull();
 		expect(composerBoxAfter).not.toBeNull();
 		expect(composerBoxAfter!.height).toBeCloseTo(composerBoxBefore!.height, 0);
-		await page.waitForTimeout(300);
-		const collapsedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
-		expect(collapsedTranscriptHeight).toBe(expandedTranscriptHeight);
+		await expect
+			.poll(() => transcriptScroll.evaluate((element) => element.clientHeight))
+			.toBe(expandedTranscriptHeight);
 		await panel.screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-collapsed-chat.png"),
@@ -662,9 +673,9 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await heading.click();
 		await expect(heading).toHaveAttribute("aria-expanded", "true");
 		await expect(drawer).not.toHaveAttribute("inert", "");
-		await page.waitForTimeout(300);
-		const expandedAgainTaskListHeight = (await panel.boundingBox())?.height ?? 0;
-		expect(expandedAgainTaskListHeight).toBeCloseTo(expandedTaskListHeight, 0);
+		await expect
+			.poll(async () => Math.round((await panel.boundingBox())?.height ?? 0))
+			.toBe(Math.round(expandedTaskListHeight));
 		const longestTaskListFrame = await page.evaluate(() => {
 			const state = window as typeof window & {
 				__taskListLongTaskObserver?: PerformanceObserver;
@@ -2256,7 +2267,9 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		// Windows draws its own 32px title bar strip inside the renderer and the
 		// settings backdrop starts beneath it (app.css data-platform rules); the
 		// dialog fills the remaining height on every platform.
-		const viewportHeight = page.viewportSize()?.height ?? 0;
+		const viewportSize = page.viewportSize();
+		if (!viewportSize) throw new Error("The profile settings test must set a viewport before measuring the dialog");
+		const viewportHeight = viewportSize.height;
 		expect(Math.round(settingsBox?.width ?? 0)).toBe(1_440);
 		expect(Math.round(settingsBox?.height ?? 0)).toBe(
 			process.platform === "win32" ? viewportHeight - 32 : viewportHeight,
