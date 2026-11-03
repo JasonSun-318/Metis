@@ -249,10 +249,8 @@ textarea { resize: none; }
    a 40px in-app row hosts session and tool tabs above the workspace, leaving
    the sessions sidebar free of an empty header row and divider. */
 :root[data-platform="win32"] .workspace-titlebar.windows-titlebar-row { position: fixed; z-index: 1; top: 32px; right: 0; left: var(--windows-sidebar-offset, 0px); width: auto; background: var(--conversation-bg); transition: left 200ms cubic-bezier(.16, 1, .3, 1); }
-:root[data-platform="win32"] .windows-titlebar-row .workspace-titlebar-tabs { left: 0; }
 /* Navigation lives above this row, so collapsed session tabs use its leading edge. */
 :root[data-platform="win32"] .windows-titlebar-row.is-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar { padding-left: 0px; }
-:root[data-platform="win32"] .windows-titlebar-row .details-sidebar-toggle svg { width: 16px; height: 16px; }
 .windows-titlebar-navigation { position: fixed; z-index: 10031; top: 0; left: 8px; display: flex; height: 32px; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button:hover:not(:disabled) { color: var(--text); }

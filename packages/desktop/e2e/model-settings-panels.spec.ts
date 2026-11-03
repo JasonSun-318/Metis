@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { launchPermissionApp } from "./fixtures/permission-app.ts";
 
@@ -13,10 +13,19 @@ test.describe.configure({ timeout: 180_000 });
  * samples under a software renderer. Stretch the product's own
  * --motion-duration-switch for the sample window instead: the real transition
  * and easing still run, but every frame in the window sees an intermediate
- * height regardless of the achieved frame rate.
+ * height regardless of the achieved frame rate. The real duration contract lives
+ * in tokens.css and is asserted before the stretch replaces it.
  */
+const REAL_MOTION_DURATION_MS = 220;
 const SLOW_MOTION_MS = 1_000;
 const SLOW_MOTION_WINDOW_MS = SLOW_MOTION_MS + 120;
+
+async function expectMotionDurationContract(page: Page) {
+	const duration = await page.evaluate(() =>
+		getComputedStyle(document.documentElement).getPropertyValue("--motion-duration-switch").trim(),
+	);
+	expect(duration).toBe(`${REAL_MOTION_DURATION_MS}ms`);
+}
 
 async function sampleDisclosure(row: Locator, reverse = false) {
 	return row.evaluate(
@@ -87,6 +96,7 @@ for (const theme of ["dark", "light"] as const) {
 		const app = await launchPermissionApp({ preset: "auto", tools: () => undefined, locale: "zh-CN" });
 		const page = app.page;
 		try {
+			await expectMotionDurationContract(page);
 			await page.evaluate(async (baseUrl) => {
 				const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 				await api.updateModelSettings({

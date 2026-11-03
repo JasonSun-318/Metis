@@ -124,6 +124,11 @@ describe("ReviewPanel", () => {
 			act(async () =>
 				root.render(<ReviewPanel api={api} sessionId={sessionId} visible focusRequest={{ id, path }} />),
 			);
+		// jsdom lays rows out at zero height and reports no scroll extent, which clamps the
+		// virtualizer's focus jump to offset 0; give rows and the pane a measurable size instead.
+		vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+			return this.classList.contains("review-file") ? 37 : 0;
+		});
 		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
 		await flush();
 		const scroll = container.querySelector<HTMLElement>(".review-content")!;
@@ -131,8 +136,15 @@ describe("ReviewPanel", () => {
 			scroll.scrollTop = options.top ?? 0;
 		});
 		Object.defineProperty(scroll, "scrollTo", { configurable: true, value: scrollTo });
+		Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 10_000 });
 		await render("first", "packages/src/nested.ts");
-		expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+		const focusedRow = container.querySelector<HTMLElement>('.review-file[data-index="1"]')!;
+		const focusedOffset = Number.parseFloat(
+			/translateY\(([-\d.]+)px\)/u.exec(focusedRow.style.transform)?.[1] ?? "NaN",
+		);
+		expect(focusedOffset).toBeGreaterThan(0);
+		expect(scrollTo).toHaveBeenCalledWith({ top: focusedOffset, behavior: "smooth" });
+		expect(scroll.scrollTop).toBe(focusedOffset);
 		await flush();
 		expect(api.getWorkspaceReview).toHaveBeenCalledExactlyOnceWith({ sessionId, revision: "working-tree" });
 		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledExactlyOnceWith({

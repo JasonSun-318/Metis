@@ -16,7 +16,7 @@ vi.mock("@pierre/diffs/react", () => ({
 	),
 }));
 
-import { ReviewPanel } from "../src/renderer/components/ReviewPanel.tsx";
+import { FILE_LIST_BOTTOM_PADDING, ReviewPanel } from "../src/renderer/components/ReviewPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
@@ -257,10 +257,10 @@ describe("ReviewPanel virtualization", () => {
 		expect(initial).not.toContain(FILE_COUNT - 1);
 		expect(row(FILE_COUNT - 1)).toBeNull();
 		expect(container.querySelector<HTMLElement>(".review-files")?.style.height).toBe(
-			`${FILE_COUNT * ROW_HEIGHT + 20}px`,
+			`${FILE_COUNT * ROW_HEIGHT + FILE_LIST_BOTTOM_PADDING}px`,
 		);
 
-		await scrollToTop(FILE_COUNT * ROW_HEIGHT + 20 - VIEWPORT_HEIGHT);
+		await scrollToTop(FILE_COUNT * ROW_HEIGHT + FILE_LIST_BOTTOM_PADDING - VIEWPORT_HEIGHT);
 		const scrolled = mountedIndices();
 		expect(scrolled).toContain(FILE_COUNT - 1);
 		expect(scrolled).not.toContain(0);
@@ -318,7 +318,7 @@ describe("ReviewPanel virtualization", () => {
 		const delta = EXPANDED_HEIGHT - ROW_HEIGHT;
 		expect(row(5)?.style.transform).toBe(`translateY(${5 * ROW_HEIGHT + delta}px)`);
 		expect(container.querySelector<HTMLElement>(".review-files")?.style.height).toBe(
-			`${FILE_COUNT * ROW_HEIGHT + 20 + delta}px`,
+			`${FILE_COUNT * ROW_HEIGHT + FILE_LIST_BOTTOM_PADDING + delta}px`,
 		);
 		expect(row(expandedIndex)?.querySelector('[data-testid="patch"]')?.textContent).toBe("diff patch");
 
@@ -333,7 +333,7 @@ describe("ReviewPanel virtualization", () => {
 		await flush();
 		await act(async () => ControlledResizeObserver.trigger(row(2)!));
 		await flushFrames();
-		const expandedHeight = FILE_COUNT * ROW_HEIGHT + 20 + EXPANDED_HEIGHT - ROW_HEIGHT;
+		const expandedHeight = FILE_COUNT * ROW_HEIGHT + FILE_LIST_BOTTOM_PADDING + EXPANDED_HEIGHT - ROW_HEIGHT;
 		expect(container.querySelector<HTMLElement>(".review-files")?.style.height).toBe(`${expandedHeight}px`);
 
 		await act(async () =>
@@ -344,7 +344,7 @@ describe("ReviewPanel virtualization", () => {
 		await flush();
 		await flushFrames();
 		expect(container.querySelector<HTMLElement>(".review-files")?.style.height).toBe(
-			`${FILE_COUNT * ROW_HEIGHT + 20}px`,
+			`${FILE_COUNT * ROW_HEIGHT + FILE_LIST_BOTTOM_PADDING}px`,
 		);
 		expect(row(2)?.querySelector(".review-file-header")?.getAttribute("aria-expanded")).toBe("false");
 	});

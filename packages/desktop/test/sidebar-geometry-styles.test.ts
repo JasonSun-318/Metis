@@ -59,7 +59,6 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(rule(".windows-titlebar-navigation").height).toBe("32px");
 		expect(rule(".windows-titlebar-navigation button").width).toBe("28px");
 		expect(rule(".windows-titlebar-navigation button").height).toBe("28px");
-		expect(rule(':root[data-platform="win32"] .windows-titlebar-row .workspace-titlebar-tabs').left).toBe("0px");
 		expect(
 			rule(
 				':root[data-platform="win32"] .windows-titlebar-row.is-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar',

@@ -1790,7 +1790,7 @@ export function App({ api, store }: AppProps) {
 						onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
 						type="button"
 					>
-						<SidebarSimple aria-hidden="true" size={17} />
+						<SidebarSimple aria-hidden="true" size={isWindows ? 16 : 17} />
 					</button>
 				</div>
 			)}

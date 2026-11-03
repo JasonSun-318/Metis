@@ -48,7 +48,7 @@ const HIGHLIGHTER_OPTIONS: Record<"dark" | "light", WorkerInitializationRenderOp
 // Collapsed rows are a 36px header plus its 1px separator. Expanded rows are measured after mount.
 const FILE_ROW_ESTIMATED_HEIGHT = 37;
 const FILE_ROW_OVERSCAN = 4;
-const FILE_LIST_BOTTOM_PADDING = 20;
+export const FILE_LIST_BOTTOM_PADDING = 20;
 // Without a laid-out scroll element (for example in jsdom) the virtualizer reports no rows; render a small
 // first window so the review stays inspectable instead of going blank.
 const MAX_UNMEASURED_ROWS = 30;
@@ -369,6 +369,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(refreshVersion): Refresh requests reload the review and invalidate cached patches.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(virtualizer.measure): useVirtualizer returns a stable instance, so measuring row heights after a load must not re-trigger the request.
 	useEffect(() => {
 		let current = true;
 		const invalidateRevisionPatches = refreshRequestRef.current;
@@ -399,7 +400,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 		return () => {
 			current = false;
 		};
-	}, [api, refreshVersion, revision, sessionId, virtualizer]);
+	}, [api, refreshVersion, revision, sessionId]);
 
 	const loadPatch = useCallback(
 		(file: DesktopWorkspaceReviewFile, retry = false) => {
@@ -454,11 +455,11 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 		setFocusNotice("");
 		if (!focusRequest.path) return;
 		const index = snapshot.files.findIndex((entry) => entry.relativePath === focusRequest.path);
-		if (index < 0) {
+		const file = index < 0 ? undefined : snapshot.files[index];
+		if (!file) {
 			setFocusNotice(t("This file is not in the current review"));
 			return;
 		}
-		const file = snapshot.files[index]!;
 		setExpanded((current) => new Set(current).add(file.relativePath));
 		loadPatch(file);
 		scrollToFileIndex(index);
@@ -492,8 +493,9 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 	const selectFile = (path: string) => {
 		if (snapshot?.kind !== "review") return;
 		const index = snapshot.files.findIndex((candidate) => candidate.relativePath === path);
-		if (index < 0) return;
-		toggleFile(snapshot.files[index]!, true);
+		const file = index < 0 ? undefined : snapshot.files[index];
+		if (!file) return;
+		toggleFile(file, true);
 		scrollToFileIndex(index);
 	};
 
