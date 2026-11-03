@@ -1,12 +1,8 @@
-import { constants as fsConstants, realpath as realpathCallback } from "node:fs";
-import { open, realpath as realpathNative, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
-import { promisify } from "node:util";
 import { type DesktopPreviewFile, PREVIEW_MAX_BYTES } from "../shared/desktop-api.ts";
-
-// App Server canonicalizes owned paths with realpathSync. On Windows, the
-// callback implementation preserves the same casing; the native variant does not.
-const realpath = process.platform === "win32" ? promisify(realpathCallback) : realpathNative;
+import { realpath } from "./canonical-path.ts";
 
 const MAX_KNOWLEDGE_NOTE_BYTES = 4 * 1024 * 1024;
 const O_NOFOLLOW_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);

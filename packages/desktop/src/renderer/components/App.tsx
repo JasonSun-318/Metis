@@ -1733,18 +1733,17 @@ export function App({ api, store }: AppProps) {
 	// row spans the window for session and tool tabs.
 	// The row starts where the workspace does so the tab cells
 	// stay above their panes; macOS keeps the single in-workspace row below.
+	const isWindows = api.platform === "win32";
 	const winTitlebarSidebarOffset = isCollapsed ? 0 : sessionSidebarWidth;
 	const titlebar = (
 		<header
-			className={`workspace-titlebar${api.platform === "win32" ? " windows-titlebar-row" : ""}${api.platform === "win32" && isCollapsed ? " is-sidebar-collapsed" : ""}`}
+			className={`workspace-titlebar${isWindows ? " windows-titlebar-row" : ""}${isWindows && isCollapsed ? " is-sidebar-collapsed" : ""}`}
 			data-active-session-id={visibleActiveSession?.sessionId}
 			style={
-				api.platform === "win32"
-					? ({ "--windows-sidebar-offset": `${winTitlebarSidebarOffset}px` } as CSSProperties)
-					: undefined
+				isWindows ? ({ "--windows-sidebar-offset": `${winTitlebarSidebarOffset}px` } as CSSProperties) : undefined
 			}
 		>
-			{api.platform !== "win32" && (
+			{!isWindows && (
 				<button
 					aria-label={t(
 						sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",

@@ -517,7 +517,8 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 			? virtualRows
 			: files.slice(0, MAX_UNMEASURED_ROWS).map((_, index) => ({
 					index,
-					start: listOffset + index * FILE_ROW_ESTIMATED_HEIGHT,
+					// The fallback only renders without a measured list offset.
+					start: index * FILE_ROW_ESTIMATED_HEIGHT,
 				}));
 
 	return (

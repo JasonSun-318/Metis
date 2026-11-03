@@ -19,6 +19,10 @@ const CHECK_LABEL_KEYS: Record<SandboxCheckId, string> = {
 	"network-denied": "Blocked network access",
 };
 
+// A blocked sandbox leaves these checks unrun; they are reported as one recovery
+// note instead of separate issues.
+const DEPENDENT_SKIP_REASONS = new Set(["readiness-failed", "sandbox-unavailable"]);
+
 function reasonLabel(t: (key: string) => string, reason: string | undefined): string | null {
 	switch (reason) {
 		case "not-applicable":
@@ -178,10 +182,11 @@ export function SandboxEnvironmentCard({
 		(check) =>
 			check.status === "failed" ||
 			(check.status === "skipped" &&
-				!["not-applicable", "not-run", "readiness-failed", "sandbox-unavailable"].includes(check.reason ?? "")),
+				!["not-applicable", "not-run"].includes(check.reason ?? "") &&
+				!DEPENDENT_SKIP_REASONS.has(check.reason ?? "")),
 	);
 	const dependentChecksSkipped = report?.checks?.some(
-		(check) => check.status === "skipped" && ["readiness-failed", "sandbox-unavailable"].includes(check.reason ?? ""),
+		(check) => check.status === "skipped" && DEPENDENT_SKIP_REASONS.has(check.reason ?? ""),
 	);
 	const recoveryActions = report?.recoveryActions ?? [];
 	const verified =

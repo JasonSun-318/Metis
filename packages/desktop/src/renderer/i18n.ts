@@ -2454,7 +2454,6 @@ const zhCN = {
 	"Allow Metis to execute the following command?": "允许 Metis 执行以下命令吗？",
 	"Allow Metis to perform the following action?": "允许 Metis 执行以下操作吗？",
 	"More approval options": "更多权限选项",
-	"Writable directory": "可写目录",
 	"Writable directories": "可写目录",
 	"Includes new files and subdirectories.": "包含新建文件和子目录。",
 	"Allowed by rule": "规则允许",
