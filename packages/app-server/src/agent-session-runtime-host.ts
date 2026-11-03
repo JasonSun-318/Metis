@@ -656,8 +656,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			const taskId = [...inputs.values()].at(-1)?.taskId;
 			if (taskId) this.publish({ type: "agent/itemsChanged", sessionId: this.sessionId, agentId, taskId });
 		} catch (error) {
-			// A concurrent delete may remove the child before its final projection refresh.
-			if (!(error instanceof AgentError && error.code === "UNKNOWN_AGENT") && !this.closed) {
+			// A concurrent delete may remove the child before its final projection refresh;
+			// a close in progress is about to clear every listener, so neither should notify.
+			if (!(error instanceof AgentError && error.code === "UNKNOWN_AGENT") && !this.closed && !this.closePromise) {
 				this.publish({
 					type: "interaction/notify",
 					sessionId: this.sessionId,

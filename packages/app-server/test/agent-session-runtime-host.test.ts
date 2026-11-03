@@ -184,6 +184,80 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		}
 	});
 
+	it("does not publish a receipt refresh failure while close is in progress", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-receipt-close-reject-"));
+		temporaryRoots.push(root);
+		const cwd = join(root, "project");
+		const agentDir = join(root, "agent");
+		mkdirSync(cwd);
+		mkdirSync(agentDir);
+		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
+			id: SESSION_ID,
+			mode: "code",
+			permissionPreset: "full",
+		});
+		const path = manager.getSessionFile()!;
+		manager.close();
+		const opened = await new AgentSessionRuntimeHost({ agentDir }).open({
+			path,
+			relativePath: basename(path),
+			summary: {
+				sessionId: SESSION_ID,
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd,
+				createdAt: "2026-11-01T00:00:00.000Z",
+				updatedAt: "2026-11-01T00:00:00.000Z",
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		});
+		const internal = opened as unknown as {
+			runtime: { subagentManager: { readJournal(): Promise<unknown[]> }; dispose(): Promise<void> };
+			refreshAgentReceipts(agentId: string): Promise<void>;
+		};
+		let readStarted!: () => void;
+		let failRead!: () => void;
+		const started = new Promise<void>((resolve) => {
+			readStarted = resolve;
+		});
+		const readFailure = new Promise<void>((_resolve, reject) => {
+			failRead = () => reject(new Error("journal unavailable"));
+		});
+		vi.spyOn(internal.runtime.subagentManager, "readJournal").mockImplementation(async () => {
+			readStarted();
+			await readFailure;
+			return [];
+		});
+		const events: DomainEvent[] = [];
+		opened.subscribe((event) => events.push(event));
+		const refreshed = internal.refreshAgentReceipts("child").then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		await started;
+		let finishDispose!: () => void;
+		const disposeGate = new Promise<void>((resolve) => {
+			finishDispose = resolve;
+		});
+		vi.spyOn(internal.runtime, "dispose").mockImplementation(async () => {
+			await disposeGate;
+		});
+		const closing = opened.close();
+		try {
+			// The journal rejects while closePromise is set but `closed` is still false.
+			failRead();
+			expect(await refreshed).toBeUndefined();
+			expect(events.filter((event) => event.type === "interaction/notify")).toEqual([]);
+		} finally {
+			finishDispose();
+			await closing;
+		}
+	});
+
 	it("projects the same provider approval ID into live events and reconnect snapshots", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-review-identity-"));
 		temporaryRoots.push(root);
