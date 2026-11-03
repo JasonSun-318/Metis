@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
+import { packagedOutputRoot } from "./package-paths.mjs";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
 const repoRoot = path.resolve(desktopRoot, "../..");
@@ -29,13 +30,17 @@ function nativeArch() {
 // header instead.
 const peMachineByArch = { arm64: 0xaa64, x64: 0x8664 };
 async function assertPeMachine(file, arch) {
+	const expectedMachine = peMachineByArch[arch];
+	if (expectedMachine === undefined) {
+		throw new Error(`Unsupported package architecture for PE validation: ${arch}`);
+	}
 	const handle = await open(file, "r");
 	try {
 		const header = Buffer.alloc(64);
 		await handle.read(header, 0, 4, 0x3c);
 		const peHeaderOffset = header.readUInt32LE(0);
 		await handle.read(header, 0, 2, peHeaderOffset + 4);
-		if (header.readUInt16LE(0) !== peMachineByArch[arch]) {
+		if (header.readUInt16LE(0) !== expectedMachine) {
 			throw new Error(`Packaged binary is not a ${arch} PE image: ${file}`);
 		}
 	} finally {
@@ -56,7 +61,7 @@ const expectedArch = explicitArch ?? nativeArch();
 const positionalArgs = process.argv.slice(2).filter((argument) => !argument.startsWith("--arch="));
 const packageRoot = positionalArgs[0]
 	? path.resolve(positionalArgs[0])
-	: path.join(desktopRoot, "out", `Metis-${process.platform}-${expectedArch}`);
+	: packagedOutputRoot(desktopRoot, { arch: expectedArch });
 const resourcesRoot =
 	process.platform === "darwin"
 		? path.join(packageRoot, "Metis.app", "Contents", "Resources")
@@ -86,8 +91,9 @@ if (process.platform === "darwin" || process.platform === "win32") {
 }
 
 const appAsar = path.join(resourcesRoot, "app.asar");
-// Imported lazily: check-skill-runtime resolves modules inside the built
-// coding-agent workspace, which may not exist while only arg validation runs.
+// Imported lazily so the `--arch` validation and native-tool manifest checks above
+// report their own errors first; check-skill-runtime resolves modules inside the
+// built coding-agent workspace, which may be absent in an unbuilt checkout.
 const { checkSkillRuntime } = await import("../../../scripts/check-skill-runtime.mjs");
 await checkSkillRuntime({ packageDir: path.join(appAsar, ".webpack/app-server/node_modules/@metis/coding-agent") });
 const executable =

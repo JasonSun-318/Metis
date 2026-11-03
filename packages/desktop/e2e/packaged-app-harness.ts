@@ -6,6 +6,24 @@ import path from "node:path";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
+// CDP pages are not covered by Playwright's `expect.timeout`; mirror the values in
+// playwright.config.ts so page actions fail on the same budget. Keep both in sync.
+const EXPECT_TIMEOUT_MS = process.env.CI ? 20_000 : 10_000;
+
+// Transient failures seen when a relaunch or reload detaches the renderer frame
+// while the app server is still booting.
+const TRANSIENT_PAGE_ERROR_FRAGMENTS = [
+	"ERR_ABORTED",
+	"frame was detached",
+	"Execution context was destroyed",
+	"Target closed",
+] as const;
+
+function isTransientPageError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return TRANSIENT_PAGE_ERROR_FRAGMENTS.some((fragment) => message.includes(fragment));
+}
+
 export const desktopRoot = path.resolve(__dirname, "..");
 
 export function nativePackageArch(): string {
@@ -284,7 +302,7 @@ export async function connectToApp(
 	if (!page) throw new Error("Packaged app did not expose a renderer page");
 	// CDP pages do not inherit Playwright fixture timeouts; fail stale actions
 	// promptly instead of spending the entire native test budget on one locator.
-	page.setDefaultTimeout(process.env.CI ? 20_000 : 10_000);
+	page.setDefaultTimeout(EXPECT_TIMEOUT_MS);
 	await page.bringToFront();
 	return { browser, page };
 }
@@ -301,15 +319,7 @@ export async function waitForServerReady(page: Page): Promise<void> {
 				// treat only those transient failures as "not ready yet" so genuine
 				// failures (missing preload, IPC errors) keep their diagnostics.
 				.catch((error: unknown) => {
-					const message = error instanceof Error ? error.message : String(error);
-					if (
-						message.includes("ERR_ABORTED") ||
-						message.includes("frame was detached") ||
-						message.includes("Execution context was destroyed") ||
-						message.includes("Target closed")
-					) {
-						return "pending";
-					}
+					if (isTransientPageError(error)) return "pending";
 					throw error;
 				}),
 		)
@@ -334,7 +344,7 @@ export async function createAndRestoreChatSession(
 			await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
 			break;
 		} catch (error) {
-			if (attempt === 2) throw error;
+			if (attempt === 2 || !isTransientPageError(error)) throw error;
 			await new Promise((resolve) => setTimeout(resolve, 250));
 		}
 	}
