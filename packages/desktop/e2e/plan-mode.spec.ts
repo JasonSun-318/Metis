@@ -401,8 +401,11 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		expect(transcript(executionPayload!)).toMatch(/friendlier greeting/i);
 		expect(transcript(executionPayload!)).not.toContain("call-submit-plan-1");
 		expect(transcript(executionPayload!)).not.toContain("Add a greeting without changing unrelated files");
-		await expect.poll(() => existsSync(acceptedWritePath), { timeout: 20_000 }).toBe(true);
-		expect(await readFile(acceptedWritePath, "utf8")).toBe("Hello, friend!\n");
+		// The path appears before the tool finishes writing its content; poll the
+		// content instead of sampling the file once.
+		await expect
+			.poll(() => readFile(acceptedWritePath, "utf8").catch(() => ""), { timeout: 20_000 })
+			.toBe("Hello, friend!\n");
 		await expect(page.getByText("Execution received the accepted revision.", { exact: true })).toBeVisible();
 		await expect(page.locator(".permission-approval-panel")).toHaveCount(0);
 		await expect(page.getByText("Task stopped", { exact: true })).toHaveCount(0);
