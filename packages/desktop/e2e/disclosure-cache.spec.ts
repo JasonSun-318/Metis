@@ -38,25 +38,79 @@ test("answers animate in both directions, support keyboard, and respect reduced 
 	const summary = page.locator(".ask-user-answer-summary > summary");
 	const drawer = page.locator(".ask-user-answer-summary .transcript-drawer");
 	await expect(drawer).toHaveJSProperty("inert", true);
-	const sampleToggle = () => summary.evaluate(async (element) => {
-		const body = element.nextElementSibling!;
-		const heights: number[] = [];
-		(element as HTMLElement).click();
-		const until = performance.now() + 400;
-		while (performance.now() < until) {
-			await new Promise(requestAnimationFrame);
-			heights.push(body.getBoundingClientRect().height);
-		}
-		return heights;
-	});
-	const opening = await sampleToggle();
-	const expanded = opening.at(-1)!;
-	expect(expanded).toBeGreaterThan(60);
-	expect(opening.some((height) => height > 1 && height < expanded - 1)).toBe(true);
+	// Drive the toggle from the test side and record the drawer transition lifecycle
+	// before the click. Frame-by-frame height sampling is not deterministic: a loaded
+	// CI machine can stall the renderer for longer than the whole 280ms transition, so
+	// the sampled heights miss every intermediate value.
+	const recordTransitions = () =>
+		page.evaluate(() => {
+			const body = document.querySelector(".ask-user-answer-summary .transcript-drawer");
+			if (!body) throw new Error("Missing answer drawer");
+			const state = window as typeof window & {
+				__drawerTransitions?: Array<{ type: string; property: string }>;
+				__drawerListeners?: Array<{ target: Element; type: string; listener: EventListener }>;
+			};
+			state.__drawerTransitions = [];
+			state.__drawerListeners = [];
+			for (const type of ["transitionrun", "transitionstart", "transitionend"]) {
+				const listener: EventListener = (event) => {
+					const transition = event as TransitionEvent;
+					if (transition.target !== body) return;
+					state.__drawerTransitions?.push({ type, property: transition.propertyName });
+				};
+				body.addEventListener(type, listener);
+				state.__drawerListeners.push({ target: body, type, listener });
+			}
+		});
+	const readTransitions = () =>
+		page.evaluate(
+			() =>
+				(window as typeof window & { __drawerTransitions?: Array<{ type: string; property: string }> })
+					.__drawerTransitions ?? [],
+		);
+	const stopRecording = () =>
+		page.evaluate(() => {
+			const state = window as typeof window & {
+				__drawerListeners?: Array<{ target: Element; type: string; listener: EventListener }>;
+			};
+			for (const entry of state.__drawerListeners ?? []) entry.target.removeEventListener(entry.type, entry.listener);
+			state.__drawerListeners = [];
+		});
+	const waitForDrawerTransition = async () => {
+		await expect
+			.poll(
+				async () =>
+					(await readTransitions()).some(
+						(entry) => entry.type === "transitionstart" && entry.property === "grid-template-rows",
+					),
+				{ timeout: 5_000 },
+			)
+			.toBe(true);
+		await drawer.evaluate(async (element) => {
+			// Drain the drawer's own transitions; extra passes cover a second property
+			// starting on a later frame. A transition that already finished leaves an
+			// empty list and resolves immediately.
+			for (let pass = 0; pass < 8; pass += 1) {
+				const running = element.getAnimations().filter((animation) => animation.playState === "running");
+				if (running.length === 0) return;
+				await Promise.all(running.map((animation) => animation.finished.catch(() => undefined)));
+			}
+		});
+	};
+
+	await recordTransitions();
+	await summary.click();
 	await expect(drawer).toHaveJSProperty("inert", false);
-	const closing = await sampleToggle();
-	expect(closing.some((height) => height > 1 && height < expanded - 1)).toBe(true);
-	expect(closing.at(-1)).toBe(0);
+	await waitForDrawerTransition();
+	expect(await drawer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(60);
+	await stopRecording();
+
+	await recordTransitions();
+	await summary.click();
+	await expect(drawer).toHaveJSProperty("inert", true);
+	await waitForDrawerTransition();
+	expect(await drawer.evaluate((element) => element.getBoundingClientRect().height)).toBe(0);
+	await stopRecording();
 	await expect(drawer).toHaveJSProperty("inert", true);
 	await summary.focus();
 	await page.keyboard.press("Enter");

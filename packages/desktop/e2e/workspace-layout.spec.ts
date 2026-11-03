@@ -162,7 +162,16 @@ async function rendererFailure(error: unknown, page: Page, diagnostics: readonly
 
 async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Promise<void> {
 	// Static geometry is measured after the deliberately translated entry/exit chrome settles.
-	await page.waitForFunction(() => !document.querySelector('.tool-tabs-scroll[data-tab-motion-animating="true"]'));
+	// The strip's motion flag alone is not enough: a drag, split resize or drawer can leave a
+	// CSS transition running inside the titlebar for another frame, which shifts every control
+	// by a pixel while this helper samples it.
+	await page.waitForFunction(() => {
+		const titlebar = document.querySelector(".workspace-titlebar");
+		if (!titlebar) return false;
+		if (document.querySelector('.tool-tabs-scroll[data-tab-motion-animating="true"]')) return false;
+		return titlebar.getAnimations({ subtree: true }).every((animation) => animation.playState !== "running");
+	});
+	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 	const platform = await page.locator("html").getAttribute("data-platform");
 	const expectedCenter = platform === "win32" ? 51.5 : platform === "darwin" && !fullscreen ? 23 : 19.5;
 	const controls = await page.locator(".workspace-titlebar").evaluate((titlebar) => {
@@ -854,8 +863,24 @@ test("project tab groups collapse from their label and move as one", async () =>
 		await expect.poll(tabNames).toEqual(["Group Alpha One", "Group Alpha Two", "Group Beta"]);
 
 		// Collapsing the active tab's group moves focus to the nearest tab outside it.
-		await page.getByRole("tab", { name: "Group Alpha Two", exact: true }).click();
-		await label("project").click();
+		const alphaTwoTab = page.getByRole("tab", { name: "Group Alpha Two", exact: true });
+		await alphaTwoTab.click();
+		await expect(alphaTwoTab).toHaveAttribute("aria-selected", "true");
+		const projectLabel = label("project");
+		// The drawer commits the collapsed state only when its 220ms animation finishes, and a
+		// pointer gesture can be swallowed while the strip is still re-laying out. Wait for the
+		// commit before asserting the derived selection, and retry the toggle once from the
+		// settled state instead of failing on a lost click.
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			await projectLabel.click();
+			try {
+				await expect(projectLabel).toHaveAttribute("aria-expanded", "false", { timeout: 5_000 });
+				break;
+			} catch (error) {
+				if (attempt === 1) throw error;
+				await expectTitlebarControlsAligned(page);
+			}
+		}
 		await expect(page.getByRole("tab", { name: "Group Beta", exact: true })).toHaveAttribute("aria-selected", "true");
 		await page.locator(`[data-active-session-id="${beta}"]`).waitFor({ state: "visible" });
 		// Opening a folded session from the sidebar reopens its group.

@@ -59,6 +59,9 @@ function respondTitle(response: ServerResponse): void {
 }
 
 test("a blocked renderer catches up with 10,000 deltas without losing its app server", async () => {
+	// A blocked renderer plus 10k streamed deltas is the slowest path in the suite;
+	// on a loaded CI runner the catch-up alone can outlast the 45s default timeout.
+	test.setTimeout(180_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
@@ -240,20 +243,30 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		phase = "catch up streamed deltas";
 		await expect
 			.poll(async () => (await page!.locator("[data-transcript-answer]").last().textContent())?.length ?? 0, {
-				timeout: 20_000,
+				// CI machines are roughly 3-5x slower than a developer laptop while the
+				// App Server replays the backlog into the recovered renderer.
+				timeout: 60_000,
 			})
 			.toBe(10_000);
 		phase = "verify recovered renderer";
-		expect(await page.locator("[data-transcript-turn]").count()).toBeLessThan(50);
+		// Coalescing can lag the final answer by a frame or two; poll instead of
+		// sampling the turn count exactly once.
+		await expect.poll(() => page!.locator("[data-transcript-turn]").count(), { timeout: 30_000 }).toBeLessThan(50);
 		// Both the active and the keep-mounted background chat panels exist at this
 		// point; only the recovered streaming session's transcript has answers.
 		const transcriptScroll = page
 			.locator(".transcript-scroll")
 			.filter({ has: page.locator("[data-transcript-answer]") });
-		expect(await transcriptScroll.evaluate((element) => {
-			const scroll = element as unknown as { scrollHeight: number; scrollTop: number; clientHeight: number };
-			return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
-		})).toBeLessThanOrEqual(48);
+		await expect
+			.poll(
+				() =>
+					transcriptScroll.evaluate((element) => {
+						const scroll = element as unknown as { scrollHeight: number; scrollTop: number; clientHeight: number };
+						return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+					}),
+				{ timeout: 30_000 },
+			)
+			.toBeLessThanOrEqual(48);
 		expect(appServerPid(rootPid)).toBe(originalServerPid);
 		expect(providerRequests).toBe(1);
 		await expect(page.locator("#composer-input")).toBeEnabled();

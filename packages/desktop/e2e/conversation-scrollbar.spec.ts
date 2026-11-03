@@ -585,7 +585,12 @@ test("a pointer can cross the gap into the preview and click its message", async
 	const card = await preview(root).boundingBox();
 	if (!card) throw new Error("Missing preview");
 	const before = (await scrollState(root)).top;
-	await page.mouse.move(card.x + card.width - 2, card.y + card.height / 2, { steps: 16 });
+	// Cross into the preview in two short hops. A single long move can leave the rail
+	// while the popover is still positioning itself, and the 120ms pointer-leave timer
+	// then unmounts the preview before the assertion samples it.
+	await page.mouse.move(card.x + 4, card.y + card.height / 2, { steps: 8 });
+	await expect(preview(root)).toBeVisible();
+	await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2, { steps: 8 });
 	await expect(preview(root)).toBeVisible();
 	await preview(root).click();
 	await expect(preview(root)).toHaveCount(0);
