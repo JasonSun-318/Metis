@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ArrowLeft, NotePencil, Play, Trash } from "../icons.tsx";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
 
@@ -242,7 +243,9 @@ export function ScheduledTaskDetail({
 					<section aria-labelledby="schedule-history-heading">
 						<h2 id="schedule-history-heading">{t("History")}</h2>
 						{loading ? (
-							<output className="status-block scheduled-task-loading">{t("Loading run history…")}</output>
+							<DelayedPlaceholder>
+								<output className="status-block scheduled-task-loading">{t("Loading run history…")}</output>
+							</DelayedPlaceholder>
 						) : runs.length === 0 ? (
 							historyError ? null : (
 								<p className="scheduled-task-muted">{t("No runs yet.")}</p>

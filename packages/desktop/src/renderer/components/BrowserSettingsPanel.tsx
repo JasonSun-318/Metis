@@ -14,6 +14,7 @@ import { ArrowLeft, CaretDown, ClockCounterClockwise, DownloadSimple, FolderOpen
 import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { browserDownloadPresentation } from "./browser-download-presentation.ts";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 type BrowserSettingsView = "overview" | "history" | "downloads";
@@ -346,7 +347,9 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 						<ReadError message={historyError} onRetry={() => setHistoryReloadRequest((request) => request + 1)} />
 					</div>
 				) : historyLoading ? (
-					<output className="status-block browser-settings-state">{t("Loading browsing history…")}</output>
+					<DelayedPlaceholder>
+						<output className="status-block browser-settings-state">{t("Loading browsing history…")}</output>
+					</DelayedPlaceholder>
 				) : groupedHistory.length === 0 ? (
 					<div className="browser-settings-state">
 						<ClockCounterClockwise aria-hidden="true" size={24} />

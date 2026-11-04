@@ -7,6 +7,7 @@ import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "../icons.tsx";
 import type { ScheduleStore } from "../store/schedule-store.ts";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ScheduledTaskDetail, scheduleLabel } from "./ScheduledTaskDetail.tsx";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog.tsx";
@@ -391,7 +392,9 @@ export function ScheduledTasksPanel({
 					)}
 					<div className="scheduled-tasks-content">
 						{loading && tasks.length === 0 ? (
-							<output className="status-block scheduled-task-loading">{t("Loading scheduled tasks…")}</output>
+							<DelayedPlaceholder>
+								<output className="status-block scheduled-task-loading">{t("Loading scheduled tasks…")}</output>
+							</DelayedPlaceholder>
 						) : listError && tasks.length === 0 ? null : tasks.length === 0 ? (
 							<div className="scheduled-tasks-empty">
 								<TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} />

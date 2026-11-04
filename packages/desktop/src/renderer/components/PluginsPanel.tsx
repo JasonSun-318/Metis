@@ -51,6 +51,7 @@ import {
 } from "../icons.tsx";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { type HookDraft, HookEditorDialog } from "./HookEditorDialog.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -1783,7 +1784,9 @@ export function PluginsPanel({
 					>
 						{section === "skills" ? (
 							skillsState.status === "loading" ? (
-								<output className="status-paragraph plugins-catalog-message">{t("Loading skills")}</output>
+								<DelayedPlaceholder>
+									<output className="status-paragraph plugins-catalog-message">{t("Loading skills")}</output>
+								</DelayedPlaceholder>
 							) : skillsState.status === "error" ? (
 								<div className="plugins-catalog-message" role="alert">
 									<p>{skillsState.message}</p>
@@ -1852,9 +1855,11 @@ export function PluginsPanel({
 							)
 						) : section === "mcp" ? (
 							mcpState.status === "loading" ? (
-								<output className="status-paragraph plugins-catalog-message">
-									{t("Loading MCP servers…")}
-								</output>
+								<DelayedPlaceholder>
+									<output className="status-paragraph plugins-catalog-message">
+										{t("Loading MCP servers…")}
+									</output>
+								</DelayedPlaceholder>
 							) : mcpState.status === "error" ? (
 								<div className="plugins-catalog-message" role="alert">
 									<p>{mcpState.message}</p>
@@ -1924,7 +1929,9 @@ export function PluginsPanel({
 								))
 							)
 						) : hooksState.status === "loading" ? (
-							<output className="status-paragraph plugins-catalog-message">{t("Loading hooks…")}</output>
+							<DelayedPlaceholder>
+								<output className="status-paragraph plugins-catalog-message">{t("Loading hooks…")}</output>
+							</DelayedPlaceholder>
 						) : hooksState.status === "error" ? (
 							<div className="plugins-catalog-message" role="alert">
 								<p>{hooksState.message}</p>
@@ -2120,7 +2127,9 @@ export function PluginsPanel({
 						</button>
 					</div>
 				) : (
-					<output className="status-paragraph plugins-detail-loading">{t("Loading Skill…")}</output>
+					<DelayedPlaceholder>
+						<output className="status-paragraph plugins-detail-loading">{t("Loading Skill…")}</output>
+					</DelayedPlaceholder>
 				)}
 			</section>
 		);
@@ -2163,7 +2172,9 @@ export function PluginsPanel({
 						</button>
 					</div>
 				) : (
-					<output className="status-paragraph plugins-detail-loading">{t("Loading MCP server…")}</output>
+					<DelayedPlaceholder>
+						<output className="status-paragraph plugins-detail-loading">{t("Loading MCP server…")}</output>
+					</DelayedPlaceholder>
 				)}
 			</section>
 		);
@@ -2313,7 +2324,9 @@ export function PluginsPanel({
 						</div>
 					</>
 				) : (
-					<output className="status-paragraph plugins-detail-loading">{t("Loading hook…")}</output>
+					<DelayedPlaceholder>
+						<output className="status-paragraph plugins-detail-loading">{t("Loading hook…")}</output>
+					</DelayedPlaceholder>
 				)}
 			</section>
 		);

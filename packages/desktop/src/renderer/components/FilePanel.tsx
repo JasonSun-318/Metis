@@ -27,6 +27,7 @@ import {
 	Trash,
 } from "../icons.tsx";
 import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { useFileSelections } from "./preview/FileSelectionContext.tsx";
@@ -1065,10 +1066,10 @@ export function FilePanel({
 					{!searching && rows.length === 0 && (
 						<output className="status-block file-tree-empty">
 							{rootLoading ? (
-								<>
+								<DelayedPlaceholder>
 									<SpinnerGap aria-hidden="true" className="is-spinning" size={14} />
 									<span>{t("Loading…")}</span>
-								</>
+								</DelayedPlaceholder>
 							) : (
 								<>
 									<span>

@@ -33,6 +33,7 @@ import {
 	X,
 	XCircle,
 } from "../icons.tsx";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -722,7 +723,9 @@ export function PluginMarketplacePanel({
 			{viewMode === "markets" ? (
 				<section className="plugins-full-list plugins-market-sources" aria-label={t("Markets")} ref={listRef}>
 					{marketsLoading ? (
-						<output className="status-paragraph plugins-catalog-message">{t("Loading markets…")}</output>
+						<DelayedPlaceholder>
+							<output className="status-paragraph plugins-catalog-message">{t("Loading markets…")}</output>
+						</DelayedPlaceholder>
 					) : marketError && markets.length === 0 ? null : visibleMarkets.length === 0 ? (
 						<p className="plugins-catalog-message">
 							{t(
@@ -768,7 +771,9 @@ export function PluginMarketplacePanel({
 					{/* Catalog List */}
 					<div className="plugins-full-list" role="listbox" ref={listRef}>
 						{catalogLoading ? (
-							<output className="status-paragraph plugins-catalog-message">{t("Loading catalog…")}</output>
+							<DelayedPlaceholder>
+								<output className="status-paragraph plugins-catalog-message">{t("Loading catalog…")}</output>
+							</DelayedPlaceholder>
 						) : catalogError ? (
 							<div className="plugins-catalog-message" role="alert">
 								<p>{catalogError}</p>
@@ -826,9 +831,11 @@ export function PluginMarketplacePanel({
 					{/* Installed List */}
 					<div className="plugins-full-list" role="listbox" ref={listRef}>
 						{installedLoading ? (
-							<output className="status-paragraph plugins-catalog-message">
-								{t("Loading installed plugins…")}
-							</output>
+							<DelayedPlaceholder>
+								<output className="status-paragraph plugins-catalog-message">
+									{t("Loading installed plugins…")}
+								</output>
+							</DelayedPlaceholder>
 						) : installedError ? (
 							<div className="plugins-catalog-message" role="alert">
 								<p>{installedError}</p>
@@ -1144,7 +1151,9 @@ function InspectPluginDialog({
 			<p id="inspect-plugin-description">{inspection?.plugin.description || entry.description}</p>
 
 			{loading ? (
-				<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
+				<DelayedPlaceholder>
+					<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
+				</DelayedPlaceholder>
 			) : error ? (
 				<p className="mcp-dialog-error" role="alert">
 					{error}
@@ -1363,7 +1372,9 @@ function InstalledPluginDetailDialog({
 			<p id="installed-detail-description">{detail?.plugin.repository || ""}</p>
 
 			{loading ? (
-				<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
+				<DelayedPlaceholder>
+					<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
+				</DelayedPlaceholder>
 			) : error ? (
 				<p className="mcp-dialog-error" role="alert">
 					{error}

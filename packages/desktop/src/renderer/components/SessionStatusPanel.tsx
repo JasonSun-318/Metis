@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { contextFillPercent, contextUsagePercent, formatContextTokens } from "../context-usage.ts";
 import { Info, X } from "../icons.tsx";
+import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 
 interface SessionStatusPanelProps {
 	readonly id?: string;
@@ -99,7 +100,9 @@ export function SessionStatusPanel({ id, closing = false, error, loading, onClos
 				</button>
 			</header>
 			{loading ? (
-				<output className="status-paragraph session-status-message">{t("Loading session status…")}</output>
+				<DelayedPlaceholder>
+					<output className="status-paragraph session-status-message">{t("Loading session status…")}</output>
+				</DelayedPlaceholder>
 			) : error ? (
 				<p className="session-status-message is-error" role="alert">
 					{t(error)}
