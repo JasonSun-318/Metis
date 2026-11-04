@@ -15,14 +15,8 @@ import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
 import { MessageOrigin } from "./MessageOrigin.tsx";
-import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
-import {
-	buildTurnPresentation,
-	messageText,
-	type ToolCallBlock,
-	toolResultImagesFromBlocks,
-} from "./transcript-turn-model.ts";
+import { buildTurnPresentation, messageText, type ToolCallBlock } from "./transcript-turn-model.ts";
 import { sameTurnProps, type TranscriptTurnProps } from "./transcript-turn-props.ts";
 
 function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
@@ -100,7 +94,6 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
-	const sessionId = items[0]?.sessionId;
 	let activeActivityIndex = -1;
 	if (runtimeRunning) {
 		for (let index = segments.length - 1; index >= 0; index -= 1) {
@@ -214,12 +207,6 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							replyVisible={final?.state === "streaming"}
 						/>
 						<ConversationToolCards calls={segment.calls} allCalls={allCalls} results={results} />
-						{sessionId ? (
-							<ToolResultImages
-								images={toolResultImagesFromBlocks(segment.blocks, results)}
-								sessionId={sessionId}
-							/>
-						) : null}
 					</div>
 				);
 			})}

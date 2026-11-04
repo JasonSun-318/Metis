@@ -647,7 +647,7 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders tool-result images outside the collapsed execution chain", async () => {
+	it("does not render tool-result images in the chat transcript", async () => {
 		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
 		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
 		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
@@ -671,10 +671,9 @@ describe("TranscriptTurn", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<TranscriptTurn items={items} />));
-		expect(readSessionImage).toHaveBeenCalledWith({ sessionId: SESSION_ID, image });
-		const img = container.querySelector<HTMLImageElement>("img.tool-result-image");
-		expect(img?.src).toContain("data:image/png;base64,");
-		expect(container.querySelector(".execution-chain .tool-result-image")).toBeNull();
+		// Images reach the conversation only through the deliver_file tool.
+		expect(readSessionImage).not.toHaveBeenCalled();
+		expect(container.querySelector("img.tool-result-image")).toBeNull();
 		await act(async () => root.unmount());
 	});
 });
@@ -706,7 +705,7 @@ describe("CodeTranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders tool-result images outside collapsed code tools", async () => {
+	it("does not render tool-result images in the code transcript", async () => {
 		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
 		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
 		Object.defineProperty(window, "metis", { configurable: true, value: { readSessionImage } });
@@ -730,9 +729,9 @@ describe("CodeTranscriptTurn", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<CodeTranscriptTurn items={items} />));
-		const img = container.querySelector<HTMLImageElement>("img.tool-result-image");
-		expect(img?.src).toContain("data:image/png;base64,");
-		expect(container.querySelector(".code-execution .tool-result-image")).toBeNull();
+		// Images reach the conversation only through the deliver_file tool.
+		expect(readSessionImage).not.toHaveBeenCalled();
+		expect(container.querySelector("img.tool-result-image")).toBeNull();
 		await act(async () => root.unmount());
 	});
 });

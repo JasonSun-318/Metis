@@ -24,7 +24,6 @@ import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
 import { MessageOrigin } from "./MessageOrigin.tsx";
 import { CodeChangeCounts, codeStepCounts, ToolCodeChanges } from "./ToolCodeChanges.tsx";
-import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -36,7 +35,6 @@ import {
 	type ToolCallBlock,
 	type ToolDetailLine,
 	type ToolResultBlock,
-	toolResultImagesFromCalls,
 	toolTranscriptPresentation,
 } from "./transcript-turn-model.ts";
 import { type TranscriptTurnProps as CodeTranscriptTurnProps, sameTurnProps } from "./transcript-turn-props.ts";
@@ -403,12 +401,6 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 								}
 							/>
 							<ConversationToolCards calls={segment.calls} allCalls={allCalls} results={results} />
-							{sessionId ? (
-								<ToolResultImages
-									images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
-									sessionId={sessionId}
-								/>
-							) : null}
 						</div>
 					);
 				}

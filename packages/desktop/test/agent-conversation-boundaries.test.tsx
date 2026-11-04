@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import type { DurableImageRefView, InteractionView, ItemView } from "@metis/app-protocol";
+import type { InteractionView, ItemView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
 import { ConversationScopeContext } from "../src/renderer/components/ConversationScope.tsx";
 import { previewCacheKey } from "../src/renderer/components/preview/preview-bytes-cache.ts";
-import { ToolResultImages } from "../src/renderer/components/ToolResultImages.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { firstInteractionForSession } from "../src/renderer/session-view-utils.ts";
@@ -26,7 +25,6 @@ const notice: ItemView = {
 	state: "completed",
 	createdAt: "2026-10-23T00:00:00.000Z",
 };
-const image: DurableImageRefView = { hash: "a".repeat(64), mediaType: "image/png", byteLength: 10 };
 beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	await setLocale("en");
@@ -112,21 +110,6 @@ describe("agent conversation boundaries", () => {
 			expect(container.querySelectorAll("[data-user-message]")).toHaveLength(2);
 		},
 	);
-	it("reads child tool images through the root owner without replacing the child id", async () => {
-		const readSessionImage = vi.fn().mockResolvedValue({ mediaType: "image/png", data: "aGVsbG8=" });
-		vi.stubGlobal("metis", { readSessionImage });
-		const container = document.createElement("div");
-		const root = createRoot(container);
-		roots.push(root);
-		await act(async () =>
-			root.render(
-				<ConversationScopeContext.Provider value={{ rootSessionId: ROOT }}>
-					<ToolResultImages sessionId={CHILD} images={[image]} />
-				</ConversationScopeContext.Provider>,
-			),
-		);
-		expect(readSessionImage).toHaveBeenCalledWith({ sessionId: CHILD, rootSessionId: ROOT, image });
-	});
 	it("routes root-owned interactions to their actual child actor", () => {
 		const pending: InteractionView = {
 			interactionId: "question",

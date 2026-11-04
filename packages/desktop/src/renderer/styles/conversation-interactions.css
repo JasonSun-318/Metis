@@ -2,7 +2,7 @@
 .transcript-tool-group { display: grid; gap: 12px; margin: 12px 0; }
 :is(.turn-user, .code-turn-user) + .transcript-tool-group { margin-top: 0; }
 .transcript-tool-group:empty { display: none; }
-.transcript .transcript-tool-group > :is(.conversation-interaction-card, .code-execution, .execution-chain, .tool-result-images) { margin-block: 0; }
+.transcript .transcript-tool-group > :is(.conversation-interaction-card, .code-execution, .execution-chain) { margin-block: 0; }
 .transcript .transcript-tool-group > :is(.code-execution, .execution-chain) > summary { display: flex; }
 .transcript .conversation-interaction-card {
 	box-sizing: border-box;
