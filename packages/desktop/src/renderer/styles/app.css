@@ -2406,8 +2406,8 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 	width: 100%;
 }
 /* Each settings entry mounts a fresh panel; fade it in instead of swapping abruptly. */
-.settings-page-mount > * { animation: settings-fade-in 180ms cubic-bezier(.16, 1, .3, 1) both; }
-.plugins-panel, .scheduled-tasks-panel { animation: settings-fade-in 180ms cubic-bezier(.16, 1, .3, 1) both; }
+.settings-page-mount > * { animation: settings-fade-in 280ms ease-out both; }
+.plugins-panel, .scheduled-tasks-panel { animation: settings-fade-in 240ms ease-out both; }
 .model-settings-loading { display: grid; width: 100%; gap: 24px; animation: settings-fade-in 160ms ease 180ms both; }
 .model-settings-loading > span { display: block; height: 150px; border: 1px solid var(--border-weak); border-radius: 12px; background: var(--surface-02); }
 .model-settings-loading > span:first-child { height: 128px; }
