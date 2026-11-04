@@ -4,10 +4,15 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ChartBar, Rows } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 
 type UsageDisplay = "chart" | "table";
 
 const RANGE_DAYS = [7, 30, 90] as const;
+
+function usageCacheKey(rangeDays: UsageRangeDays): string {
+	return `usage:${rangeDays}`;
+}
 
 function dayTotal(day: UsageDailyView): number {
 	return day.chatTokens + day.codeTokens;
@@ -28,7 +33,9 @@ export function UsagePanel({
 	});
 	const rangeDays = request.rangeDays;
 	const [display, setDisplay] = useState<UsageDisplay>("chart");
-	const [usage, setUsage] = useState<UsageSummaryView | null>(null);
+	const [usage, setUsage] = useState<UsageSummaryView | null>(
+		cachedSettingsView<UsageSummaryView>(api, usageCacheKey(request.rangeDays)) ?? null,
+	);
 	const [hovered, setHovered] = useState<number | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const activeSelectedRef = useRef<UsageDailyView | null>(null);
@@ -66,13 +73,14 @@ export function UsagePanel({
 		if (!serverReady) return;
 		let current = true;
 		setError(null);
-		setUsage(null);
+		setUsage(cachedSettingsView<UsageSummaryView>(api, usageCacheKey(request.rangeDays)) ?? null);
 		setHovered(null);
 		activeSelectedRef.current = null;
 		activeLeftRef.current = 50;
 		void api.getUsage({ rangeDays: request.rangeDays }).then(
 			(result) => {
 				if (current) {
+					rememberSettingsView(api, usageCacheKey(request.rangeDays), result);
 					setUsage(result);
 					setHovered(null);
 				}
@@ -86,11 +94,14 @@ export function UsagePanel({
 		};
 	}, [api, request, serverReady, t]);
 
+	const showLoadingPlaceholder = useDelayedLoading(!usage && !error);
 	if (!usage && !error)
 		return (
 			<>
 				{rangeToolbar}
-				<output aria-label={t("Loading usage")} className="status-block settings-loading" />
+				{showLoadingPlaceholder ? (
+					<output aria-label={t("Loading usage")} className="status-block settings-loading" />
+				) : null}
 			</>
 		);
 	if (!usage)

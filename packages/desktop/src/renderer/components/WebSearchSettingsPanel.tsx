@@ -3,8 +3,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Eye, EyeSlash, XCircle } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
+
+const WEB_SEARCH_VIEW_CACHE_KEY = "webSearch";
 
 const PROVIDERS: readonly { readonly value: WebSearchProvider; readonly label: string }[] = [
 	{ value: "brave", label: "Brave Search" },
@@ -25,8 +28,9 @@ export function WebSearchSettingsPanel({
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
-	const [settings, setSettings] = useState<WebSearchSettingsView | null>(null);
-	const [savedSettings, setSavedSettings] = useState<WebSearchSettingsView | null>(null);
+	const cachedSettings = cachedSettingsView<WebSearchSettingsView>(api, WEB_SEARCH_VIEW_CACHE_KEY);
+	const [settings, setSettings] = useState<WebSearchSettingsView | null>(cachedSettings ?? null);
+	const [savedSettings, setSavedSettings] = useState<WebSearchSettingsView | null>(cachedSettings ?? null);
 	const [apiKey, setApiKey] = useState("");
 	const [revealedCredential, setRevealedCredential] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -46,6 +50,7 @@ export function WebSearchSettingsPanel({
 		void api.getWebSearchSettings().then(
 			(result) => {
 				if (current) {
+					rememberSettingsView(api, WEB_SEARCH_VIEW_CACHE_KEY, result);
 					setSettings(result);
 					setSavedSettings(result);
 					setApiKey("");
@@ -77,8 +82,10 @@ export function WebSearchSettingsPanel({
 		onDirtyChange?.(dirty);
 	}, [dirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+	const showLoadingPlaceholder = useDelayedLoading(settings === null);
 	if (!settings) {
 		if (!error) {
+			if (!showLoadingPlaceholder) return null;
 			return <output aria-label={t("Search settings")} className="status-block settings-loading" />;
 		}
 		return (

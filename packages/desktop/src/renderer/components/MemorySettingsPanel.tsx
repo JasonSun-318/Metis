@@ -21,11 +21,21 @@ import {
 	Trash,
 	XCircle,
 } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 import { MemoryDreamSettings } from "./MemoryDreamSettings.tsx";
 import { MemorySessionSettings } from "./MemorySessionSettings.tsx";
 import { type DreamSettingsDraft, parseDreamDraft, toDreamDraft } from "./memory-dream-settings.ts";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
+
+interface MemorySettingsCache {
+	readonly view: MemorySettingsView;
+	readonly history: readonly MemoryChangelogEntryView[];
+}
+
+function memorySettingsCacheKey(sessionId: string | undefined): string {
+	return `memory:${sessionId ?? "global"}`;
+}
 
 const HISTORY_LIMIT = 20;
 const NOTES_LIMIT = 100;
@@ -175,9 +185,12 @@ export function MemorySettingsPanel({
 	const { t } = useTranslation();
 	const [activePanel, setActivePanel] = useState<"notes" | "advanced" | "history" | "storage" | null>(null);
 	const [advancedBaseline, setAdvancedBaseline] = useState<DreamSettingsDraft | null>(null);
-	const [settings, setSettings] = useState<MemorySettingsView | null>(null);
-	const [savedSettings, setSavedSettings] = useState<MemorySettingsView | null>(null);
-	const [history, setHistory] = useState<MemoryChangelogEntryView[] | null>(null);
+	const cachedSettings = cachedSettingsView<MemorySettingsCache>(api, memorySettingsCacheKey(sessionId));
+	const [settings, setSettings] = useState<MemorySettingsView | null>(cachedSettings?.view ?? null);
+	const [savedSettings, setSavedSettings] = useState<MemorySettingsView | null>(cachedSettings?.view ?? null);
+	const [history, setHistory] = useState<MemoryChangelogEntryView[] | null>(
+		cachedSettings ? [...cachedSettings.history] : null,
+	);
 	const [busy, setBusy] = useState(false);
 	const [undoBusy, setUndoBusy] = useState<string | null>(null);
 	const [dreamBusy, setDreamBusy] = useState<"run" | "undo" | null>(null);
@@ -192,8 +205,12 @@ export function MemorySettingsPanel({
 	const [noteBusy, setNoteBusy] = useState<"load" | "save" | "delete" | null>(null);
 	const [expandedChange, setExpandedChange] = useState<string | null>(null);
 	const [diffs, setDiffs] = useState<Record<string, DiffState>>({});
-	const [dreamDraft, setDreamDraft] = useState<DreamSettingsDraft | null>(null);
-	const [savedDreamDraft, setSavedDreamDraft] = useState<DreamSettingsDraft | null>(null);
+	const [dreamDraft, setDreamDraft] = useState<DreamSettingsDraft | null>(
+		cachedSettings ? toDreamDraft(cachedSettings.view.dream) : null,
+	);
+	const [savedDreamDraft, setSavedDreamDraft] = useState<DreamSettingsDraft | null>(
+		cachedSettings ? toDreamDraft(cachedSettings.view.dream) : null,
+	);
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [modelChoicesError, setModelChoicesError] = useState(false);
 	const [failedRunId, setFailedRunId] = useState<string | null>(null);
@@ -210,6 +227,10 @@ export function MemorySettingsPanel({
 		]).then(
 			([view, recent]) => {
 				if (!current) return;
+				rememberSettingsView<MemorySettingsCache>(api, memorySettingsCacheKey(sessionId), {
+					view,
+					history: recent.entries,
+				});
 				setSettings(view);
 				setSavedSettings(view);
 				setHistory([...recent.entries]);
@@ -613,8 +634,10 @@ export function MemorySettingsPanel({
 		}
 	};
 
+	const showLoadingPlaceholder = useDelayedLoading(settings === null);
 	if (!settings) {
 		if (!error) {
+			if (!showLoadingPlaceholder) return null;
 			return <output aria-label={t("Memory settings")} className="status-block settings-loading" />;
 		}
 		return (

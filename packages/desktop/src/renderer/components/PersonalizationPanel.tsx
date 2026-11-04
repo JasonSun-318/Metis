@@ -12,8 +12,10 @@ import {
 	Sparkle,
 	Trash,
 } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
+const PERSONALIZATION_VIEW_CACHE_KEY = "personalization";
 
 const PRESET_INSTRUCTIONS = [
 	{
@@ -54,9 +56,10 @@ export function PersonalizationPanel({
 }) {
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
-	const [instructions, setInstructions] = useState("");
-	const [savedInstructions, setSavedInstructions] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
+	const cachedInstructions = cachedSettingsView<string>(api, PERSONALIZATION_VIEW_CACHE_KEY);
+	const [instructions, setInstructions] = useState(cachedInstructions ?? "");
+	const [savedInstructions, setSavedInstructions] = useState<string | null>(cachedInstructions ?? null);
+	const [loading, setLoading] = useState(cachedInstructions === undefined);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<"load" | "save" | null>(null);
 	const [saved, setSaved] = useState(false);
@@ -68,16 +71,18 @@ export function PersonalizationPanel({
 	}, [dirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 	const oversized = instructionBytes > MAX_INSTRUCTION_BYTES;
+	const showLoadingPlaceholder = useDelayedLoading(loading);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(request): Retry explicitly reloads global instructions.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
-		setLoading(true);
+		if (cachedSettingsView<string>(api, PERSONALIZATION_VIEW_CACHE_KEY) === undefined) setLoading(true);
 		setError(null);
 		void api.getPersonalization().then(
 			(result) => {
 				if (!current) return;
+				rememberSettingsView(api, PERSONALIZATION_VIEW_CACHE_KEY, result.instructions);
 				setInstructions(result.instructions);
 				setSavedInstructions(result.instructions);
 				setLoading(false);
@@ -123,6 +128,7 @@ export function PersonalizationPanel({
 	};
 
 	if (loading) {
+		if (!showLoadingPlaceholder) return null;
 		return <output aria-label={t("Global instructions")} className="status-block settings-loading" />;
 	}
 	if (error === "load") {

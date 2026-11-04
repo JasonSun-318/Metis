@@ -8,6 +8,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { CaretLeft, CaretRight, CheckCircle, Key, MagnifyingGlass, Plus, Trash, X, XCircle } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView } from "../settings-async.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ModelCatalog } from "./ModelCatalog.tsx";
@@ -21,6 +22,8 @@ import {
 } from "./ModelReasoningEditor.tsx";
 import { ReviewerModelSettingsPanel } from "./ReviewerModelSettingsPanel.tsx";
 import { FloatingSystemNotice, type SystemNoticeProps } from "./SystemNotice.tsx";
+
+const MODEL_SETTINGS_CACHE_KEY = "model";
 
 interface ProviderDraft {
 	readonly provider: string;
@@ -203,7 +206,9 @@ export function ModelSettingsPanel({
 	const [catalogQuery, setCatalogQuery] = useState("");
 	const [catalogPage, setCatalogPage] = useState(1);
 	const [providerQuery, setProviderQuery] = useState("");
-	const [settings, setSettings] = useState<ModelSettingsView | null>(initialSettings ?? null);
+	const [settings, setSettings] = useState<ModelSettingsView | null>(
+		initialSettings ?? cachedSettingsView<ModelSettingsView>(api, MODEL_SETTINGS_CACHE_KEY) ?? null,
+	);
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
 	const [visionDraft, setVisionDraft] = useState<VisionDraft | null>(null);
@@ -261,11 +266,12 @@ export function ModelSettingsPanel({
 
 	const applySettings = useCallback(
 		(next: ModelSettingsView) => {
+			rememberSettingsView(api, MODEL_SETTINGS_CACHE_KEY, next);
 			setSettings(next);
 			setDefaultThinking(next.defaultThinkingSelection);
 			onSettingsChange?.(next);
 		},
-		[onSettingsChange],
+		[api, onSettingsChange],
 	);
 
 	// 权限页跳转时定位审批模型区域，避免落在长供应商列表顶部找不到。

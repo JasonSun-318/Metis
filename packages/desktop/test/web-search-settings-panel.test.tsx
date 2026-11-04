@@ -77,6 +77,10 @@ describe("WebSearchSettingsPanel load and save", () => {
 		expect(button(container, "Retry")).not.toBeNull();
 
 		await act(async () => button(container, "Retry").click());
+		// The placeholder is delayed so fast loads never flash it.
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		});
 		expect(container.querySelector(".settings-loading")).not.toBeNull();
 		expect(container.querySelector('input[type="password"]')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();

@@ -4,10 +4,17 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ArrowLeft, CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
+const AGENT_TYPES_CACHE_KEY = "agentTypes";
 const AGENT_TYPE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
 const MAX_SYSTEM_PROMPT_BYTES = 8 * 1024;
+
+interface AgentTypeCatalogCache {
+	readonly types: readonly CustomAgentTypeView[];
+	readonly availableTools: readonly string[];
+}
 
 interface AgentTypeDraft {
 	readonly id: string;
@@ -50,9 +57,10 @@ export function AgentTypesSettingsPanel({
 }) {
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
-	const [types, setTypes] = useState<readonly CustomAgentTypeView[]>([]);
-	const [availableTools, setAvailableTools] = useState<readonly string[]>([]);
-	const [loading, setLoading] = useState(true);
+	const cachedCatalog = cachedSettingsView<AgentTypeCatalogCache>(api, AGENT_TYPES_CACHE_KEY);
+	const [types, setTypes] = useState<readonly CustomAgentTypeView[]>(cachedCatalog?.types ?? []);
+	const [availableTools, setAvailableTools] = useState<readonly string[]>(cachedCatalog?.availableTools ?? []);
+	const [loading, setLoading] = useState(cachedCatalog === undefined);
 	const [loadError, setLoadError] = useState(false);
 	const [request, setRequest] = useState(0);
 	const [draft, setDraft] = useState<AgentTypeDraft | null>(null);
@@ -67,11 +75,15 @@ export function AgentTypesSettingsPanel({
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
-		setLoading(true);
+		setLoading(cachedSettingsView<AgentTypeCatalogCache>(api, AGENT_TYPES_CACHE_KEY) === undefined);
 		setLoadError(false);
 		void api.listAgentTypes().then(
 			(result) => {
 				if (!current) return;
+				rememberSettingsView<AgentTypeCatalogCache>(api, AGENT_TYPES_CACHE_KEY, {
+					types: result.types,
+					availableTools: result.availableTools ?? [],
+				});
 				setTypes(result.types);
 				setAvailableTools(result.availableTools ?? []);
 				setLoading(false);
@@ -173,7 +185,9 @@ export function AgentTypesSettingsPanel({
 		}
 	};
 
+	const showLoadingPlaceholder = useDelayedLoading(loading);
 	if (loading) {
+		if (!showLoadingPlaceholder) return null;
 		return (
 			<output aria-label={t("Agent types")} className="status-block settings-loading">
 				{t("Loading agent types…")}

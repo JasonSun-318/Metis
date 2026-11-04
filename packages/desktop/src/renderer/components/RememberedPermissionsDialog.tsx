@@ -2,6 +2,7 @@ import type { ClientResult } from "@metis/app-protocol";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MagnifyingGlass, ShieldCheck, X } from "../icons.tsx";
+import { useDelayedLoading } from "../settings-async.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -77,6 +78,7 @@ export function RememberedPermissionsDialog({
 	const [decision, setDecision] = useState<DecisionFilter>("all");
 	const [search, setSearch] = useState("");
 	const [highlightId, setHighlightId] = useState<string | null>(focus?.id ?? null);
+	const showLoadingPlaceholder = useDelayedLoading(loading && groups.length === 0);
 
 	useEffect(() => {
 		const dialog = dialogRef.current;
@@ -218,7 +220,7 @@ export function RememberedPermissionsDialog({
 					</div>
 				) : null}
 				<div className="remembered-permissions-scroll" ref={scrollRef}>
-					{loading && groups.length === 0 ? (
+					{loading && groups.length === 0 && showLoadingPlaceholder ? (
 						<output aria-label={t("Loading remembered permissions")} className="status-block settings-loading" />
 					) : visibleGroups.length === 0 ? (
 						<div className="remembered-permissions-empty">

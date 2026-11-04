@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Browser, Info } from "../icons.tsx";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
 import {
 	type RememberedFocus,
@@ -21,6 +22,9 @@ import { ReviewerModelSettingsPanel } from "./ReviewerModelSettingsPanel.tsx";
 import { SandboxEnvironmentCard } from "./SandboxEnvironmentCard.tsx";
 
 type Catalog = ClientResult<"permission/rules/catalog">;
+
+const PERMISSION_AUTO_CACHE_KEY = "permissions:auto";
+const PERMISSION_CATALOG_CACHE_KEY = "permissions:catalog";
 
 function reviewerSummaryLabel(
 	settings: ModelSettingsView | null,
@@ -93,7 +97,8 @@ export function PermissionSettingsPanel({
 }) {
 	const { t } = useTranslation();
 
-	const [autoView, setAutoView] = useState<ClientResult<"permission/auto/get"> | null>(null);
+	const cachedAutoView = cachedSettingsView<ClientResult<"permission/auto/get">>(api, PERMISSION_AUTO_CACHE_KEY);
+	const [autoView, setAutoView] = useState<ClientResult<"permission/auto/get"> | null>(cachedAutoView ?? null);
 	const [autoError, setAutoError] = useState<string | null>(null);
 	const [autoLoadRequest, setAutoLoadRequest] = useState(0);
 	const [switchSaving, setSwitchSaving] = useState(false);
@@ -103,7 +108,8 @@ export function PermissionSettingsPanel({
 	const [modelError, setModelError] = useState<string | null>(null);
 	const [modelLoadRequest, setModelLoadRequest] = useState(0);
 
-	const [catalog, setCatalog] = useState<Catalog | null>(null);
+	const cachedCatalog = cachedSettingsView<Catalog>(api, PERMISSION_CATALOG_CACHE_KEY);
+	const [catalog, setCatalog] = useState<Catalog | null>(cachedCatalog ?? null);
 	const [catalogError, setCatalogError] = useState<string | null>(null);
 	const [catalogRequest, setCatalogRequest] = useState(0);
 	const [managerOpen, setManagerOpen] = useState(false);
@@ -119,7 +125,10 @@ export function PermissionSettingsPanel({
 		setAutoError(null);
 		void api.getPermissionAutoSettings().then(
 			(result) => {
-				if (current) setAutoView(result);
+				if (current) {
+					rememberSettingsView(api, PERMISSION_AUTO_CACHE_KEY, result);
+					setAutoView(result);
+				}
 			},
 			(cause) => {
 				if (current) setAutoError(cause instanceof Error ? cause.message : t("Couldn’t load permission settings."));
@@ -156,7 +165,10 @@ export function PermissionSettingsPanel({
 		setCatalogError(null);
 		void api.listRememberedPermissionRules().then(
 			(result) => {
-				if (current) setCatalog(result);
+				if (current) {
+					rememberSettingsView(api, PERMISSION_CATALOG_CACHE_KEY, result);
+					setCatalog(result);
+				}
 			},
 			(cause) => {
 				if (current) {
@@ -248,6 +260,8 @@ export function PermissionSettingsPanel({
 	const reviewerSummary = reviewerSummaryLabel(modelSettings, t);
 	const groups = catalog?.groups ?? [];
 	const rememberedTotal = groups.reduce((total, group) => total + group.rules.length, 0);
+	const showAutoLoading = useDelayedLoading(autoView === null && autoError === null);
+	const showCatalogLoading = useDelayedLoading(catalog === null && catalogError === null);
 	const dialogError = revokeError ?? catalogError;
 
 	return (
@@ -261,7 +275,7 @@ export function PermissionSettingsPanel({
 						<p>{t("Use the approval model for actions that no enabled rule matches.")}</p>
 					</div>
 				</div>
-				{!autoView && !autoError ? (
+				{!autoView && !autoError && showAutoLoading ? (
 					<output aria-label={t("Loading permission settings")} className="status-block settings-loading" />
 				) : null}
 				{autoError ? (
@@ -378,7 +392,7 @@ export function PermissionSettingsPanel({
 						</p>
 					</div>
 				</div>
-				{!catalog && !catalogError ? (
+				{!catalog && !catalogError && showCatalogLoading ? (
 					<output aria-label={t("Loading remembered permissions")} className="status-block settings-loading" />
 				) : null}
 				{catalogError && !catalog ? (

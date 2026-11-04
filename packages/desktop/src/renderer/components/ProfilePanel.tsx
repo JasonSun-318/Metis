@@ -10,6 +10,7 @@ import {
 	saveProfileIdentity,
 	useProfileIdentity,
 } from "../profile-identity.ts";
+import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
 import { UsagePanel } from "./UsagePanel.tsx";
 
 const DAY_MS = 86_400_000;
@@ -89,6 +90,8 @@ function intensity(tokens: number, peak: number): number {
 	return Math.min(4, Math.max(1, Math.ceil((tokens / peak) * 4)));
 }
 
+const PROFILE_VIEW_CACHE_KEY = "profile";
+
 function formatActivityTokens(tokens: number, compact: Intl.NumberFormat): string {
 	return tokens < 10_000 ? String(tokens) : compact.format(tokens);
 }
@@ -126,7 +129,9 @@ export function ProfilePanel({
 	const fullNumber = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 	const fullDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }), [locale]);
 	const [activeTab, setActiveTab] = useState<"activity" | "usage">(initialTab);
-	const [profile, setProfile] = useState<ProfileUsageSummaryView | null>(null);
+	const [profile, setProfile] = useState<ProfileUsageSummaryView | null>(
+		cachedSettingsView<ProfileUsageSummaryView>(api, PROFILE_VIEW_CACHE_KEY) ?? null,
+	);
 	const [error, setError] = useState<string | null>(null);
 	const [request, setRequest] = useState(0);
 	const identity = useProfileIdentity();
@@ -152,7 +157,10 @@ export function ProfilePanel({
 		setError(null);
 		void api.getProfile().then(
 			(result) => {
-				if (current) setProfile(result);
+				if (current) {
+					rememberSettingsView(api, PROFILE_VIEW_CACHE_KEY, result);
+					setProfile(result);
+				}
 			},
 			(cause) => {
 				if (current) setError(cause instanceof Error ? cause.message : "Personal profile could not be loaded.");
@@ -206,12 +214,9 @@ export function ProfilePanel({
 			bitmap?.close();
 		}
 	};
+	const showLoadingPlaceholder = useDelayedLoading(!profile && !error);
 	if (!profile && !error)
-		return (
-			<section className="profile-panel">
-				<ProfileLoading />
-			</section>
-		);
+		return <section className="profile-panel">{showLoadingPlaceholder ? <ProfileLoading /> : null}</section>;
 	if (!profile) {
 		return (
 			<section className="profile-panel">

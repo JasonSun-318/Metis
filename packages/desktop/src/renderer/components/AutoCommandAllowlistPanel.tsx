@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { DotsThree, MagnifyingGlass, Plus, Trash } from "../icons.tsx";
+import { useDelayedLoading } from "../settings-async.ts";
 import { PermissionRuleDialog, type RestoreDefaultEntry, RestoreDefaultsDialog } from "./PermissionRuleDialog.tsx";
 import {
 	applyDefaultRestore,
@@ -66,6 +67,7 @@ export function AutoCommandAllowlistPanel({
 	const [menu, setMenu] = useState<RuleMenu | null>(null);
 	const [highlightId, setHighlightId] = useState<string | null>(null);
 	const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
+	const showLoadingPlaceholder = useDelayedLoading(view === null && loadError === null);
 	const appliedFocusRef = useRef<string | null>(null);
 	const cardMenuAnchor = useRef<HTMLButtonElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -278,7 +280,7 @@ export function AutoCommandAllowlistPanel({
 					</button>
 				</>
 			) : null}
-			{!view && !loadError ? (
+			{!view && !loadError && showLoadingPlaceholder ? (
 				<output aria-label={t("Loading permission rules")} className="status-block settings-loading" />
 			) : null}
 			{view ? (
