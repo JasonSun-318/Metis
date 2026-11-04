@@ -151,7 +151,12 @@ export class AppServer {
 			memorySettings,
 			hooks,
 			plugins,
-			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
+			options.titleGenerator ??
+				new DefaultSessionTitleGenerator({
+					modelRegistry,
+					settingsManager,
+					isEnabled: () => settingsManager.getAutoSessionTitleEnabled(),
+				}),
 		);
 		this.outboundQueueLimits = {
 			maxUnacknowledgedBytes: options.maxUnacknowledgedBytes,

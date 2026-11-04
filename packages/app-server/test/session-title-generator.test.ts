@@ -70,7 +70,7 @@ describe("DefaultSessionTitleGenerator", () => {
 				systemPrompt: expect.stringContaining("otherwise use no more than 6 words"),
 				messages: [expect.objectContaining({ role: "user" })],
 			}),
-			expect.objectContaining({ reasoning: "low", maxTokens: 32, maxRetries: 0, timeoutMs: 10_000 }),
+			expect.objectContaining({ reasoning: "low", maxTokens: 256, maxRetries: 0, timeoutMs: 10_000 }),
 		);
 	});
 
@@ -103,5 +103,26 @@ describe("DefaultSessionTitleGenerator", () => {
 			} as unknown as SettingsManager,
 		});
 		await expect(failed.generate(prompt)).resolves.toBe(`${"🚀".repeat(9)}…`);
+	});
+
+	it("uses the first message when model-generated titles are disabled", async () => {
+		const modelRegistry = {
+			refresh: vi.fn(),
+			find: vi.fn(() => ({ provider: "test", id: "model", reasoning: false })),
+			hasConfiguredAuth: vi.fn(() => true),
+			getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "test-key" })),
+			streamSimple: vi.fn(),
+		} as unknown as ModelRegistry;
+		const generator = new DefaultSessionTitleGenerator({
+			modelRegistry,
+			settingsManager: {
+				getDefaultProvider: vi.fn(() => "test"),
+				getDefaultModel: vi.fn(() => "model"),
+			} as unknown as SettingsManager,
+			isEnabled: () => false,
+		});
+
+		await expect(generator.generate("帮我查一下登录失败的问题")).resolves.toBe("帮我查一下登录失败…");
+		expect(modelRegistry.streamSimple).not.toHaveBeenCalled();
 	});
 });

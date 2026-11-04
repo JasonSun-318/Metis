@@ -104,7 +104,13 @@ describe("ModelSettingsService", () => {
 		expect(service.view()).toMatchObject({
 			defaultModel: { provider: "local-test", modelId: "test-model" },
 			defaultThinkingSelection: "off",
+			autoSessionTitle: true,
 		});
+
+		const titleOff = await service.update({ type: "set_auto_session_title", enabled: false });
+		expect(titleOff.autoSessionTitle).toBe(false);
+		const titleOn = await service.update({ type: "set_auto_session_title", enabled: true });
+		expect(titleOn.autoSessionTitle).toBe(true);
 
 		const removed = await service.update({ type: "remove_provider", provider: "local-test" });
 		expect(removed.providers.some((provider) => provider.provider === "local-test")).toBe(false);

@@ -266,6 +266,7 @@ export class ModelSettingsService {
 			defaultThinkingSelection: defaultModel
 				? clampThinkingSelection(defaultModel, savedThinkingSelection)
 				: savedThinkingSelection,
+			autoSessionTitle: this.settingsManager.getAutoSessionTitleEnabled(),
 			providers,
 			loadError: readError ?? this.modelRegistry.getError() ?? null,
 		};
@@ -294,6 +295,11 @@ export class ModelSettingsService {
 			} else {
 				this.settingsManager.setDefaultModelSettings(null, mutation.thinkingSelection);
 			}
+			await this.settingsManager.flushOrThrow();
+			return this.view();
+		}
+		if (mutation.type === "set_auto_session_title") {
+			this.settingsManager.setAutoSessionTitleEnabled(mutation.enabled);
 			await this.settingsManager.flushOrThrow();
 			return this.view();
 		}

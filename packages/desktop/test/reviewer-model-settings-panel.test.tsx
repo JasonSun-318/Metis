@@ -68,6 +68,7 @@ function view(reviewer?: ReviewerSettingsView["permissionReviewer"]): ReviewerSe
 	return {
 		defaultModel: { provider: "review-provider", modelId: "review-model" },
 		defaultThinkingSelection: "high",
+		autoSessionTitle: true,
 		vision: null,
 		loadError: null,
 		providers: [provider("review-provider", "Review Provider"), provider("other-provider", "Other Provider")],

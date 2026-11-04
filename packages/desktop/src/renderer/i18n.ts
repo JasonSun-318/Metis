@@ -788,6 +788,10 @@ const zhCN = {
 	"Default model": "默认模型",
 	"No default": "不设默认模型",
 	"Default reasoning": "默认推理强度",
+	"Generate session titles with the model": "使用模型生成会话标题",
+	"Use the default model to title new sessions. Turning this off uses the first message as the title.":
+		"使用默认模型为新会话生成标题。关闭后使用第一条消息作为标题。",
+	"Session title preference saved": "会话标题偏好已保存",
 	"Use this model": "使用此模型",
 	"Save defaults": "保存默认值",
 	"Defaults saved": "默认值已保存",

@@ -5247,6 +5247,23 @@
                           "type": "object",
                           "required": [
                             "type",
+                            "enabled"
+                          ],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "set_auto_session_title"
+                            },
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
                             "settings",
                             "credential"
                           ],
@@ -37332,6 +37349,7 @@
                     "vision",
                     "permissionReviewer",
                     "defaultThinkingSelection",
+                    "autoSessionTitle",
                     "providers",
                     "loadError"
                   ],
@@ -37753,6 +37771,9 @@
                           "const": "max"
                         }
                       ]
+                    },
+                    "autoSessionTitle": {
+                      "type": "boolean"
                     },
                     "providers": {
                       "type": "array",
@@ -38139,6 +38160,7 @@
                     "vision",
                     "permissionReviewer",
                     "defaultThinkingSelection",
+                    "autoSessionTitle",
                     "providers",
                     "loadError"
                   ],
@@ -38560,6 +38582,9 @@
                           "const": "max"
                         }
                       ]
+                    },
+                    "autoSessionTitle": {
+                      "type": "boolean"
                     },
                     "providers": {
                       "type": "array",
@@ -62411,6 +62436,23 @@
                       "type": "object",
                       "required": [
                         "type",
+                        "enabled"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "set_auto_session_title"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
                         "settings",
                         "credential"
                       ],
@@ -83979,6 +84021,7 @@
                 "vision",
                 "permissionReviewer",
                 "defaultThinkingSelection",
+                "autoSessionTitle",
                 "providers",
                 "loadError"
               ],
@@ -84400,6 +84443,9 @@
                       "const": "max"
                     }
                   ]
+                },
+                "autoSessionTitle": {
+                  "type": "boolean"
                 },
                 "providers": {
                   "type": "array",
@@ -84786,6 +84832,7 @@
                 "vision",
                 "permissionReviewer",
                 "defaultThinkingSelection",
+                "autoSessionTitle",
                 "providers",
                 "loadError"
               ],
@@ -85207,6 +85254,9 @@
                       "const": "max"
                     }
                   ]
+                },
+                "autoSessionTitle": {
+                  "type": "boolean"
                 },
                 "providers": {
                   "type": "array",

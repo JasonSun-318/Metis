@@ -1441,6 +1441,37 @@ export function ModelSettingsPanel({
 													{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
 												</button>
 											</div>
+											<div className="general-setting-row">
+												<div className="general-setting-copy">
+													<span>{t("Generate session titles with the model")}</span>
+													<p>
+														{t(
+															"Use the default model to title new sessions. Turning this off uses the first message as the title.",
+														)}
+													</p>
+												</div>
+												<div className="general-setting-control">
+													<label className="web-search-toggle">
+														<span className="sr-only">{t("Generate session titles with the model")}</span>
+														<input
+															aria-checked={settings?.autoSessionTitle ?? true}
+															aria-label={t("Generate session titles with the model")}
+															checked={settings?.autoSessionTitle ?? true}
+															disabled={busy || settings === null}
+															onChange={(event) =>
+																void runUpdate(
+																	{ type: "set_auto_session_title", enabled: event.target.checked },
+																	t("Session title preference saved"),
+																	"defaults",
+																)
+															}
+															role="switch"
+															type="checkbox"
+														/>
+														<span aria-hidden="true" className="web-search-toggle-track" />
+													</label>
+												</div>
+											</div>
 										</div>
 									) : null}
 								</div>

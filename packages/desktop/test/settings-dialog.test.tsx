@@ -23,6 +23,7 @@ const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
 	vision: null,
 	defaultThinkingSelection: "high",
+	autoSessionTitle: true,
 	permissionReviewer: { config: null, status: "unconfigured" },
 	providers: [
 		{
@@ -201,6 +202,7 @@ describe("SettingsDialog", () => {
 				defaultModel: null,
 				vision: null,
 				defaultThinkingSelection: "off",
+				autoSessionTitle: true,
 				providers: [],
 				loadError: null,
 			}),
@@ -1155,6 +1157,7 @@ describe("ModelSettingsPanel", () => {
 			...modelSettings,
 			defaultModel: { provider: "my-custom", modelId: "my-model-a" },
 			defaultThinkingSelection: "high",
+			autoSessionTitle: true,
 			providers: [
 				{
 					provider: "my-custom",

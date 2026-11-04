@@ -338,6 +338,7 @@ function createHarness(
 		getModelSettings: vi.fn().mockResolvedValue({
 			defaultModel: null,
 			defaultThinkingSelection: "off",
+			autoSessionTitle: true,
 			providers: [],
 			permissionReviewer: { config: null, status: "unconfigured" },
 			loadError: null,
@@ -4609,6 +4610,7 @@ describe("Chat desktop shell", () => {
 		const settings: ModelSettingsView = {
 			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
 			defaultThinkingSelection: "max",
+			autoSessionTitle: true,
 			vision: null,
 			permissionReviewer: { config: null, status: "unconfigured" },
 			providers: [

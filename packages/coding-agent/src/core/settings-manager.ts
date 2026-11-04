@@ -214,6 +214,7 @@ export interface Settings {
 	permissionRulesVersion?: number; // 1 once the global rule list has been initialized or migrated
 	permissionReviewer?: PermissionReviewerConfig; // global-only independent Auto approval model
 	autoReviewerEnabled?: boolean; // global-only; default false
+	autoSessionTitle?: boolean; // global-only; default true
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -773,6 +774,16 @@ export class SettingsManager {
 	setAutoReviewerEnabled(enabled: boolean): void {
 		this.globalSettings.autoReviewerEnabled = enabled;
 		this.markModified("autoReviewerEnabled");
+		this.save();
+	}
+
+	getAutoSessionTitleEnabled(): boolean {
+		return this.globalSettings.autoSessionTitle !== false;
+	}
+
+	setAutoSessionTitleEnabled(enabled: boolean): void {
+		this.globalSettings.autoSessionTitle = enabled;
+		this.markModified("autoSessionTitle");
 		this.save();
 	}
 

@@ -14,6 +14,7 @@ function settings(): ModelSettingsView {
 	return {
 		defaultModel: { provider: "openai", modelId: "gpt-5" },
 		defaultThinkingSelection: "high",
+		autoSessionTitle: true,
 		vision: null,
 		permissionReviewer: { config: null, status: "unconfigured" },
 		loadError: null,

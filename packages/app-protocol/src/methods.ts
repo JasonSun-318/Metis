@@ -1102,6 +1102,10 @@ export const ModelSettingsMutationSchema = Type.Union([
 		thinkingSelection: ThinkingSelectionSchema,
 	}),
 	StrictObject({
+		type: Type.Literal("set_auto_session_title"),
+		enabled: Type.Boolean(),
+	}),
+	StrictObject({
 		type: Type.Literal("set_vision"),
 		settings: Type.Union([
 			StrictObject({

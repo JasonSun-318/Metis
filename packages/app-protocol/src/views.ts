@@ -975,6 +975,8 @@ export const ModelSettingsViewSchema = StrictObject({
 	/** Independent reviewer profile; invalid legacy objects are never revived. */
 	permissionReviewer: PermissionReviewerViewSchema,
 	defaultThinkingSelection: ThinkingSelectionSchema,
+	/** Whether new Sessions get a model-generated title. */
+	autoSessionTitle: Type.Boolean(),
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
 });

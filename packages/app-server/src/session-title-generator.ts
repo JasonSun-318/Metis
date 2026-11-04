@@ -54,15 +54,22 @@ export class DefaultSessionTitleGenerator implements SessionTitleGenerator {
 	private readonly dependencies: {
 		modelRegistry: ModelRegistry;
 		settingsManager: SettingsManager;
+		isEnabled?: () => boolean;
 	};
 
-	constructor(dependencies: { modelRegistry: ModelRegistry; settingsManager: SettingsManager }) {
+	constructor(dependencies: {
+		modelRegistry: ModelRegistry;
+		settingsManager: SettingsManager;
+		/** Model-generated titles can be turned off; the first message is used instead. */
+		isEnabled?: () => boolean;
+	}) {
 		this.dependencies = dependencies;
 	}
 
 	async generate(source: string): Promise<string | undefined> {
 		const fallback = fallbackTitle(source);
 		if (!fallback) return undefined;
+		if (this.dependencies.isEnabled?.() === false) return fallback;
 		const provider = this.dependencies.settingsManager.getDefaultProvider();
 		const modelId = this.dependencies.settingsManager.getDefaultModel();
 		if (!provider || !modelId) return undefined;
@@ -92,7 +99,7 @@ export class DefaultSessionTitleGenerator implements SessionTitleGenerator {
 						env: auth.env,
 						headers: auth.headers,
 						reasoning: reasoning === "off" ? undefined : reasoning,
-						maxTokens: 32,
+						maxTokens: 256,
 						maxRetries: 0,
 						timeoutMs: 10_000,
 						signal: AbortSignal.timeout(10_000),
