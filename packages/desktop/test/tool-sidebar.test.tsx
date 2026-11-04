@@ -210,14 +210,15 @@ describe("per-session tools sidebar", () => {
 		expect(document.querySelector(".tool-add-menu")).toBeNull();
 	});
 
-	it("returns to a new browser tab after the last tool tab is closed", async () => {
+	it("closes the sidebar after the last tool tab is closed", async () => {
 		const view = mount();
 		await view.render();
 		const original = view.container.querySelector<HTMLElement>(".browser-panel")!.dataset.browserId;
 		await act(async () => button(view.toolsSlot, "Close New tab").click());
 		expect(view.api.closeBrowser).toHaveBeenCalledWith({ sessionId: SESSION, browserId: original });
-		expect(view.toolsSlot.querySelectorAll('[role="tab"]')).toHaveLength(1);
-		expect(view.container.querySelector<HTMLElement>(".browser-panel")!.dataset.browserId).not.toBe(original);
+		expect(view.onToolsSidebarOpenChange).toHaveBeenLastCalledWith(false);
+		// No replacement start page appears while the drawer slides out.
+		expect(view.container.querySelector(".browser-panel")).toBeNull();
 	});
 
 	it("retains each session's browser and tool tabs when switching between sessions", async () => {

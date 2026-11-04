@@ -456,6 +456,12 @@ export function SessionWorkspaceView({
 	const showToolsSidebar = useCallback(() => {
 		onToolsSidebarOpenChangeRef.current?.(true);
 	}, []);
+	// Closing the last tool tab closes the sidebar; the empty strip must not
+	// immediately spawn a replacement start page while the drawer slides out.
+	const suppressEmptyStripBrowserTab = useRef(false);
+	useEffect(() => {
+		if (!sidebarOpen) suppressEmptyStripBrowserTab.current = false;
+	}, [sidebarOpen]);
 	// A newly added tool opens the sidebar once; closing stays closed afterwards.
 	const toolTabCount = [...workspace.tools.values()].reduce((count, strip) => count + strip.tabs.length, 0);
 	const seenToolTabCount = useRef(toolTabCount);
@@ -1199,6 +1205,7 @@ export function SessionWorkspaceView({
 
 	useEffect(() => {
 		if (!visible || !sidebarOpen || sidebarClosing || !toolsTarget.sessionId || toolsStrip.tabs.length > 0) return;
+		if (suppressEmptyStripBrowserTab.current) return;
 		addBrowser(toolsTarget, undefined, true);
 	}, [addBrowser, sidebarClosing, sidebarOpen, toolsTarget, toolsStrip.tabs.length, visible]);
 
@@ -1580,6 +1587,13 @@ export function SessionWorkspaceView({
 	const removeTabInternal = (id: string) => {
 		const closing = workspaceTabs(workspace).find((tab) => tab.id === id);
 		if (!closing) return;
+		const toolLocation = findToolLocation(workspace, id);
+		const closesFocusedToolStrip =
+			sidebarOpen &&
+			toolLocation !== null &&
+			closing.sessionId !== null &&
+			closing.sessionId === focusedChatSession &&
+			toolStripOf(workspace, closing.sessionId).tabs.length === 1;
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
 		else if (closing.kind === "browser")
 			void api.closeBrowser({ sessionId: closing.sessionId, browserId: id }).catch(onError);
@@ -1603,6 +1617,10 @@ export function SessionWorkspaceView({
 			}
 			return next;
 		});
+		if (closesFocusedToolStrip) {
+			suppressEmptyStripBrowserTab.current = true;
+			onToolsSidebarOpenChangeRef.current?.(false);
+		}
 	};
 
 	const closeTab = (id: string) => {

@@ -7468,7 +7468,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Close Example Domain").click());
 		expect(api.closeBrowser).toHaveBeenCalledTimes(2);
 		expect(api.closeBrowser).toHaveBeenCalledWith({ sessionId: "chat-existing", browserId });
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
+		// Closing the last tool tab closes the sidebar instead of spawning a start page.
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(1);
 
 		await act(async () => root.unmount());
 	});
