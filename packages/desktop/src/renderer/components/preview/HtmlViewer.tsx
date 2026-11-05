@@ -100,21 +100,11 @@ export function HtmlViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 	}, [mode, postTheme]);
 
 	const modeActions = (
-		<fieldset aria-label={t("Preview mode")} className="preview-html-modes">
-			<button
-				aria-pressed={mode === "preview"}
-				className={`preview-toolbar-btn${mode === "preview" ? " is-active" : ""}`}
-				onClick={() => setMode("preview")}
-				type="button"
-			>
+		<fieldset aria-label={t("Preview mode")} className="control-group settings-segmented preview-html-modes">
+			<button aria-pressed={mode === "preview"} onClick={() => setMode("preview")} type="button">
 				{t("Rendered")}
 			</button>
-			<button
-				aria-pressed={mode === "source"}
-				className={`preview-toolbar-btn${mode === "source" ? " is-active" : ""}`}
-				onClick={() => setMode("source")}
-				type="button"
-			>
+			<button aria-pressed={mode === "source"} onClick={() => setMode("source")} type="button">
 				{t("Source code")}
 			</button>
 		</fieldset>
