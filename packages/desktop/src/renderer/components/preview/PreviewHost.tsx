@@ -4,6 +4,7 @@ import type { DesktopPreviewFileInput, MetisDesktopApi } from "../../../shared/d
 import { File, SpinnerGap } from "../../icons.tsx";
 import { DocxViewer } from "./DocxViewer.tsx";
 import { ExcelViewer } from "./ExcelViewer.tsx";
+import { HtmlViewer } from "./HtmlViewer.tsx";
 import { ImageViewer } from "./ImageViewer.tsx";
 import { PdfViewer } from "./PdfViewer.tsx";
 import { PptxViewer } from "./PptxViewer.tsx";
@@ -286,6 +287,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	if (kind === "pptx") return <PptxViewer {...viewerProps} />;
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
 	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
+	if (kind === "html") return <HtmlViewer {...viewerProps} />;
 	if (kind === "markdown" || kind === "text")
 		return <TextViewer key={JSON.stringify(input)} api={api} kind={kind} {...viewerProps} />;
 

@@ -3561,6 +3561,42 @@ classes so their inline layout wins the cascade. */
 	filter: invert(0.88) hue-rotate(180deg);
 }
 
+
+/* HTML preview: model-authored page rendered in an opaque-origin frame. */
+.preview-html-frame {
+	flex: 1 1 0%;
+	width: 100%;
+	min-height: 0;
+	border: 0;
+	background: var(--app-bg);
+}
+.preview-html-source {
+	flex: 1 1 0%;
+	min-height: 0;
+	overflow: auto;
+	margin: 0;
+	background: var(--app-bg);
+	color: var(--text);
+	padding: 16px 20px;
+	font: var(--code-mono-size)/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	white-space: pre-wrap;
+	word-break: break-word;
+	tab-size: 2;
+}
+.preview-html-modes {
+	display: inline-flex;
+	gap: 2px;
+	border: 0;
+	border-radius: 7px;
+	background: var(--surface-03);
+	padding: 2px;
+	margin: 0;
+}
+.preview-html-modes .preview-toolbar-btn {
+	min-height: 24px;
+	padding: 0 8px;
+	font-size: 12px;
+}
 .preview-loading-state,
 .preview-empty-state,
 .preview-error-state {

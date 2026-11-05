@@ -11,7 +11,17 @@ export interface UniversalPreviewTarget {
 	readonly byteLength?: number;
 }
 
-export type PreviewKind = "pdf" | "docx" | "pptx" | "xlsx" | "csv" | "image" | "markdown" | "text" | "unsupported";
+export type PreviewKind =
+	| "pdf"
+	| "docx"
+	| "pptx"
+	| "xlsx"
+	| "csv"
+	| "image"
+	| "markdown"
+	| "html"
+	| "text"
+	| "unsupported";
 
 const ENGINE_KINDS = new Set<PreviewKind>(["pdf", "docx", "pptx", "xlsx", "csv"]);
 
@@ -46,8 +56,8 @@ const KIND_BY_EXT: Record<string, PreviewKind> = {
 	css: "text",
 	scss: "text",
 	less: "text",
-	html: "text",
-	htm: "text",
+	html: "html",
+	htm: "html",
 	xml: "text",
 	yml: "text",
 	yaml: "text",

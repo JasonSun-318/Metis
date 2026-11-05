@@ -26,6 +26,8 @@ describe("classifyPreviewKind", () => {
 		expect(classifyPreviewKind("data.json")).toBe("text");
 		expect(classifyPreviewKind("app.ts")).toBe("text");
 		expect(classifyPreviewKind("notes.txt")).toBe("text");
+		expect(classifyPreviewKind("page.html")).toBe("html");
+		expect(classifyPreviewKind("index.HTM")).toBe("html");
 	});
 
 	it("rejects legacy office and unknown binaries", () => {
@@ -39,5 +41,6 @@ describe("classifyPreviewKind", () => {
 		expect(isEnginePreviewKind("unsupported")).toBe(false);
 		expect(isHostedPreviewKind("image")).toBe(true);
 		expect(isHostedPreviewKind("text")).toBe(false);
+		expect(isHostedPreviewKind("html")).toBe(false);
 	});
 });

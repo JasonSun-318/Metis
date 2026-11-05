@@ -348,6 +348,38 @@ describe("UniversalFilePreviewer", () => {
 		expect(container.textContent).toContain("Hello from delivered text");
 	});
 
+	it("renders delivered HTML in a script-only sandbox", async () => {
+		const readPreviewFile = vi.fn().mockResolvedValue({
+			ok: true,
+			name: "page.html",
+			byteLength: 70,
+			mediaType: "text/html",
+			bytes: new TextEncoder().encode("<!doctype html><html><body><h1>Delivered page</h1></body></html>"),
+		});
+		const api = {
+			readPreviewFile,
+			openDeliveredFile: vi.fn(),
+		} as unknown as MetisDesktopApi;
+		const { container } = mount(
+			<UniversalFilePreviewer
+				api={api}
+				file={{
+					source: "delivered",
+					sessionId: "test-session",
+					fileId: "1234567890abcdef",
+					name: "page.html",
+				}}
+				onError={vi.fn()}
+			/>,
+		);
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		});
+		const frame = container.querySelector<HTMLIFrameElement>("iframe.preview-html-frame");
+		expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+		expect(frame?.getAttribute("srcdoc") ?? "").toContain("Delivered page");
+	});
+
 	it("loads markdown workspace file and renders formatted markdown", async () => {
 		const readPreviewFile = vi.fn().mockResolvedValue({
 			ok: true,
