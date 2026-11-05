@@ -3584,6 +3584,7 @@ classes so their inline layout wins the cascade. */
 	tab-size: 2;
 }
 .preview-html-modes {
+	flex: none;
 	display: inline-flex;
 	gap: 2px;
 	border: 0;
@@ -3593,9 +3594,15 @@ classes so their inline layout wins the cascade. */
 	margin: 0;
 }
 .preview-html-modes .preview-toolbar-btn {
+	flex: none;
+	width: auto;
+	min-width: 24px;
+	height: 24px;
 	min-height: 24px;
 	padding: 0 8px;
 	font-size: 12px;
+	line-height: 1;
+	white-space: nowrap;
 }
 .preview-loading-state,
 .preview-empty-state,
