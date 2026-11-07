@@ -67,15 +67,11 @@ function HomeFixture() {
 					/>
 				}
 				reducedMotion={reducedMotion}
-				recentProjects={
-					mode === "code"
-						? [
-								{ cwd: "/tmp/metis-home-qa", name: "Metis", updatedAt: "2026-09-12T09:00:00.000Z" },
-								{ cwd: "/tmp/website", name: "Website", updatedAt: "2026-09-11T09:00:00.000Z" },
-								{ cwd: "/tmp/demo", name: "Demo", updatedAt: "2026-09-10T09:00:00.000Z" },
-							]
-						: []
-				}
+				recentProjects={[
+					{ cwd: "/tmp/metis-home-qa", name: "Metis", updatedAt: "2026-09-12T09:00:00.000Z" },
+					{ cwd: "/tmp/website", name: "Website", updatedAt: "2026-09-11T09:00:00.000Z" },
+					{ cwd: "/tmp/demo", name: "Demo", updatedAt: "2026-09-10T09:00:00.000Z" },
+				]}
 				skills={[]}
 			/>
 			<output hidden data-submission-count={submissions} data-workspace-folder={folder ?? ""} />

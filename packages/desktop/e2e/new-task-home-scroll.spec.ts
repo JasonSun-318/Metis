@@ -250,8 +250,8 @@ test.describe("new task home workspace and compact layout", () => {
 				await expect(page.locator(".home-project-picker-browse")).toHaveAttribute("title", "/tmp/metis-home-qa");
 				const closedLayout = await snapshot(page);
 				const recent = page.locator(".new-task-recent-projects");
-				await expect(recent.getByRole("button")).toHaveCount(mode === "code" ? 3 : 0);
-				const recentBounds = mode === "code" ? await recent.boundingBox() : null;
+				await expect(recent.getByRole("button")).toHaveCount(3);
+				const recentBounds = (await recent.boundingBox())!;
 				const trigger = page.locator(".new-task-more-trigger");
 				const drawer = page.locator(".new-task-more-drawer");
 				const arrow = trigger.locator(".new-task-more-arrow");
@@ -271,11 +271,9 @@ test.describe("new task home workspace and compact layout", () => {
 				});
 				const drawerBounds = (await drawer.boundingBox())!;
 				expect(drawerBounds.y).toBeCloseTo(closedLayout.shortcuts.at(-1)!.bottom);
-				if (recentBounds) {
-					const openRecent = (await recent.boundingBox())!;
-					expect(openRecent.y).toBeGreaterThan(recentBounds.y);
-					expect(openRecent.y).toBeGreaterThanOrEqual(drawerBounds.y + drawerBounds.height);
-				}
+				const openRecent = (await recent.boundingBox())!;
+				expect(openRecent.y).toBeGreaterThan(recentBounds.y);
+				expect(openRecent.y).toBeGreaterThanOrEqual(drawerBounds.y + drawerBounds.height);
 				await assertWithinViewport(page, ".new-task-more-drawer");
 				await page.screenshot({
 					path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-more.png`),
@@ -286,7 +284,7 @@ test.describe("new task home workspace and compact layout", () => {
 				await expect(label).toHaveCSS("opacity", "1");
 				await expect(drawer).toBeHidden();
 				expect(await snapshot(page)).toEqual(closedLayout);
-				if (recentBounds) expect(await recent.boundingBox()).toEqual(recentBounds);
+				expect(await recent.boundingBox()).toEqual(recentBounds);
 				if (viewport.width >= 1280) {
 					await page.evaluate(() => {
 						document.documentElement.dataset.theme = "light";

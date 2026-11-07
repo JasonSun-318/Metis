@@ -2618,6 +2618,12 @@ describe("Chat desktop shell", () => {
 
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "  Analyze this repository\ncarefully  "));
+		const recentProject = container.querySelector<HTMLButtonElement>(
+			'.new-task-recent-project[title="/work/chat-project"]',
+		)!;
+		await act(async () => recentProject.click());
+		expect(recentProject.getAttribute("aria-pressed")).toBe("true");
+		expect(api.createSession).not.toHaveBeenCalled();
 		order.length = 0;
 		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
@@ -2626,7 +2632,7 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mode: "chat",
-				cwd: "/work/selected-project",
+				cwd: "/work/chat-project",
 			}),
 		);
 		expect(vi.mocked(api.createSession).mock.calls[0]![0]).not.toHaveProperty("name");

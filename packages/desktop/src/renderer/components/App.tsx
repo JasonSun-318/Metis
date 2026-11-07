@@ -912,13 +912,13 @@ export function App({ api, store }: AppProps) {
 	);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
-	const homeProjects = useMemo(
-		() => buildSessionTree(sidebarState, mode, projectPreferences).projects,
-		[mode, projectPreferences, sidebarState],
-	);
-	const recentCodeProjects = useMemo(
-		() => (mode === "code" ? recentProjectsFromGroups(homeProjects) : []),
-		[homeProjects, mode],
+	const recentHomeProjects = useMemo(
+		() =>
+			recentProjectsFromGroups([
+				...buildSessionTree(sidebarState, "chat", projectPreferences).projects,
+				...buildSessionTree(sidebarState, "code", projectPreferences).projects,
+			]),
+		[projectPreferences, sidebarState],
 	);
 	const activeCodeProjectSetupRequest = codeProjectSetupRequest.current;
 
@@ -1729,11 +1729,11 @@ export function App({ api, store }: AppProps) {
 				onManageSkills={openSkillsDestination}
 				onPickFiles={pickAttachmentFiles}
 				onResolveDroppedFiles={api.resolveDroppedFiles}
-				onSelectRecentProject={(cwd) => selectHomeProject("code", cwd)}
+				onSelectRecentProject={(cwd) => selectHomeProject(mode, cwd)}
 				reducedMotion={reducedMotion}
 				onSlashCommand={handleSlashCommand}
 				onSubmit={submitNewTaskDraft}
-				recentProjects={recentCodeProjects}
+				recentProjects={recentHomeProjects}
 				selectionSessionId={visibleNewTaskDraft.sessionId}
 				skills={skills}
 				thinkingControl={thinkingControl}

@@ -326,7 +326,7 @@ export function NewTaskHome({
 							</div>
 						</div>
 					</section>
-					{mode === "code" && recentProjects.length > 0 && onSelectRecentProject && (
+					{recentProjects.length > 0 && onSelectRecentProject && (
 						<section className="new-task-recent-projects" aria-labelledby="new-task-recent-projects-title">
 							<h2 id="new-task-recent-projects-title">{t("Recent projects")}</h2>
 							<div className="new-task-recent-project-list">
