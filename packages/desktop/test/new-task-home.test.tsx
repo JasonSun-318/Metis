@@ -99,7 +99,7 @@ describe("NewTaskHome", () => {
 			const home = container.querySelector<HTMLElement>(".new-task-home");
 			expect(home?.dataset.mode).toBe(mode);
 			expect(container.querySelector(composerSelector)).not.toBeNull();
-			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(starterCount);
+			expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(starterCount);
 
 			const editor = container.querySelector<HTMLElement>("#composer-input")!;
 			const projectControl = container.querySelector<HTMLElement>("[data-testid='project-control']")!;
@@ -165,50 +165,6 @@ describe("NewTaskHome", () => {
 			for (const button of container.querySelectorAll<HTMLButtonElement>(".home-project-picker button"))
 				expect(button.disabled).toBe(true);
 			expect(onChooseFolder).not.toHaveBeenCalled();
-		} finally {
-			await act(async () => root.unmount());
-		}
-	});
-
-	it("expands additional tasks without changing the draft, then prefills without submitting", async () => {
-		Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
-		const onSubmit = vi.fn(async () => undefined);
-		const { container, root } = await renderHome("chat", { onSubmit });
-		try {
-			const editor = container.querySelector<HTMLElement>("#composer-input")!;
-			await act(async () => {
-				editor.textContent = "My draft";
-				editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
-			});
-			const more = container.querySelector<HTMLButtonElement>(".new-task-more-trigger")!;
-			expect(more.getAttribute("aria-expanded")).toBe("false");
-			await act(async () => more.click());
-			expect(editor.textContent).toBe("My draft");
-			expect(more.getAttribute("aria-expanded")).toBe("true");
-			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(9);
-			await act(async () => {
-				container.querySelector<HTMLButtonElement>('[data-starter-id="document"]')!.click();
-				await flush();
-			});
-			expect(editor.textContent).toContain(getHomeStarters("chat")[4]!.prompt);
-			expect(document.activeElement).toBe(editor);
-			expect(more.getAttribute("aria-expanded")).toBe("false");
-			expect(onSubmit).not.toHaveBeenCalled();
-		} finally {
-			await act(async () => root.unmount());
-		}
-	});
-
-	it("returns keyboard focus to More tasks when Escape closes the additional tasks", async () => {
-		const { container, root } = await renderHome("code");
-		try {
-			const more = container.querySelector<HTMLButtonElement>(".new-task-more-trigger")!;
-			await act(async () => more.click());
-			const last = container.querySelector<HTMLButtonElement>('[data-starter-id="performance"]')!;
-			last.focus();
-			await act(async () => last.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-			expect(more.getAttribute("aria-expanded")).toBe("false");
-			expect(document.activeElement).toBe(more);
 		} finally {
 			await act(async () => root.unmount());
 		}

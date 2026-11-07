@@ -1,10 +1,10 @@
-import { build } from "esbuild";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { build } from "esbuild";
 
 test.use({ channel: "chrome" });
 
@@ -103,7 +103,9 @@ async function snapshot(page: Page): Promise<HomeSnapshot> {
 		};
 		const scroll = document.querySelector<HTMLElement>(".new-task-home-scroll")!;
 		return {
-			scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight,
+			scrollTop: scroll.scrollTop,
+			scrollHeight: scroll.scrollHeight,
+			clientHeight: scroll.clientHeight,
 			headingText: document.querySelector(".new-task-home-heading h1")?.textContent?.trim() ?? "",
 			heading: rect(document.querySelector(".new-task-home-heading h1")),
 			composer: rect(document.querySelector(".new-task-home-composer")),
@@ -115,7 +117,7 @@ async function snapshot(page: Page): Promise<HomeSnapshot> {
 
 async function waitForHome(page: Page): Promise<void> {
 	await expect(page.locator(".new-task-home")).toBeVisible();
-	await expect(page.locator(".new-task-starter")).toHaveCount(4);
+	await expect(page.locator(".new-task-starter:visible")).toHaveCount(4);
 	await expect(page.locator("#composer-input")).toBeVisible();
 	await page.evaluate(() => document.fonts.ready);
 }
@@ -123,7 +125,9 @@ async function waitForHome(page: Page): Promise<void> {
 function monitorPageErrors(page: Page): string[] {
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
-	page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+	page.on("console", (message) => {
+		if (message.type() === "error") errors.push(message.text());
+	});
 	return errors;
 }
 
@@ -203,8 +207,13 @@ test.describe("new task home workspace and compact layout", () => {
 	}
 
 	for (const mode of ["chat", "code"] as const) {
-		for (const viewport of [{ width: 1280, height: 840 }, { width: 900, height: 640 }] as const) {
-			test(`${mode} ${viewport.width}x${viewport.height} shows the workspace and task shortcuts in the first screen`, async ({ page }, testInfo) => {
+		for (const viewport of [
+			{ width: 1280, height: 840 },
+			{ width: 900, height: 640 },
+		] as const) {
+			test(`${mode} ${viewport.width}x${viewport.height} shows the workspace and task shortcuts in the first screen`, async ({
+				page,
+			}, testInfo) => {
 				const errors = monitorPageErrors(page);
 				await page.setViewportSize(viewport);
 				await page.goto(`${fixture.url}/?mode=${mode}`, { waitUntil: "load" });
@@ -224,21 +233,73 @@ test.describe("new task home workspace and compact layout", () => {
 				for (const shortcut of layout.shortcuts) expect(shortcut.bottom).toBeLessThanOrEqual(viewport.height - 8);
 				await assertWithinViewport(page, ".home-project-picker-browse");
 				await assertWithinViewport(page, ".composer-send");
-				expect(await page.locator(".new-task-home-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-				await testInfo.attach("home-layout", { body: JSON.stringify(layout, null, 2), contentType: "application/json" });
-				await page.screenshot({ path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-initial.png`), animations: "disabled" });
+				expect(
+					await page
+						.locator(".new-task-home-scroll")
+						.evaluate((element) => element.scrollWidth <= element.clientWidth),
+				).toBe(true);
+				await testInfo.attach("home-layout", {
+					body: JSON.stringify(layout, null, 2),
+					contentType: "application/json",
+				});
+				await page.screenshot({
+					path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-initial.png`),
+					animations: "disabled",
+				});
 				await page.locator(".home-project-picker-browse").click();
 				await expect(page.locator(".home-project-picker-browse")).toHaveAttribute("title", "/tmp/metis-home-qa");
-				await page.locator(".new-task-more-trigger").click();
-				await expect(page.locator(".new-task-starter")).toHaveCount(mode === "chat" ? 9 : 6);
-				await page.screenshot({ path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-more.png`), animations: "disabled" });
-				await page.locator(".new-task-more-trigger").click();
-				await expect(page.locator(".new-task-starter")).toHaveCount(4);
+				const closedLayout = await snapshot(page);
+				const recent = page.locator(".new-task-recent-projects");
+				await expect(recent.getByRole("button")).toHaveCount(mode === "code" ? 3 : 0);
+				const recentBounds = mode === "code" ? await recent.boundingBox() : null;
+				const trigger = page.locator(".new-task-more-trigger");
+				const drawer = page.locator(".new-task-more-drawer");
+				const arrow = trigger.locator(".new-task-more-arrow");
+				const label = trigger.locator(".new-task-more-label");
+				await trigger.click();
+				await expect(trigger).toHaveAttribute("aria-expanded", "true");
+				await expect(arrow).toHaveCSS("rotate", "0deg");
+				await expect(arrow).toHaveCSS("opacity", "1");
+				await expect(label).toHaveCSS("opacity", "0");
+				await expect(trigger).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+				await expect(trigger).toHaveCSS("box-shadow", "none");
+				await expect(page.locator(".new-task-starter:visible")).toHaveCount(mode === "chat" ? 9 : 6);
+				expect(await snapshot(page)).toMatchObject({
+					heading: closedLayout.heading,
+					composer: closedLayout.composer,
+					shortcuts: closedLayout.shortcuts,
+				});
+				const drawerBounds = (await drawer.boundingBox())!;
+				expect(drawerBounds.y).toBeCloseTo(closedLayout.shortcuts.at(-1)!.bottom);
+				if (recentBounds) {
+					const openRecent = (await recent.boundingBox())!;
+					expect(openRecent.y).toBeGreaterThan(recentBounds.y);
+					expect(openRecent.y).toBeGreaterThanOrEqual(drawerBounds.y + drawerBounds.height);
+				}
+				await assertWithinViewport(page, ".new-task-more-drawer");
+				await page.screenshot({
+					path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-more.png`),
+					animations: "disabled",
+				});
+				await trigger.click();
+				await expect(arrow).toHaveCSS("rotate", "180deg");
+				await expect(label).toHaveCSS("opacity", "1");
+				await expect(drawer).toBeHidden();
+				expect(await snapshot(page)).toEqual(closedLayout);
+				if (recentBounds) expect(await recent.boundingBox()).toEqual(recentBounds);
 				if (viewport.width >= 1280) {
-					await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+					await page.evaluate(() => {
+						document.documentElement.dataset.theme = "light";
+					});
 					await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(250, 249, 246)");
-					await expect(page.locator(".new-task-home-composer")).toHaveCSS("background-color", "rgb(252, 252, 250)");
-					await page.screenshot({ path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-light.png`), animations: "disabled" });
+					await expect(page.locator(".new-task-home-composer")).toHaveCSS(
+						"background-color",
+						"rgb(252, 252, 250)",
+					);
+					await page.screenshot({
+						path: testInfo.outputPath(`${mode}-${viewport.width}x${viewport.height}-light.png`),
+						animations: "disabled",
+					});
 				}
 				expect(errors).toEqual([]);
 			});
@@ -261,7 +322,7 @@ test.describe("new task home workspace and compact layout", () => {
 	});
 
 	test("additional tasks prefill without submitting and collapse back to the shortcuts", async ({ page }) => {
-		await page.setViewportSize({ width: 900, height: 640 });
+		await page.setViewportSize({ width: 1280, height: 840 });
 		await page.goto(`${fixture.url}/?mode=chat&motion=reduced`, { waitUntil: "load" });
 		await waitForHome(page);
 		await page.locator("#composer-input").fill("My draft");
@@ -278,7 +339,12 @@ test.describe("new task home workspace and compact layout", () => {
 		await page.setViewportSize({ width: 900, height: 640 });
 		await page.goto(`${fixture.url}/?mode=code&motion=reduced`, { waitUntil: "load" });
 		await waitForHome(page);
-		await page.locator(".new-task-more-trigger").click();
+		const trigger = page.locator(".new-task-more-trigger");
+		await trigger.focus();
+		await page.keyboard.press("Enter");
+		await expect(trigger).toHaveAttribute("aria-expanded", "true");
+		await expect(page.locator('[data-starter-id="test"]')).toBeVisible();
+		await expect(trigger).toBeFocused();
 		await page.keyboard.press("Tab");
 		await expect(page.locator('[data-starter-id="test"]')).toBeFocused();
 		await page.keyboard.press("Tab");
@@ -287,8 +353,8 @@ test.describe("new task home workspace and compact layout", () => {
 		await expect(page.locator('[data-starter-id="performance"]')).toHaveCSS("outline-style", "solid");
 		await page.screenshot({ path: testInfo.outputPath("code-keyboard-focus.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
-		await expect(page.locator(".new-task-more-trigger")).toBeFocused();
-		await expect(page.locator(".new-task-more-trigger")).toHaveAttribute("aria-expanded", "false");
+		await expect(trigger).toBeFocused();
+		await expect(trigger).toHaveAttribute("aria-expanded", "false");
 	});
 
 	test("multiline text keeps workspace selection reachable and preserves the text", async ({ page }, testInfo) => {
@@ -297,9 +363,13 @@ test.describe("new task home workspace and compact layout", () => {
 		await page.goto(`${fixture.url}/?mode=chat&motion=reduced`, { waitUntil: "load" });
 		await waitForHome(page);
 		const initial = await snapshot(page);
-		const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}: outline the next useful step`).join("\n");
+		const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}: outline the next useful step`).join(
+			"\n",
+		);
 		await page.locator("#composer-input").fill(text);
-		await expect.poll(async () => (await snapshot(page)).composer.height).toBeGreaterThan(initial.composer.height + 10);
+		await expect
+			.poll(async () => (await snapshot(page)).composer.height)
+			.toBeGreaterThan(initial.composer.height + 10);
 		await page.locator(".home-project-picker-browse").scrollIntoViewIfNeeded();
 		await assertWithinViewport(page, ".home-project-picker-browse");
 		await page.locator(".home-project-picker-browse").click();
@@ -319,5 +389,11 @@ test.describe("new task home workspace and compact layout", () => {
 		await assertWithinViewport(page, ".home-project-picker-browse");
 		await assertWithinViewport(page, ".new-task-more-trigger");
 		await page.screenshot({ path: testInfo.outputPath("chat-english-reference-size.png"), animations: "disabled" });
+		const trigger = page.locator(".new-task-more-trigger");
+		await trigger.click();
+		await expect(trigger.locator(".new-task-more-arrow")).toHaveCSS("rotate", "0deg");
+		const lastTask = page.locator('[data-starter-id="meeting"]');
+		await lastTask.scrollIntoViewIfNeeded();
+		await assertWithinViewport(page, '[data-starter-id="meeting"]');
 	});
 });

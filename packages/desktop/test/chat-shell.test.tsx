@@ -2653,7 +2653,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "New task").click());
 		const heading = container.querySelector(".new-task-home-heading h1")?.textContent;
 		expect(container.querySelector(".new-task-home-heading p")).toBeNull();
-		expect(container.querySelectorAll(".new-task-starter")).toHaveLength(4);
+		expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(4);
 		expect(container.querySelector(".new-task-home-backdrop")).toBeNull();
 		const creates = vi.mocked(api.createSession).mock.calls.length;
 		await act(async () => container.querySelector<HTMLButtonElement>('[data-starter-id="slides"]')!.click());
@@ -3357,7 +3357,7 @@ describe("Chat desktop shell", () => {
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
 			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("chat");
-			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(4);
+			expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(4);
 			const chatEditor = container.querySelector<HTMLElement>("#composer-input")!;
 			await act(async () => changeTextarea(chatEditor, "Chat draft must not follow the mode switch"));
 
@@ -3365,7 +3365,7 @@ describe("Chat desktop shell", () => {
 			await flush();
 
 			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("code");
-			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(4);
+			expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(4);
 			const codeEditor = container.querySelector<HTMLElement>("#composer-input")!;
 			expect(composerText(codeEditor)).toBe("");
 			expect(container.querySelector(".new-task-home-heading h1")?.textContent).toContain("build");

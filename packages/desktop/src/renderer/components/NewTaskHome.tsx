@@ -1,5 +1,5 @@
 import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
-import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import {
@@ -171,14 +171,28 @@ export function NewTaskHome({
 	const [prefillRequest, setPrefillRequest] = useState<ComposerPrefillRequest>();
 	const prefillSequence = useRef(0);
 	const scrollRef = useRef<HTMLDivElement>(null);
-	const moreRef = useRef<HTMLButtonElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
+	const moreTriggerRef = useRef<HTMLButtonElement>(null);
+	const moreDrawerRef = useRef<HTMLDivElement>(null);
 	const [moreTasksOpen, setMoreTasksOpen] = useState(false);
 	const additionalTasksId = useId();
 	const starters = getHomeStarters(mode);
 	const scrollBehavior = reducedMotion ? "auto" : "smooth";
+	useLayoutEffect(() => {
+		const content = contentRef.current;
+		const drawer = moreDrawerRef.current;
+		if (!content || !drawer) return;
+		const updateHeight = () => content.style.setProperty("--new-task-drawer-height", `${drawer.offsetHeight}px`);
+		updateHeight();
+		if (typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver(updateHeight);
+		observer.observe(drawer);
+		return () => observer.disconnect();
+	}, []);
 
 	const handleStarterClick = (prompt: string) => {
 		setMoreTasksOpen(false);
+		scrollRef.current?.querySelector<HTMLElement>("#composer-input")?.focus({ preventScroll: true });
 		setPrefillRequest({ id: ++prefillSequence.current, text: t(prompt) });
 		scrollRef.current?.scrollTo({ behavior: scrollBehavior, top: 0 });
 	};
@@ -216,7 +230,7 @@ export function NewTaskHome({
 		<section className="new-task-home" data-mode={mode}>
 			{!reducedMotion && <NewTaskRippleBackground />}
 			<div className="new-task-home-scroll" ref={scrollRef}>
-				<div className="new-task-home-content">
+				<div className="new-task-home-content" data-more-open={moreTasksOpen} ref={contentRef}>
 					<div className="new-task-home-hero">
 						<div className="new-task-home-hero-main">
 							<div className="new-task-home-heading">
@@ -280,30 +294,37 @@ export function NewTaskHome({
 							if (event.key !== "Escape" || !moreTasksOpen) return;
 							event.preventDefault();
 							setMoreTasksOpen(false);
-							moreRef.current?.focus();
+							moreTriggerRef.current?.focus();
 						}}
 					>
 						<div className="new-task-starter-grid">
 							{starters.slice(0, 4).map((starter) => renderStarter(starter))}
 							<button
-								aria-controls={moreTasksOpen ? additionalTasksId : undefined}
+								aria-controls={additionalTasksId}
 								aria-expanded={moreTasksOpen}
 								aria-label={t(moreTasksOpen ? "Fewer tasks" : "More tasks")}
 								className="new-task-more-trigger"
 								disabled={busy}
 								onClick={() => setMoreTasksOpen((open) => !open)}
-								ref={moreRef}
+								ref={moreTriggerRef}
 								type="button"
 							>
-								<DotsThree aria-hidden="true" size={17} />
-								<span>{t(moreTasksOpen ? "Less" : "More")}</span>
+								<span aria-hidden="true" className="new-task-more-label">
+									<DotsThree size={17} />
+									{t("More")}
+								</span>
+								<CaretDown aria-hidden="true" className="new-task-more-arrow" size={16} />
 							</button>
 						</div>
-						{moreTasksOpen && (
-							<div className="new-task-additional-grid" id={additionalTasksId}>
-								{starters.slice(4).map((starter) => renderStarter(starter, true))}
+						<div className="new-task-more-drawer" id={additionalTasksId} inert={!moreTasksOpen}>
+							<div className="new-task-more-drawer-clip">
+								<div className="new-task-more-drawer-body" ref={moreDrawerRef}>
+									<div className="new-task-more-drawer-items">
+										{starters.slice(4).map((starter) => renderStarter(starter, true))}
+									</div>
+								</div>
 							</div>
-						)}
+						</div>
 					</section>
 					{mode === "code" && recentProjects.length > 0 && onSelectRecentProject && (
 						<section className="new-task-recent-projects" aria-labelledby="new-task-recent-projects-title">
