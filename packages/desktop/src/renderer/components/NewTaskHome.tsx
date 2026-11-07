@@ -29,6 +29,7 @@ import type { ProjectSessionGroup } from "../session-groups.ts";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
+import { NewTaskRippleBackground } from "./NewTaskRippleBackground.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 const starterIcons: Record<HomeStarterId, typeof FileText> = {
@@ -213,6 +214,7 @@ export function NewTaskHome({
 
 	return (
 		<section className="new-task-home" data-mode={mode}>
+			{!reducedMotion && <NewTaskRippleBackground />}
 			<div className="new-task-home-scroll" ref={scrollRef}>
 				<div className="new-task-home-content">
 					<div className="new-task-home-hero">

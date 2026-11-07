@@ -150,6 +150,58 @@ test.describe("new task home workspace and compact layout", () => {
 		if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true });
 	});
 
+	for (const theme of ["dark", "light"]) {
+		test(`the ${theme} character field ripples and fades after a click on empty space`, async ({
+			page,
+		}, testInfo) => {
+			await page.setViewportSize({ width: 1280, height: 840 });
+			await page.goto(`${fixture.url}/?mode=chat&theme=${theme}`);
+			await waitForHome(page);
+			const canvas = page.locator(".new-task-ripple-background");
+			await expect(canvas).toBeVisible();
+			const clickOffset = { x: 90, y: 180 };
+			const distantX = clickOffset.x + 150;
+			const paintedPixels = () =>
+				canvas.evaluate((element: HTMLCanvasElement, distantX) => {
+					const { width, height } = element;
+					const { data } = element.getContext("2d")!.getImageData(0, 0, width, height);
+					let neutral = 0;
+					let colored = 0;
+					let distant = 0;
+					let faint = 0;
+					for (let i = 0; i < data.length; i += 4) {
+						const alpha = data[i + 3]!;
+						if (alpha >= 4 && alpha <= 11) faint++;
+						if (alpha < 24) continue;
+						if (data[i + 2]! - data[i]! > 30) {
+							colored++;
+							const pixel = i / 4;
+							if (pixel % width > distantX * devicePixelRatio) distant++;
+						} else neutral++;
+					}
+					return { neutral, colored, distant, faint };
+				}, distantX);
+			await expect.poll(async () => (await paintedPixels()).neutral).toBeGreaterThan(0);
+			await expect.poll(async () => (await paintedPixels()).faint).toBeGreaterThan(10_000);
+			await page.locator("#composer-input").click();
+			await page.keyboard.type("Draft");
+			await expect(page.locator("#composer-input")).toHaveText("Draft");
+			expect((await paintedPixels()).colored).toBe(0);
+			await page.screenshot({ path: testInfo.outputPath(`${theme}-idle.png`) });
+
+			const bounds = (await canvas.boundingBox())!;
+			await page.mouse.click(bounds.x + clickOffset.x, bounds.y + clickOffset.y);
+			await expect.poll(async () => (await paintedPixels()).distant).toBeGreaterThan(25);
+			await page.screenshot({ path: testInfo.outputPath(`${theme}-ripple.png`) });
+			await expect.poll(async () => (await paintedPixels()).colored).toBe(0);
+			await page.screenshot({ path: testInfo.outputPath(`${theme}-decayed.png`) });
+
+			await page.goto(`${fixture.url}/?mode=chat&motion=reduced`);
+			await waitForHome(page);
+			await expect(canvas).toHaveCount(0);
+		});
+	}
+
 	for (const mode of ["chat", "code"] as const) {
 		for (const viewport of [{ width: 1280, height: 840 }, { width: 900, height: 640 }] as const) {
 			test(`${mode} ${viewport.width}x${viewport.height} shows the workspace and task shortcuts in the first screen`, async ({ page }, testInfo) => {
