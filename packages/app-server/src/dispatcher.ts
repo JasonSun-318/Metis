@@ -540,6 +540,8 @@ export class Dispatcher {
 					),
 				};
 			}
+			case "session/archived/list":
+				return await this.archivedConversations.list(this.allSessionRefs(), request.params);
 			case "knowledge/list":
 				return this.knowledge.list();
 			case "knowledge/register":
@@ -1006,6 +1008,12 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.archiveAgent(request.params));
 				});
+			case "agent/rename":
+				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.renameAgent(request.params));
+				});
 			case "agentType/list":
 				return await this.registry.listAgentTypes();
 			case "agentType/upsert":
@@ -1014,6 +1022,13 @@ export class Dispatcher {
 				return await this.replayMutation(request, () => this.registry.removeAgentType(request.params));
 			case "agent/delete":
 				return await this.replayMutation(request, async () => {
+					if (this.catalog.get(request.params.sessionId).summary.archived) {
+						this.assertMutableSession(request.params.sessionId);
+						return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
+							this.registry.assertClosed(ref.summary.sessionId);
+							return await deleteArchivedAgent(ref, this.catalog.agentDir, request.params);
+						});
+					}
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.deleteAgent(request.params));
 				});

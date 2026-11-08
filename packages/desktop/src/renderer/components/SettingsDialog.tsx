@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
 import {
+	Archive,
 	ArrowLeft,
 	Browser,
 	Database,
@@ -16,6 +17,7 @@ import {
 } from "../icons.tsx";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
+import { ArchivedConversationsPanel } from "./ArchivedConversationsPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
@@ -211,6 +213,12 @@ export function SettingsDialog({
 			icon: ShieldCheck,
 		},
 		{
+			id: "archived" as const,
+			label: "Archived conversations",
+			description: "Manage archived conversations and their subagents.",
+			icon: Archive,
+		},
+		{
 			id: "browser" as const,
 			label: "Browser",
 			description: "Import browser data and manage history and downloads.",
@@ -326,6 +334,15 @@ export function SettingsDialog({
 									sessionCwd={sessionCwd}
 									sessionId={sessionId}
 									sessionTitle={sessionTitle}
+								/>
+							) : null}
+							{page === "archived" ? (
+								<ArchivedConversationsPanel
+									api={api}
+									serverReady={serverReady}
+									onDeleteSession={onDeleteSession}
+									onDeleteAgent={onDeleteAgent}
+									onRestoreConversation={onRestoreConversation}
 								/>
 							) : null}
 							{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
