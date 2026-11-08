@@ -2,6 +2,7 @@ import { ClientRequestMethods, type ClientRpcRequest } from "@metis/app-protocol
 import type { ModelRegistry, ScheduleManager } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentCatalog } from "../src/agent-catalog.ts";
+import type { ArchivedConversationCatalog } from "../src/archived-conversations.ts";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "../src/dispatch/agent-types.ts";
 import { dispatchAgentsRequest, isAgentsRequest } from "../src/dispatch/agents.ts";
 import { dispatchHooksRequest, isHooksRequest } from "../src/dispatch/hooks.ts";
@@ -14,11 +15,13 @@ import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "../src/dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
 import { dispatchScheduleRequest, isScheduleRequest } from "../src/dispatch/schedule.ts";
+import { dispatchSessionsRequest, isSessionsRequest } from "../src/dispatch/sessions.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
 import { dispatchTurnsRequest, isTurnsRequest } from "../src/dispatch/turns.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
 import type { HooksService } from "../src/hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "../src/interactions.ts";
+import type { KnowledgeService } from "../src/knowledge.ts";
 import type { MemoryService } from "../src/memory-settings.ts";
 import type { ModelSettingsService } from "../src/model-settings.ts";
 import type { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
@@ -403,6 +406,68 @@ function scheduleContext() {
 	};
 }
 
+function sessionsContext() {
+	const runtime = {
+		getStatus: vi.fn(async (input: unknown) => ({ state: "idle", input })),
+		getGoal: vi.fn(async (input: unknown) => input),
+	};
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const catalog = {
+		list: vi.fn(() => ({ sessions: [], nextAfterSessionId: null })),
+		get: vi.fn(() => ref),
+	} as unknown as SessionCatalog;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+		has: vi.fn(() => true),
+		withOpenRuntime: vi.fn(async (_sessionId: string, run: (runtime: unknown) => Promise<unknown>) => ({
+			open: true,
+			result: await run(runtime),
+		})),
+		withSessionsQuiesced: vi.fn(async (_ids: readonly string[], run: () => Promise<unknown>) => await run()),
+		close: vi.fn(async () => undefined),
+		assertClosed: vi.fn(),
+	} as unknown as SessionRegistry;
+	const subscriptionHub = {
+		removeSession: vi.fn(),
+		publishSessionUpdated: vi.fn(),
+	} as unknown as SessionSubscriptions;
+	const interactions = {
+		assign: vi.fn(),
+		release: vi.fn(),
+		releaseSession: vi.fn(),
+	} as unknown as InteractionBroker;
+	const knowledge = { libraries: vi.fn(() => []) } as unknown as KnowledgeService;
+	const archivedConversations = {
+		list: vi.fn(async () => ({ sessions: [] })),
+	} as unknown as ArchivedConversationCatalog;
+	const scheduleManager = { markRunRead: vi.fn(async () => ({})) } as unknown as ScheduleManager;
+	const connectionSubscriptions = {
+		subscribe: vi.fn(async () => ({})),
+		unsubscribe: vi.fn(),
+	} as unknown as ConnectionSubscriptions;
+	return {
+		runtime,
+		registry,
+		context: {
+			catalog,
+			registry,
+			subscriptionHub,
+			interactions,
+			knowledge,
+			archivedConversations,
+			scheduleManager,
+			connectionSubscriptions,
+			interactionPeer: { request: vi.fn(async () => ({})) } as unknown as InteractionPeer,
+			allSessionRefs: () => [ref],
+			runtimeRef: () => ref,
+			hydrateScheduledSession: async () => ref,
+			assertMutableSession: vi.fn(),
+			allowRetainedScheduledDelete: async () => true,
+			...replayTracker(),
+		},
+	};
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -487,6 +552,12 @@ const DOMAINS = [
 		recognized: isScheduleRequest,
 		dispatch: dispatchScheduleRequest,
 		context: scheduleContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("session/"),
+		recognized: isSessionsRequest,
+		dispatch: dispatchSessionsRequest,
+		context: sessionsContext,
 	},
 	{
 		owns: (method: string) => method.startsWith("turn/"),
@@ -673,5 +744,13 @@ describe("dispatcher domain matrix", () => {
 		expect(schedule.scheduleManager.listRuns).toHaveBeenCalledWith("t1", {});
 		expect(schedule.scheduleManager.delete).toHaveBeenCalledWith("t1", { deleteSessions: false });
 		expect(schedule.context.mutations).toEqual(["schedule/delete"]);
+	});
+	it("reads session status and goals through the open runtime", async () => {
+		const sessions = sessionsContext();
+		await expect(
+			dispatchSessionsRequest(request("session/status", { sessionId: "s1" }), sessions.context),
+		).resolves.toEqual({ state: "idle", input: { sessionId: "s1" } });
+		await dispatchSessionsRequest(request("session/goal/get", { sessionId: "s1" }), sessions.context);
+		expect(sessions.registry.run).toHaveBeenCalledTimes(2);
 	});
 });
