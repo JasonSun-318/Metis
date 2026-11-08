@@ -208,21 +208,23 @@ test("the last-row elbow keeps its stroke after collapsing and reopening the bra
 });
 
 for (const theme of ["light", "dark"] as const) {
- test(`tree strokes have uniform brightness without overlapping segments in ${theme}`, async ({page}) => {
- await page.goto(url);
- await page.evaluate((value) => {document.documentElement.dataset.theme=value;}, theme);
- const scan = await scanTree(page, async () => undefined);
- // Each row composites the same 1px stroke over its own background, so Linux
- // software rendering can round one 8-bit channel by a level. A doubled stroke
- // moves far more: --border-strong is 30% alpha in light, so two stacked strokes
- // composite to roughly 51% — well beyond this envelope and the scanner's own
- // 8-level line/background separation.
- const STROKE_CHANNEL_TOLERANCE = 2;
- for (const row of scan.geometry.rows) {
- for (const offset of [2,5,9,12]) {
- const sample = pixel(scan.image, 0, Math.round(row.top + offset));
- expect(distance(sample, scan.line)).toBeLessThanOrEqual(STROKE_CHANNEL_TOLERANCE);
- }
- }
- });
+	test(`tree strokes have uniform brightness without overlapping segments in ${theme}`, async ({ page }) => {
+		await page.goto(url);
+		await page.evaluate((value) => {
+			document.documentElement.dataset.theme = value;
+		}, theme);
+		const scan = await scanTree(page, async () => undefined);
+		// Each row composites the same 1px stroke over its own background, so Linux
+		// software rendering can round one 8-bit channel by a level. A doubled stroke
+		// moves far more: --border-strong is 30% alpha in light, so two stacked strokes
+		// composite to roughly 51% — well beyond this envelope and the scanner's own
+		// 8-level line/background separation.
+		const STROKE_CHANNEL_TOLERANCE = 2;
+		for (const row of scan.geometry.rows) {
+			for (const offset of [2, 5, 9, 12]) {
+				const sample = pixel(scan.image, 0, Math.round(row.top + offset));
+				expect(distance(sample, scan.line)).toBeLessThanOrEqual(STROKE_CHANNEL_TOLERANCE);
+			}
+		}
+	});
 }

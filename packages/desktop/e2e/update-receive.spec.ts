@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	connectToApp,
@@ -14,14 +14,17 @@ import {
 	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
-const executable = process.env.METIS_UPDATE_E2E_APP ?? (existsSync(packagedExecutable()) ? packagedExecutable() : undefined);
+const executable =
+	process.env.METIS_UPDATE_E2E_APP ?? (existsSync(packagedExecutable()) ? packagedExecutable() : undefined);
 
 function isOlderThanCurrent(appPath?: string): boolean {
 	if (!appPath) return false;
 	if (process.platform === "darwin") {
 		const infoPlist = path.resolve(appPath, "../../Info.plist");
 		if (existsSync(infoPlist)) {
-			const res = spawnSync("/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", infoPlist], { encoding: "utf8" });
+			const res = spawnSync("/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", infoPlist], {
+				encoding: "utf8",
+			});
 			if (res.status === 0) {
 				const ver = res.stdout.trim();
 				return ver !== "" && ver < "0.0.5";
@@ -33,6 +36,7 @@ function isOlderThanCurrent(appPath?: string): boolean {
 
 const olderExecutable = process.env.METIS_UPDATE_OLDER_APP ?? (isOlderThanCurrent(executable) ? executable : undefined);
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged older build announces a published update", async ({}, testInfo) => {
 	test.skip(!olderExecutable, "Set METIS_UPDATE_OLDER_APP to an older packaged Metis executable (e.g. 0.0.4)");
 	test.setTimeout(90_000);
@@ -89,6 +93,7 @@ test("packaged older build announces a published update", async ({}, testInfo) =
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged build executes manual update check through real IPC", async ({}, testInfo) => {
 	test.skip(!executable, "Set METIS_UPDATE_E2E_APP to a packaged Metis executable or run npm run package first");
 	test.setTimeout(90_000);
@@ -222,6 +227,7 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 // offline result so CDN reachability cannot red every run. Set
 // METIS_UPDATE_ONLINE=1 in a release/nightly gate to require that the packaged
 // build actually reaches the published update service.
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged build reaches the published update service", async ({}, testInfo) => {
 	test.skip(process.env.METIS_UPDATE_ONLINE !== "1", "Set METIS_UPDATE_ONLINE=1 to require a live update check");
 	test.skip(!executable, "Set METIS_UPDATE_E2E_APP to a packaged Metis executable or run npm run package first");

@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
@@ -242,7 +242,10 @@ test("packaged projection client recovers across renderer and app-server restart
 		expect(rendererErrors, rendererErrors.join("\n")).toEqual([]);
 	} catch (error) {
 		const processState = `app pid=${app.pid ?? "none"} exit=${app.exitCode ?? "running"} signal=${app.signalCode ?? "none"} spawnError=${spawnError?.message ?? "none"}`;
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${requestCount}\n${processState}\nrenderer errors:\n${rendererErrors.join("\n") || "none"}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
 		);

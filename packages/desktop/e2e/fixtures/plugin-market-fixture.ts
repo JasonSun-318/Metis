@@ -2,9 +2,9 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import net from "node:net";
 import JSZip from "jszip";
 import { createMcpTestServer, type McpTestServer } from "../../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server in plugin market integration fixtures
 import { closeServer, listen } from "../packaged-app-harness.ts";
@@ -92,7 +92,11 @@ process.stdin.on("end", () => {
 `;
 }
 
-async function buildRepositoryZip(version: "A" | "B", httpMcpUrl: string, extraCatalogEntries: number): Promise<Buffer> {
+async function buildRepositoryZip(
+	version: "A" | "B",
+	httpMcpUrl: string,
+	extraCatalogEntries: number,
+): Promise<Buffer> {
 	const zip = new JSZip();
 	const root = "plugins-market-fixture";
 
@@ -140,9 +144,24 @@ async function buildRepositoryZip(version: "A" | "B", httpMcpUrl: string, extraC
 	};
 	for (let index = 0; index < extraCatalogEntries; index += 1) {
 		const name = `catalog-plugin-${String(index).padStart(3, "0")}`;
-		marketManifest.plugins.push({ name, description: `Catalog pagination fixture ${index}`, source: `./plugins/${name}` });
-		zip.file(`${root}/plugins/${name}/.claude-plugin/plugin.json`, JSON.stringify({ name, description: `Catalog pagination fixture ${index}`, version: "1.0.0", skills: "./skills" }));
-		zip.file(`${root}/plugins/${name}/skills/demo/SKILL.md`, `---\nname: ${name}\ndescription: Pagination fixture\n---\nLocal fixture only.\n`);
+		marketManifest.plugins.push({
+			name,
+			description: `Catalog pagination fixture ${index}`,
+			source: `./plugins/${name}`,
+		});
+		zip.file(
+			`${root}/plugins/${name}/.claude-plugin/plugin.json`,
+			JSON.stringify({
+				name,
+				description: `Catalog pagination fixture ${index}`,
+				version: "1.0.0",
+				skills: "./skills",
+			}),
+		);
+		zip.file(
+			`${root}/plugins/${name}/skills/demo/SKILL.md`,
+			`---\nname: ${name}\ndescription: Pagination fixture\n---\nLocal fixture only.\n`,
+		);
 	}
 	zip.file(`${root}/.claude-plugins/marketplace.json`, JSON.stringify(marketManifest, null, 2));
 	zip.file(`${root}/.claude-plugin/marketplace.json`, JSON.stringify(marketManifest, null, 2));
@@ -172,7 +191,7 @@ When asked about fixture suite, use the suite echo tool.
 	const mcpJson = {
 		"suite-echo-server": {
 			command: "node",
-			args: ["${CLAUDE_PLUGIN_ROOT}/mcp-server.cjs"],
+			args: [`\${CLAUDE_PLUGIN_ROOT}/mcp-server.cjs`],
 		},
 	};
 	zip.file(`${root}/plugins/fixture-suite/mcp.json`, JSON.stringify(mcpJson, null, 2));
@@ -206,7 +225,7 @@ When asked about fixture suite, use the suite echo tool.
 			{
 				"partial-echo-server": {
 					command: "node",
-					args: ["${CLAUDE_PLUGIN_ROOT}/mcp-server.cjs"],
+					args: [`\${CLAUDE_PLUGIN_ROOT}/mcp-server.cjs`],
 				},
 				"partial-unsupported-server": {
 					type: "sse",
@@ -384,7 +403,9 @@ export async function createPluginFixtureServer(extraCatalogEntries = 0): Promis
 	// 3. Build Fixture Repository Zip Archives for Commit A and B
 	const zipA = await buildRepositoryZip("A", mcpTestServer.url.toString(), extraCatalogEntries);
 	const zipB = await buildRepositoryZip("B", mcpTestServer.url.toString(), extraCatalogEntries);
-	const catalogJson = await (await JSZip.loadAsync(zipA)).file("plugins-market-fixture/.claude-plugin/marketplace.json")!.async("nodebuffer");
+	const catalogJson = await (await JSZip.loadAsync(zipA))
+		.file("plugins-market-fixture/.claude-plugin/marketplace.json")!
+		.async("nodebuffer");
 
 	let currentCommit = FIXTURE_COMMIT_A;
 	let shouldFailDownload = false;
@@ -478,7 +499,9 @@ export async function createPluginFixtureServer(extraCatalogEntries = 0): Promis
 		setCommit: (commit: string) => {
 			currentCommit = commit;
 		},
-		setRateLimited: (limited: boolean) => { rateLimited = limited; },
+		setRateLimited: (limited: boolean) => {
+			rateLimited = limited;
+		},
 		setFailDownload: (fail: boolean) => {
 			shouldFailDownload = fail;
 		},

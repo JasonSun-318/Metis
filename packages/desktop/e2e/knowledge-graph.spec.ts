@@ -93,7 +93,9 @@ test.afterAll(async () => {
 });
 
 for (const theme of ["dark", "light"]) {
-	test(`${theme} graph pointer focus has no frame while keyboard focus and navigation remain visible`, async ({ page }, info) => {
+	test(`${theme} graph pointer focus has no frame while keyboard focus and navigation remain visible`, async ({
+		page,
+	}, info) => {
 		const errors = errorsOn(page);
 		await page.setViewportSize({ width: 520, height: 700 });
 		await page.goto(`${url}/?theme=${theme}`);
@@ -168,7 +170,12 @@ test("wheel zoom and background pan remain responsive and refresh preserves posi
 	expect(canvas).not.toBeNull();
 	const start = { x: canvas!.x + 20, y: canvas!.y + 20 };
 	// Anchor the gesture to the canvas, independently of toolbar and icon metrics.
-	expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains("knowledge-graph-canvas"), start)).toBe(true);
+	expect(
+		await page.evaluate(
+			({ x, y }) => document.elementFromPoint(x, y)?.classList.contains("knowledge-graph-canvas"),
+			start,
+		),
+	).toBe(true);
 	await page.mouse.move(start.x, start.y);
 	await page.mouse.down();
 	await page.mouse.move(start.x + 45, start.y + 50, { steps: 8 });
@@ -195,10 +202,17 @@ for (const theme of ["dark", "light"]) {
 			await page.setViewportSize(size);
 			await page.getByRole("button", { name: "Reset view" }).click();
 			let camera = "";
-			await expect.poll(async () => {
-				const next = await page.locator(".knowledge-graph-viewport").getAttribute("transform");
-				const stable = next === camera; camera = next ?? ""; return stable;
-			}, { intervals: [250] }).toBe(true);
+			await expect
+				.poll(
+					async () => {
+						const next = await page.locator(".knowledge-graph-viewport").getAttribute("transform");
+						const stable = next === camera;
+						camera = next ?? "";
+						return stable;
+					},
+					{ intervals: [250] },
+				)
+				.toBe(true);
 			const bounds = await page.locator(".knowledge-graph-canvas").boundingBox();
 			if (!bounds) throw new Error("Missing canvas");
 			const viewBox = await page.locator(".knowledge-graph-canvas").getAttribute("viewBox");

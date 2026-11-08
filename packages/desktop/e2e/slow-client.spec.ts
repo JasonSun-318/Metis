@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
@@ -96,20 +96,22 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		}
 		providerRequests += 1;
 		await streamGate;
-		const chunks = Array.from({ length: 10_000 }, (_, index) =>
-			`data: ${JSON.stringify({
-				id: "chatcmpl-slow-client",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "slow-client-model",
-				choices: [
-					{
-						index: 0,
-						delta: { ...(index === 0 ? { role: "assistant" } : {}), content: "x" },
-						finish_reason: null,
-					},
-				],
-			})}\n\n`,
+		const chunks = Array.from(
+			{ length: 10_000 },
+			(_, index) =>
+				`data: ${JSON.stringify({
+					id: "chatcmpl-slow-client",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "slow-client-model",
+					choices: [
+						{
+							index: 0,
+							delta: { ...(index === 0 ? { role: "assistant" } : {}), content: "x" },
+							finish_reason: null,
+						},
+					],
+				})}\n\n`,
 		).join("");
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		response.end(
@@ -132,9 +134,7 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
 						apiKey: "test-key",
 						api: "openai-completions",
-						models: [
-							{ id: "slow-client-model", name: "Slow client", contextWindow: 32_000, maxTokens: 16_000 },
-						],
+						models: [{ id: "slow-client-model", name: "Slow client", contextWindow: 32_000, maxTokens: 16_000 }],
 					},
 				},
 			}),
@@ -175,21 +175,24 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		await waitForServerReady(page);
 		phase = "restore Chat session";
 		sessionId = await createAndRestoreChatSession(page, projectDir);
-		backgroundSessionId = await page.evaluate(async ({ activeSessionId, cwd }) => {
-			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-			await api.renameSession({
-				sessionId: activeSessionId,
-				requestId: crypto.randomUUID(),
-				name: "Streaming fixture",
-			});
-			const created = await api.createSession({
-				requestId: crypto.randomUUID(),
-				mode: "chat",
-				cwd,
-				name: "Background fixture",
-			});
-			return created.session.sessionId;
-		}, { activeSessionId: sessionId, cwd: projectDir });
+		backgroundSessionId = await page.evaluate(
+			async ({ activeSessionId, cwd }) => {
+				const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+				await api.renameSession({
+					sessionId: activeSessionId,
+					requestId: crypto.randomUUID(),
+					name: "Streaming fixture",
+				});
+				const created = await api.createSession({
+					requestId: crypto.randomUUID(),
+					mode: "chat",
+					cwd,
+					name: "Background fixture",
+				});
+				return created.session.sessionId;
+			},
+			{ activeSessionId: sessionId, cwd: projectDir },
+		);
 		await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
 		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
 		const sidebar = page.locator(".session-sidebar");
@@ -215,7 +218,9 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		await page.screenshot({ path: path.join(qaDir, "running-session.png"), animations: "disabled" });
 		phase = "switch away from running session";
 		await sidebar.getByRole("button", { name: "Background fixture", exact: true }).click();
-		await page.locator(`[data-active-session-id="${backgroundSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await page
+			.locator(`[data-active-session-id="${backgroundSessionId}"]`)
+			.waitFor({ state: "visible", timeout: 15_000 });
 		phase = "block renderer";
 		const blockingStarted = page.waitForEvent("console", {
 			predicate: (message) => message.text() === "slow-client-blocking",
@@ -261,7 +266,11 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 			.poll(
 				() =>
 					transcriptScroll.evaluate((element) => {
-						const scroll = element as unknown as { scrollHeight: number; scrollTop: number; clientHeight: number };
+						const scroll = element as unknown as {
+							scrollHeight: number;
+							scrollTop: number;
+							clientHeight: number;
+						};
 						return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
 					}),
 				{ timeout: 30_000 },
@@ -273,11 +282,21 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const body = page
-			? await diagnosticWithin(page.locator("body").innerText().catch(() => "renderer unavailable"), "renderer diagnostic timed out")
+			? await diagnosticWithin(
+					page
+						.locator("body")
+						.innerText()
+						.catch(() => "renderer unavailable"),
+					"renderer diagnostic timed out",
+				)
 			: "renderer unavailable";
-		const projectionLength = page && sessionId
-			? await diagnosticWithin(projectedTextLength(page, sessionId).catch(() => -2), -4)
-			: -3;
+		const projectionLength =
+			page && sessionId
+				? await diagnosticWithin(
+						projectedTextLength(page, sessionId).catch(() => -2),
+						-4,
+					)
+				: -3;
 		throw new Error(
 			`phase=${phase}\n${error instanceof Error ? error.message : String(error)}\nserver projection length=${projectionLength}\nrenderer body:\n${body}\n${diagnostics.join("").slice(-8_000)}`,
 		);

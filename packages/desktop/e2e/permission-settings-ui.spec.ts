@@ -44,6 +44,7 @@ function lastToolResult(app: Awaited<ReturnType<typeof launchPermissionApp>>): s
 	return latestToolResult(payload.messages ?? []);
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("global commands remain compact and preserve non-command permissions", async ({}, testInfo) => {
 	const app = await launchPermissionApp({ preset: "auto", tools });
 	try {
@@ -57,20 +58,28 @@ test("global commands remain compact and preserve non-command permissions", asyn
 		await expect(page.locator(".permission-rules-row")).toHaveCount(29);
 		const region = page.locator(".permission-rules-scroll");
 		const dimensions = await region.evaluate((element) => ({
-			height: element.clientHeight, content: element.scrollHeight,
+			height: element.clientHeight,
+			content: element.scrollHeight,
 		}));
 		expect(dimensions.height).toBeLessThanOrEqual(360);
 		expect(dimensions.content).toBeGreaterThan(dimensions.height);
 		const toolbar = page.locator(".permission-rules-toolbar");
 		const toolbarBefore = await toolbar.boundingBox();
-		await region.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+		await region.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
 		expect((await toolbar.boundingBox())!.y).toBeCloseTo(toolbarBefore!.y, 0);
 		await expect(toolbar.getByRole("button", { name: "Add command" })).toBeVisible();
-		await region.evaluate((element) => { element.scrollTop = 0; });
-		const addSize = await toolbar.getByRole("button", {name: "Add command"}).boundingBox();
+		await region.evaluate((element) => {
+			element.scrollTop = 0;
+		});
+		const addSize = await toolbar.getByRole("button", { name: "Add command" }).boundingBox();
 		expect(addSize!.height).toBe(28);
-		const inputStyle = await toolbar.locator("input").evaluate((element) => ({border: getComputedStyle(element).borderWidth, height: element.getBoundingClientRect().height}));
-		expect(inputStyle).toEqual({border: "0px", height: 28});
+		const inputStyle = await toolbar.locator("input").evaluate((element) => ({
+			border: getComputedStyle(element).borderWidth,
+			height: element.getBoundingClientRect().height,
+		}));
+		expect(inputStyle).toEqual({ border: "0px", height: 28 });
 
 		const catRow = page.locator('.permission-rules-row[data-rule-id="C04"]');
 		await expect(catRow).toContainText("cat");
@@ -172,19 +181,20 @@ test("global commands remain compact and preserve non-command permissions", asyn
 		await expect(manager).toContainText("No remembered permissions yet.");
 		expect((await manager.boundingBox())!.width).toBeLessThanOrEqual(640);
 		await expect(manager.locator("select, .remembered-permissions-toolbar, footer")).toHaveCount(0);
-		await page.screenshot({path: testInfo.outputPath("remembered-empty.png")});
+		await page.screenshot({ path: testInfo.outputPath("remembered-empty.png") });
 		await page.keyboard.press("Escape");
 		await expect(manager).toHaveCount(0);
 		await expect(manage).toBeFocused();
 		await expect(page.getByRole("button", { name: "Run sandbox self-test", exact: true })).toBeVisible();
 		const sandbox = page.locator(".sandbox-environment-card");
 		const before = await sandbox.boundingBox();
-		await sandbox.getByRole("button", {name: "Run sandbox self-test"}).click();
-		await expect(sandbox.locator(".sandbox-environment-status")).toHaveText("Available", {timeout: 30000});
+		await sandbox.getByRole("button", { name: "Run sandbox self-test" }).click();
+		await expect(sandbox.locator(".sandbox-environment-status")).toHaveText("Available", { timeout: 30000 });
 		expect((await sandbox.boundingBox())!.height).toBeCloseTo(before!.height, 0);
-		await expect(sandbox.locator("details, ul, .sandbox-environment-notice, .sandbox-environment-issue")).toHaveCount(0);
-		await page.screenshot({path: testInfo.outputPath("sandbox-available.png")});
-
+		await expect(sandbox.locator("details, ul, .sandbox-environment-notice, .sandbox-environment-issue")).toHaveCount(
+			0,
+		);
+		await page.screenshot({ path: testInfo.outputPath("sandbox-available.png") });
 	} finally {
 		await app.close();
 	}
@@ -202,7 +212,7 @@ test("visible rules control an already-open session and deletion survives restar
 		await expect(app.approval).toHaveCount(0);
 		await app.page.locator(".execution-chain > summary").click();
 		await expect(app.page.getByRole("button", { name: "View rule", exact: true })).toHaveCount(0);
-        await app.openSettings("Permissions");
+		await app.openSettings("Permissions");
 		await expect(app.page.getByRole("heading", { name: "Permissions", exact: true })).toBeVisible();
 		const row = app.page.locator('.permission-rules-row[data-rule-id="C03"]');
 		await expect(row).toBeVisible();
@@ -259,28 +269,34 @@ for (const preset of ["ask", "auto"] as const) {
 	});
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("Chinese permission controls remain compact in both themes", async ({}, testInfo) => {
 	const app = await launchPermissionApp({ preset: "auto", tools, locale: "zh-CN" });
 	try {
 		const page = app.page;
 		await page.setViewportSize({ width: 1440, height: 1100 });
 		await page.locator(".account-menu-trigger").click();
-		await page.getByRole("menuitem", {name: "设置", exact: true}).click();
+		await page.getByRole("menuitem", { name: "设置", exact: true }).click();
 		const navigation = page.locator(".settings-navigation");
-		await navigation.getByRole("button", {name: "权限", exact: true}).click();
-		await expect(page.getByRole("button", {name: "添加命令", exact: true})).toBeVisible();
+		await navigation.getByRole("button", { name: "权限", exact: true }).click();
+		await expect(page.getByRole("button", { name: "添加命令", exact: true })).toBeVisible();
 		await page.locator(".sandbox-environment-card button").click();
-		await expect(page.locator(".sandbox-environment-status")).toHaveText("可用", {timeout: 30000});
-		await page.screenshot({path: testInfo.outputPath("permissions-zh-dark.png")});
-		await navigation.getByRole("button", {name: "通用", exact: true}).click();
-		await page.getByRole("group", {name: "外观", exact: true}).getByRole("button", {name: "浅色", exact: true}).click();
+		await expect(page.locator(".sandbox-environment-status")).toHaveText("可用", { timeout: 30000 });
+		await page.screenshot({ path: testInfo.outputPath("permissions-zh-dark.png") });
+		await navigation.getByRole("button", { name: "通用", exact: true }).click();
+		await page
+			.getByRole("group", { name: "外观", exact: true })
+			.getByRole("button", { name: "浅色", exact: true })
+			.click();
 		await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-		await navigation.getByRole("button", {name: "权限", exact: true}).click();
-		await page.screenshot({path: testInfo.outputPath("permissions-zh-light.png")});
-		await page.getByRole("button", {name: "管理记住的授权", exact: true}).click();
-		const dialog = page.getByRole("dialog", {name: "记住的授权", exact: true});
+		await navigation.getByRole("button", { name: "权限", exact: true }).click();
+		await page.screenshot({ path: testInfo.outputPath("permissions-zh-light.png") });
+		await page.getByRole("button", { name: "管理记住的授权", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "记住的授权", exact: true });
 		await expect(dialog).toBeVisible();
 		expect((await dialog.boundingBox())!.width).toBe(640);
-		await page.screenshot({path: testInfo.outputPath("remembered-zh-light.png")});
-	} finally { await app.close(); }
+		await page.screenshot({ path: testInfo.outputPath("remembered-zh-light.png") });
+	} finally {
+		await app.close();
+	}
 });

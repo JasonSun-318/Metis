@@ -5,7 +5,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	connectToApp,
 	desktopRoot,
@@ -22,13 +22,15 @@ const ALPHA_ID = "81000000-0000-4000-8000-0000000000a1";
 const BETA_ID = "81000000-0000-4000-8000-0000000000b1";
 
 function writeChunk(response: ServerResponse, delta: object, finishReason: string | null = null): void {
-	response.write(`data: ${JSON.stringify({
-		id: "stream-reply",
-		object: "chat.completion.chunk",
-		created: 1,
-		model: "stream-model",
-		choices: [{ index: 0, delta, finish_reason: finishReason }],
-	})}\n\n`);
+	response.write(
+		`data: ${JSON.stringify({
+			id: "stream-reply",
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "stream-model",
+			choices: [{ index: 0, delta, finish_reason: finishReason }],
+		})}\n\n`,
+	);
 }
 
 async function launchWorkspace(): Promise<{
@@ -44,10 +46,16 @@ async function launchWorkspace(): Promise<{
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full" }): {
+			create(
+				cwd: string,
+				sessionDir: string,
+				options: { id: string; mode: "chat" | "code"; permissionPreset: "full" },
+			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -69,11 +77,11 @@ async function launchWorkspace(): Promise<{
 		{ id: ALPHA_ID, name: "Stream A" },
 		{ id: BETA_ID, name: "Stream B" },
 	]) {
-		const manager = sessions.SessionManager.create(
-			projectDir,
-			sessions.getDefaultSessionDir(projectDir, agentDir),
-			{ id: seed.id, mode: "chat", permissionPreset: "full" },
-		);
+		const manager = sessions.SessionManager.create(projectDir, sessions.getDefaultSessionDir(projectDir, agentDir), {
+			id: seed.id,
+			mode: "chat",
+			permissionPreset: "full",
+		});
 		manager.appendSessionInfo(seed.name);
 		manager.close();
 	}
@@ -90,13 +98,15 @@ async function launchWorkspace(): Promise<{
 		const transcript = JSON.stringify(payload.messages ?? []);
 		if (transcript.includes("conversation title generator")) {
 			response.writeHead(200, { "content-type": "text/event-stream" });
-			response.end(`data: ${JSON.stringify({
-				id: "stream-title",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "stream-model",
-				choices: [{ index: 0, delta: { role: "assistant", content: "Stream title" }, finish_reason: "stop" }],
-			})}\n\ndata: [DONE]\n\n`);
+			response.end(
+				`data: ${JSON.stringify({
+					id: "stream-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "stream-model",
+					choices: [{ index: 0, delta: { role: "assistant", content: "Stream title" }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		response.writeHead(200, { "content-type": "text/event-stream" });
@@ -166,7 +176,10 @@ test("a session keeps streaming intact across background switches and reopen", a
 		}
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
 		);

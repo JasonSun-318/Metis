@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	appServerPid,
 	connectToApp,
@@ -87,19 +87,23 @@ function sseToolCall(id: string, name: string, args: Record<string, unknown>): s
 		object: "chat.completion.chunk",
 		created: 1,
 		model: "plan-model",
-		choices: [{
-			index: 0,
-			delta: {
-				role: "assistant",
-				tool_calls: [{
-					index: 0,
-					id,
-					type: "function",
-					function: { name, arguments: JSON.stringify(args) },
-				}],
+		choices: [
+			{
+				index: 0,
+				delta: {
+					role: "assistant",
+					tool_calls: [
+						{
+							index: 0,
+							id,
+							type: "function",
+							function: { name, arguments: JSON.stringify(args) },
+						},
+					],
+				},
+				finish_reason: "tool_calls",
 			},
-			finish_reason: "tool_calls",
-		}],
+		],
 	})}\n\ndata: [DONE]\n\n`;
 }
 
@@ -122,7 +126,11 @@ async function createCodeSession(page: Page, sessionId: string): Promise<void> {
 
 interface CodingFixtures {
 	readonly SessionManager: {
-		create(cwd: string, sessionDir: string, options: { id: string; mode: "code"; permissionPreset: "full" }): {
+		create(
+			cwd: string,
+			sessionDir: string,
+			options: { id: string; mode: "code"; permissionPreset: "full" },
+		): {
 			appendSessionInfo(name: string): void;
 			getSessionFile(): string | undefined;
 			close(): void;
@@ -134,20 +142,39 @@ interface CodingFixtures {
 
 async function loadCodingFixtures(): Promise<CodingFixtures> {
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	return {
-		SessionManager: (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)).SessionManager as CodingFixtures["SessionManager"],
-		ProjectTrustStore: (await importEsm(pathToFileURL(path.join(coreRoot, "trust-manager.js")).href)).ProjectTrustStore as CodingFixtures["ProjectTrustStore"],
-		getDefaultSessionDir: (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)).getDefaultSessionDir as CodingFixtures["getDefaultSessionDir"],
+		SessionManager: (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href))
+			.SessionManager as CodingFixtures["SessionManager"],
+		ProjectTrustStore: (await importEsm(pathToFileURL(path.join(coreRoot, "trust-manager.js")).href))
+			.ProjectTrustStore as CodingFixtures["ProjectTrustStore"],
+		getDefaultSessionDir: (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href))
+			.getDefaultSessionDir as CodingFixtures["getDefaultSessionDir"],
 	};
 }
 
 async function expectCompletedPlanTurn(page: Page, sessionFile: string, toolCallId: string): Promise<void> {
-	await expect.poll(async () => {
-		const entries = (await readFile(sessionFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-		const result = entries.find((entry) => entry.type === "message" && entry.message?.role === "toolResult" && entry.message.toolCallId === toolCallId);
-		return entries.reverse().find((entry) => entry.type === "runtime_turn" && entry.turnId === result?.turnId)?.state;
-	}, { timeout: 20_000 }).toBe("completed");
+	await expect
+		.poll(
+			async () => {
+				const entries = (await readFile(sessionFile, "utf8"))
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				const result = entries.find(
+					(entry) =>
+						entry.type === "message" &&
+						entry.message?.role === "toolResult" &&
+						entry.message.toolCallId === toolCallId,
+				);
+				return entries.reverse().find((entry) => entry.type === "runtime_turn" && entry.turnId === result?.turnId)
+					?.state;
+			},
+			{ timeout: 20_000 },
+		)
+		.toBe("completed");
 	await expect(page.getByText("Task stopped", { exact: true })).toHaveCount(0);
 }
 
@@ -167,11 +194,11 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 
 	const sessionId = "91000000-0000-4000-8000-000000000001";
-	const manager = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "code", permissionPreset: "full" },
-	);
+	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
+		id: sessionId,
+		mode: "code",
+		permissionPreset: "full",
+	});
 	manager.appendSessionInfo("Plan mode fixture");
 	const sessionFile = manager.getSessionFile()!;
 	manager.close();
@@ -197,9 +224,14 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		providerPayloads.push(payload);
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		if (lastUserText(payload).includes("Try submit_plan outside Plan mode")) {
-			response.end(hasToolResult(payload, "call-submit-outside-plan")
-				? sseText("Please enable Plan mode before submitting a plan.")
-				: sseToolCall("call-submit-outside-plan", "submit_plan", { title: "Not in Plan", markdown: "# This must not create a proposal" }));
+			response.end(
+				hasToolResult(payload, "call-submit-outside-plan")
+					? sseText("Please enable Plan mode before submitting a plan.")
+					: sseToolCall("call-submit-outside-plan", "submit_plan", {
+							title: "Not in Plan",
+							markdown: "# This must not create a proposal",
+						}),
+			);
 			return;
 		}
 		if (providerStage === "awaiting-bash-1" && hasToolResult(payload, bash1Id)) {
@@ -207,7 +239,8 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			response.end(
 				sseToolCall("call-submit-plan-1", "submit_plan", {
 					title: "Add safe greeting",
-					markdown: "# Goal\n\nAdd a greeting without changing unrelated files.\n\n## Steps\n\n1. Add the greeting.\n2. Run the focused test.",
+					markdown:
+						"# Goal\n\nAdd a greeting without changing unrelated files.\n\n## Steps\n\n1. Add the greeting.\n2. Run the focused test.",
 				}),
 			);
 			return;
@@ -221,30 +254,35 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 			response.end(
 				sseToolCall("call-submit-plan-2", "submit_plan", {
 					title: "Add friendly greeting",
-					markdown: "# Goal\n\nAdd a friendlier greeting.\n\n## Steps\n\n1. Update the greeting.\n2. Run the focused test.",
+					markdown:
+						"# Goal\n\nAdd a friendlier greeting.\n\n## Steps\n\n1. Update the greeting.\n2. Run the focused test.",
 				}),
 			);
 			return;
 		}
 		if (
 			plan2Submitted &&
-			(lastUserText(payload).includes("Draft another safe plan") || hasUserText(payload, "Draft another safe plan")) &&
+			(lastUserText(payload).includes("Draft another safe plan") ||
+				hasUserText(payload, "Draft another safe plan")) &&
 			!transcript(payload).includes("call-submit-plan-3") &&
 			!lastUserText(payload).includes("Use a friendlier greeting")
 		) {
 			response.end(
 				sseToolCall("call-submit-plan-3", "submit_plan", {
 					title: "Draft another safe plan",
-					markdown: "# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
+					markdown:
+						"# Goal\n\nDraft another safe plan.\n\n## Steps\n\n1. Keep the greeting safe.\n2. Run the focused test.",
 				}),
 			);
 			return;
 		}
 		const latestUserText = lastUserText(payload);
 		if (isPlanExecutionTurn(payload)) {
-			response.end(hasToolResult(payload, "call-execute-plan")
-				? sseText("Execution received the accepted revision.")
-				: sseToolCall("call-execute-plan", "write", { path: acceptedWritePath, content: "Hello, friend!\n" }));
+			response.end(
+				hasToolResult(payload, "call-execute-plan")
+					? sseText("Execution received the accepted revision.")
+					: sseToolCall("call-execute-plan", "write", { path: acceptedWritePath, content: "Hello, friend!\n" }),
+			);
 			return;
 		}
 		if (latestUserText.includes("Create a safe plan") && providerStage === "idle" && !plan2Submitted) {
@@ -257,19 +295,27 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	});
 	const providerPort = await listen(fakeProvider);
 	await Promise.all([
-		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
-			plan: {
-				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-				apiKey: "plan-key",
-				api: "openai-completions",
-				models: [{ id: "plan-model", name: "Plan Model", contextWindow: 32_000, maxTokens: 1_024 }],
-			},
-		} })),
-		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
-			defaultProvider: "plan",
-			defaultModel: "plan-model",
-			retry: { enabled: false },
-		})),
+		writeFile(
+			path.join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					plan: {
+						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+						apiKey: "plan-key",
+						api: "openai-completions",
+						models: [{ id: "plan-model", name: "Plan Model", contextWindow: 32_000, maxTokens: 1_024 }],
+					},
+				},
+			}),
+		),
+		writeFile(
+			path.join(agentDir, "settings.json"),
+			JSON.stringify({
+				defaultProvider: "plan",
+				defaultModel: "plan-model",
+				retry: { enabled: false },
+			}),
+		),
 	]);
 
 	const debuggingPort = await reservePort();
@@ -306,7 +352,9 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect(page.locator(".plan-card")).toHaveCount(0);
 		const defaultTools = toolNames(providerPayloads[0]!);
 		expect(defaultTools).toContain("submit_plan");
-		const feedbackPayload = providerPayloads.find((payload) => transcript(payload).includes("You are not in Plan mode"));
+		const feedbackPayload = providerPayloads.find((payload) =>
+			transcript(payload).includes("You are not in Plan mode"),
+		);
 		expect(feedbackPayload).toBeDefined();
 		expect(transcript(feedbackPayload!)).toContain("call-submit-outside-plan");
 		expect(transcript(feedbackPayload!)).toContain('"name":"submit_plan"');
@@ -314,9 +362,9 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		phase = "entering plan mode";
 		await enterPlanMode(page);
 		const exitPlanMode = page.getByRole("button", { name: "Exit Plan mode", exact: true });
-		const leadingClasses = await page.locator(".composer-leading > *").evaluateAll((elements) =>
-			elements.slice(0, 3).map((element) => element.className),
-		);
+		const leadingClasses = await page
+			.locator(".composer-leading > *")
+			.evaluateAll((elements) => elements.slice(0, 3).map((element) => element.className));
 		expect(leadingClasses[0]).toContain("composer-add");
 		expect(leadingClasses[1]).toContain("permission-selector");
 		expect(leadingClasses[2]).toContain("collaboration-mode-control");
@@ -338,7 +386,9 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		expect(existsSync(planWritePath)).toBe(false);
 		await expectCompletedPlanTurn(page, sessionFile, "call-submit-plan-1");
 
-		const explorationPayload = providerPayloads.find((payload) => lastUserText(payload).includes("Create a safe plan"))!;
+		const explorationPayload = providerPayloads.find((payload) =>
+			lastUserText(payload).includes("Create a safe plan"),
+		)!;
 		const explorationTools = toolNames(explorationPayload);
 		expect(explorationTools).toEqual(expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]));
 		expect(explorationTools).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
@@ -388,15 +438,23 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await page.locator('[data-plan-action="start"]').last().click();
 		await expect(exitPlanMode).toHaveCount(0);
 		let executionPayload: ProviderPayload | undefined;
-		await expect.poll(() => {
-			executionPayload = providerPayloads
-				.slice(requestsBeforeStart)
-				.find((payload) => {
-					const tools = toolNames(payload);
-					return tools.includes("write") && tools.includes("set_tasks") && tools.includes("submit_plan") && isPlanExecutionTurn(payload);
-				});
-			return executionPayload !== undefined;
-		}, { timeout: 60_000 }).toBe(true);
+		await expect
+			.poll(
+				() => {
+					executionPayload = providerPayloads.slice(requestsBeforeStart).find((payload) => {
+						const tools = toolNames(payload);
+						return (
+							tools.includes("write") &&
+							tools.includes("set_tasks") &&
+							tools.includes("submit_plan") &&
+							isPlanExecutionTurn(payload)
+						);
+					});
+					return executionPayload !== undefined;
+				},
+				{ timeout: 60_000 },
+			)
+			.toBe(true);
 		expect([...toolNames(executionPayload!)].sort()).toEqual([...defaultTools].sort());
 		expect(transcript(executionPayload!)).toMatch(/friendlier greeting/i);
 		expect(transcript(executionPayload!)).not.toContain("call-submit-plan-1");
@@ -438,7 +496,10 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		expect(providerPayloads.length).toBe(requestsBeforeCancel);
 		await expect(page.locator(".plan-card").last()).toContainText("Cancelled");
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}`,
 		);

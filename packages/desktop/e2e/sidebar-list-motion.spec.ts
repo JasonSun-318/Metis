@@ -506,13 +506,16 @@ test("content updates preserve entering header and exiting remnant opacity anima
 					animation = header
 						?.getAnimations()
 						.find((effect) =>
-							(effect.effect as KeyframeEffect).getKeyframes().some((keyframe) => keyframe.opacity !== undefined),
+							(effect.effect as KeyframeEffect)
+								.getKeyframes()
+								.some((keyframe) => keyframe.opacity !== undefined),
 						);
 					if (animation && animation.startTime !== null) break;
 					await new Promise(requestAnimationFrame);
 				}
 				if (!header) throw new Error("Expected a real entering header or exiting remnant");
-				if (!animation || animation.startTime === null) throw new Error("Expected a real running opacity animation");
+				if (!animation || animation.startTime === null)
+					throw new Error("Expected a real running opacity animation");
 				// Pause and seek the real animation so a slow frame cannot finish it
 				// between the content update and the continuity assertions. This is
 				// coupled to Web Animations: a JS-driven replacement would ignore

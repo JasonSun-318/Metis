@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron, type ElectronApplication } from "@playwright/test";
@@ -67,7 +67,12 @@ export async function launchSourceBrowser() {
 	}
 }
 
-export function callSourceBrowser(app: ElectronApplication, name: string, args: Record<string, unknown>, actorId?: string) {
+export function callSourceBrowser(
+	app: ElectronApplication,
+	name: string,
+	args: Record<string, unknown>,
+	actorId?: string,
+) {
 	return app.evaluate(
 		async (_electron, input) => {
 			const api: SourceBrowserApi = await globalThis.metisBrowserSourceReady;

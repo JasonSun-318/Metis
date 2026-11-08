@@ -2,12 +2,15 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { launchPermissionApp, type LaunchPermissionAppOptions, type PermissionAppDirs } from "./fixtures/permission-app.ts";
+import {
+	type LaunchPermissionAppOptions,
+	launchPermissionApp,
+	type PermissionAppDirs,
+} from "./fixtures/permission-app.ts";
 import type { PermissionToolCall } from "./fixtures/permission-provider.ts";
 
 test.describe.configure({ timeout: 180_000 });
 
-const APPROVAL = ".permission-approval-panel";
 const REDACTED_SECRET = "super-secret-token";
 
 function toolFor(marker: string, dirs: PermissionAppDirs): PermissionToolCall | undefined {
@@ -22,10 +25,16 @@ function toolFor(marker: string, dirs: PermissionAppDirs): PermissionToolCall | 
 	const generatedDir = path.join(dirs.projectDir, "generated");
 	const bareRepo = path.join(dirs.tempRoot, "origin.git");
 	const cases: Array<readonly [string, PermissionToolCall]> = [
-		["case-review-inline", { name: "bash", arguments: { command: "bash <<'SCRIPT'\nprintf 'inline-reviewed' > inline.txt\nSCRIPT" } }],
+		[
+			"case-review-inline",
+			{ name: "bash", arguments: { command: "bash <<'SCRIPT'\nprintf 'inline-reviewed' > inline.txt\nSCRIPT" } },
+		],
 		["case-review-shellwrite", { name: "bash", arguments: { command: "printf 'shell-reviewed' > shell.txt" } }],
 		["case-auto-high-incomplete", { name: "bash", arguments: { command: "touch $OUTPUT" } }],
-		["case-remember-changed", { name: "write", arguments: { path: path.join(dirs.projectDir, "other.txt"), content: "changed" } }],
+		[
+			"case-remember-changed",
+			{ name: "write", arguments: { path: path.join(dirs.projectDir, "other.txt"), content: "changed" } },
+		],
 		["case-ask-write", { name: "write", arguments: { path: workspaceFile, content: "ask-once" } }],
 		["case-auto-write", { name: "write", arguments: { path: autoFile, content: "auto-ok" } }],
 		["case-auto-read", { name: "read", arguments: { path: path.join(dirs.projectDir, "README.md") } }],
@@ -35,14 +44,14 @@ function toolFor(marker: string, dirs: PermissionAppDirs): PermissionToolCall | 
 		["case-auto-medium", { name: "write", arguments: { path: outsideFile, content: "outside-write" } }],
 		["case-review-allow", { name: "bash", arguments: { command: `cat ${JSON.stringify(outsideFile)}` } }],
 		["case-gitpush", { name: "bash", arguments: { command: `git push ${JSON.stringify(bareRepo)} main` } }],
-		["case-headless", { name: "bash", arguments: { command: `printf unattended >> ${JSON.stringify(outsideFile)}` } }],
+		[
+			"case-headless",
+			{ name: "bash", arguments: { command: `printf unattended >> ${JSON.stringify(outsideFile)}` } },
+		],
 		["case-adversary-repo", { name: "write", arguments: { path: workspaceFile, content: "from-repo" } }],
 		["case-root-delete", { name: "bash", arguments: { command: `rm -rf ${JSON.stringify(generatedDir)}` } }],
 		["case-protected", { name: "write", arguments: { path: gitHead, content: "tamper" } }],
-		[
-			"case-secret-args",
-			{ name: "write", arguments: { path: envFile, content: `TOKEN=${REDACTED_SECRET}` } },
-		],
+		["case-secret-args", { name: "write", arguments: { path: envFile, content: `TOKEN=${REDACTED_SECRET}` } }],
 		["case-session-b-safe", { name: "write", arguments: { path: autoFile, content: "session-b" } }],
 		["case-full-host", { name: "bash", arguments: { command: "pwd" } }],
 		["case-full-critical", { name: "read", arguments: { path: secretFile } }],
@@ -72,7 +81,11 @@ const reviewerSeed = (timeoutMs = 8_000) =>
 		enabled: true,
 	}) as const;
 
-for (const [preset, verdict] of [["ask", "deny"], ["auto", "deny"], ["auto", "allow"]] as const) {
+for (const [preset, verdict] of [
+	["ask", "deny"],
+	["auto", "deny"],
+	["auto", "allow"],
+] as const) {
 	test(`${preset} approvals survive managed work directory initialization (${verdict})`, async () => {
 		test.setTimeout(180_000);
 		const app = await launchPermissionApp({
@@ -106,9 +119,12 @@ for (const [preset, verdict] of [["ask", "deny"], ["auto", "deny"], ["auto", "al
 				if (marker === "case-workdir") expect(result.content).toMatch(/[\\/]document-work[\\/]/u);
 				if (marker === "case-office-version") expect(result.content).toMatch(/\d+\.\d+/);
 				if (marker === "case-pwd-after-workdir") {
-					const shellProjectDir = process.platform === "win32"
-						? app.projectDir.replace(/\\/gu, "/").replace(/^([A-Za-z]):/u, (_match, drive: string) => `/${drive.toLowerCase()}`)
-						: app.projectDir;
+					const shellProjectDir =
+						process.platform === "win32"
+							? app.projectDir
+									.replace(/\\/gu, "/")
+									.replace(/^([A-Za-z]):/u, (_match, drive: string) => `/${drive.toLowerCase()}`)
+							: app.projectDir;
 					expect(result.content).toContain(shellProjectDir);
 				}
 			}
@@ -123,7 +139,9 @@ for (const [preset, verdict] of [["ask", "deny"], ["auto", "deny"], ["auto", "al
 test("Ask workspace write denies, allows once, then prompts again", async () => {
 	const app = await launchPermissionApp({ preset: "ask", tools: commonTools });
 	try {
-		await expect(app.page.getByRole("button", { name: "Select permissions, current Ask", exact: true })).toBeVisible();
+		await expect(
+			app.page.getByRole("button", { name: "Select permissions, current Ask", exact: true }),
+		).toBeVisible();
 		await app.submit("case-auto-read");
 		await app.waitDone("case-auto-read");
 		await expect(app.approval).toHaveCount(0);
@@ -131,7 +149,9 @@ test("Ask workspace write denies, allows once, then prompts again", async () => 
 		await app.submit("case-ask-write-deny");
 		const panel = app.approval;
 		await expect(panel).toBeVisible();
-		await expect(panel.getByRole("heading", { name: "Allow Metis to perform the following action?", exact: true })).toBeVisible();
+		await expect(
+			panel.getByRole("heading", { name: "Allow Metis to perform the following action?", exact: true }),
+		).toBeVisible();
 		await expect(panel).toContainText("write");
 		await expect(panel).toContainText(path.join(app.projectDir, "ask.txt"));
 		// The simplified card shows no risk/model/sandbox commentary or detail dump.
@@ -161,8 +181,10 @@ test("Ask workspace write denies, allows once, then prompts again", async () => 
 test("Auto safe workspace read and write stay in the sandbox with zero reviewer calls", async () => {
 	const app = await launchPermissionApp({ preset: "auto", tools: commonTools });
 	try {
-		const auto = await app.page.evaluate(async (session) => {
-			const metis = (globalThis as unknown as { metis: { getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }> } }).metis;
+		const auto = await app.page.evaluate(async () => {
+			const metis = (
+				globalThis as unknown as { metis: { getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }> } }
+			).metis;
 			return metis.getPermissionAutoSettings();
 		}, app.sessionId);
 		expect(auto.reviewerEnabled).toBe(false);
@@ -188,7 +210,9 @@ test("Auto outside write with the reviewer off needs the user and never calls a 
 		await app.submit("case-auto-medium-denied");
 		const panel = app.approval;
 		await expect(panel).toBeVisible();
-		await expect(panel.getByRole("heading", { name: "Allow Metis to perform the following action?", exact: true })).toBeVisible();
+		await expect(
+			panel.getByRole("heading", { name: "Allow Metis to perform the following action?", exact: true }),
+		).toBeVisible();
 		await expect(panel).toContainText(app.outsideDir);
 		expect(app.provider.reviewCount).toBe(0);
 		// A scope-complete, non-critical outside action offers the persistent options in the dropdown.
@@ -240,7 +264,12 @@ test("Auto outside read with the independent reviewer enabled allows with one mo
 });
 
 test("Auto reviews ordinary writes and incomplete inline scripts before asking the user", async () => {
-	const app = await launchPermissionApp({ preset: "auto", tools: commonTools, decide: () => ({ decision: "allow" }), reviewer: reviewerSeed() });
+	const app = await launchPermissionApp({
+		preset: "auto",
+		tools: commonTools,
+		decide: () => ({ decision: "allow" }),
+		reviewer: reviewerSeed(),
+	});
 	try {
 		for (const [index, [marker, file, content]] of [
 			["case-auto-medium", path.join(app.outsideDir, "outside.txt"), "outside-write"],
@@ -253,7 +282,9 @@ test("Auto reviews ordinary writes and incomplete inline scripts before asking t
 			expect(app.provider.reviewCount).toBe(index + 1);
 			expect(await readFile(file!, "utf8")).toBe(content);
 		}
-	} finally { await app.close(); }
+	} finally {
+		await app.close();
+	}
 });
 
 test("Auto reviewer deny, malformed output, and timeout each fall back to the user once", async () => {
@@ -343,10 +374,14 @@ test("unattended scheduled actions that need review are denied with no side effe
 		const outsideFile = path.join(app.outsideDir, "outside.txt");
 		const taskId = await app.page.evaluate(
 			async ({ cwd }) => {
-				const metis = (globalThis as unknown as { metis: {
-					createSchedule(input: Record<string, unknown>): Promise<{ task: { id: string } }>;
-					runScheduleNow(input: Record<string, unknown>): Promise<unknown>;
-				} }).metis;
+				const metis = (
+					globalThis as unknown as {
+						metis: {
+							createSchedule(input: Record<string, unknown>): Promise<{ task: { id: string } }>;
+							runScheduleNow(input: Record<string, unknown>): Promise<unknown>;
+						};
+					}
+				).metis;
 				const created = await metis.createSchedule({
 					requestId: crypto.randomUUID(),
 					name: "Headless deny",
@@ -360,13 +395,21 @@ test("unattended scheduled actions that need review are denied with no side effe
 			},
 			{ cwd: app.projectDir },
 		);
-		await expect.poll(async () =>
-			app.page.evaluate(async (id) => {
-				const metis = (globalThis as unknown as { metis: { listScheduleRuns(input: Record<string, unknown>): Promise<{ runs: { status?: string }[] }> } }).metis;
-				const listed = await metis.listScheduleRuns({ taskId: id, limit: 5 });
-				return listed.runs[0]?.status ?? "pending";
-			}, taskId),
-		).not.toBe("running");
+		await expect
+			.poll(async () =>
+				app.page.evaluate(async (id) => {
+					const metis = (
+						globalThis as unknown as {
+							metis: {
+								listScheduleRuns(input: Record<string, unknown>): Promise<{ runs: { status?: string }[] }>;
+							};
+						}
+					).metis;
+					const listed = await metis.listScheduleRuns({ taskId: id, limit: 5 });
+					return listed.runs[0]?.status ?? "pending";
+				}, taskId),
+			)
+			.not.toBe("running");
 		await expect(app.approval).toHaveCount(0);
 		expect(app.provider.reviewCount).toBe(0);
 		expect(await readFile(outsideFile, "utf8")).toBe("outside");
@@ -454,7 +497,9 @@ test("keyboard, live review status, and a second session stay isolated", async (
 		await expect(panel).toHaveAttribute("role", "dialog");
 		await panel.focus();
 		await app.page.keyboard.press("Escape");
-		await expect(app.page.getByRole("button", { name: "Select permissions, current Auto", exact: true })).toBeVisible();
+		await expect(
+			app.page.getByRole("button", { name: "Select permissions, current Auto", exact: true }),
+		).toBeVisible();
 	} finally {
 		await app.close();
 	}
@@ -463,9 +508,13 @@ test("keyboard, live review status, and a second session stay isolated", async (
 test("Full host actions skip Metis approvals entirely", async () => {
 	const app = await launchPermissionApp({ preset: "full", tools: commonTools, seed: withGeneratedDir });
 	try {
-		await expect(app.page.getByRole("button", { name: "Select permissions, current Full", exact: true })).toBeVisible();
+		await expect(
+			app.page.getByRole("button", { name: "Select permissions, current Full", exact: true }),
+		).toBeVisible();
 		await app.page.getByRole("button", { name: "Select permissions, current Full", exact: true }).click();
-		await expect(app.page.getByRole("menuitemradio", { name: /^Full\b/u })).toContainText("without a sandbox or tool approvals");
+		await expect(app.page.getByRole("menuitemradio", { name: /^Full\b/u })).toContainText(
+			"without a sandbox or tool approvals",
+		);
 		await app.page.keyboard.press("Escape");
 
 		await app.submit("case-full-host");

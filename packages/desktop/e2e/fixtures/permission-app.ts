@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page } from "@playwright/test";
 import {
 	connectToApp,
 	desktopRoot,
@@ -266,6 +266,18 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 	let localeApplied = options.locale === undefined;
 	let pendingCompletion: { marker: string; count: number } | undefined;
 
+	const setActiveSession = async (id: string) => {
+		await page!.evaluate(
+			({ session, mode }) => {
+				localStorage.setItem("metis.active-conversation.v1", session);
+				localStorage.setItem("metis.work-mode.v1", mode);
+			},
+			{ session: id, mode: options.mode ?? "chat" },
+		);
+		await page!.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
+		await page!.locator(`[data-active-session-id="${id}"]`).waitFor({ state: "visible" });
+	};
+
 	const open = async () => {
 		const debuggingPort = await reservePort();
 		app = launchPackagedDesktop({
@@ -300,16 +312,12 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 						cwd,
 						...(permissionPreset ? { permissionPreset } : {}),
 					});
-					localStorage.setItem(`metis.activeSessionId.${mode}`, result.session.sessionId);
 					return result.session.sessionId;
 				},
 				{ cwd: dirs.projectDir, permissionPreset: options.preset, mode: options.mode ?? "chat" },
 			);
-			await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
-			if (options.mode === "code") await page.getByRole("button", { name: "Code", exact: true }).click();
-			await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
+			await setActiveSession(sessionId);
 		} else {
-			if (options.mode === "code") await page.getByRole("button", { name: "Code", exact: true }).click();
 			await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 		}
 	};
@@ -322,13 +330,6 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 		await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 		throw error;
 	}
-
-	const setActiveSession = async (id: string) => {
-		await page!.evaluate(({ session, mode }) => localStorage.setItem(`metis.activeSessionId.${mode}`, session), { session: id, mode: options.mode ?? "chat" });
-		await page!.reload({ waitUntil: "domcontentloaded", timeout: 15_000 });
-		if (options.mode === "code") await page!.getByRole("button", { name: "Code", exact: true }).click();
-		await page!.locator(`[data-active-session-id="${id}"]`).waitFor({ state: "visible" });
-	};
 
 	const launched: LaunchedPermissionApp = {
 		get page() {
@@ -360,7 +361,9 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			await expect(input).toHaveAttribute("contenteditable", "true");
 			await input.click();
 			await input.fill(marker);
-			await page!.getByRole("button", { name: options.locale === "zh-CN" ? "发送消息" : "Send message", exact: true }).click();
+			await page!
+				.getByRole("button", { name: options.locale === "zh-CN" ? "发送消息" : "Send message", exact: true })
+				.click();
 		},
 		async waitDone(marker: string) {
 			const completion = page!.getByText(`done:${marker}`, { exact: true });
@@ -373,7 +376,11 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			await page!.evaluate(
 				async ({ session, permissionPreset }) => {
 					const metis = (globalThis as unknown as { metis: DesktopMetisApi }).metis;
-					await metis.setPermissionPreset({ sessionId: session, requestId: crypto.randomUUID(), permissionPreset });
+					await metis.setPermissionPreset({
+						sessionId: session,
+						requestId: crypto.randomUUID(),
+						permissionPreset,
+					});
 				},
 				{ session: sessionId, permissionPreset: next.toLowerCase() as "ask" | "auto" | "full" },
 			);
@@ -382,13 +389,10 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			).toBeVisible();
 		},
 		async setReviewerEnabled(enabled: boolean) {
-			await page!.evaluate(
-				async (value) => {
-					const metis = (globalThis as unknown as { metis: DesktopMetisApi }).metis;
-					await metis.updatePermissionAutoSettings({ requestId: crypto.randomUUID(), reviewerEnabled: value });
-				},
-				enabled,
-			);
+			await page!.evaluate(async (value) => {
+				const metis = (globalThis as unknown as { metis: DesktopMetisApi }).metis;
+				await metis.updatePermissionAutoSettings({ requestId: crypto.randomUUID(), reviewerEnabled: value });
+			}, enabled);
 		},
 		async relaunch() {
 			if (app && browser) await quitPackagedApp({ app, browser });
@@ -407,7 +411,6 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 						cwd,
 						...(permissionPreset ? { permissionPreset } : {}),
 					});
-					localStorage.setItem(`metis.activeSessionId.${mode}`, result.session.sessionId);
 					return result.session.sessionId;
 				},
 				{ cwd: dirs.projectDir, permissionPreset: preset, mode: options.mode ?? "chat" },
@@ -423,7 +426,10 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 			await page!.getByRole("menuitem", { name: "Settings", exact: true }).click();
 			await expect(page!.getByRole("dialog", { name: "Settings", exact: true })).toBeVisible();
 			if (pageName) {
-				await page!.getByRole("navigation", { name: "Settings pages" }).getByRole("button", { name: pageName, exact: true }).click();
+				await page!
+					.getByRole("navigation", { name: "Settings pages" })
+					.getByRole("button", { name: pageName, exact: true })
+					.click();
 				await expect(page!.getByRole("heading", { name: pageName, exact: true })).toBeVisible();
 			}
 		},

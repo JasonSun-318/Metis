@@ -94,8 +94,7 @@ async function selectQuote(page: Page, target: Locator, text: string) {
 	await target.click({ position: { x: 4, y: 4 } });
 	const rect = await target.evaluate((element, text) => {
 		const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-		let node: Text | null;
-		while ((node = walker.nextNode() as Text | null)) {
+		for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
 			const start = node.data.indexOf(text);
 			if (start < 0) continue;
 			const range = document.createRange();
@@ -488,12 +487,16 @@ test("reference-sized index keeps one real tick per turn and precise keyboard qu
 });
 
 for (const mode of ["chat", "code"] as const) {
-	test(`${mode} shows a compact return-to-bottom control while reading an active conversation`, async ({ page }, info) => {
+	test(`${mode} shows a compact return-to-bottom control while reading an active conversation`, async ({
+		page,
+	}, info) => {
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await page.goto(`${url}?mode=${mode}&running=1&count=30`);
 		const scroll = page.locator(".transcript-scroll");
 		const button = page.getByRole("button", { name: "滚动到底部", exact: true });
-		await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThan(2);
+		await expect
+			.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+			.toBeLessThan(2);
 		await expect(button).toBeHidden();
 		await scroll.hover();
 		await page.mouse.wheel(0, -700);
@@ -502,15 +505,23 @@ for (const mode of ["chat", "code"] as const) {
 		await expect(button).toHaveCSS("position", "absolute");
 		await page.screenshot({ path: info.outputPath(`${mode}-return-to-bottom.png`) });
 		await page.getByRole("button", { name: "Append reply" }).click();
-		await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeGreaterThan(100);
+		await expect
+			.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+			.toBeGreaterThan(100);
 		await button.click();
-		await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThan(2);
+		await expect
+			.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+			.toBeLessThan(2);
 		await expect(button).toBeHidden();
 		await page.getByRole("button", { name: "Append reply" }).click();
-		await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThan(2);
+		await expect
+			.poll(() => scroll.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+			.toBeLessThan(2);
 	});
 
-	test(`accepted ${mode} messages return to the latest item without taking later scroll ownership`, async ({ page }) => {
+	test(`accepted ${mode} messages return to the latest item without taking later scroll ownership`, async ({
+		page,
+	}) => {
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await page.goto(`${url}?mode=${mode}&quotes=1&submission=1&count=30`);
 		const rail = page.getByRole("slider", { name: "会话导航" });
@@ -533,8 +544,13 @@ for (const mode of ["chat", "code"] as const) {
 		await editor.press("Enter");
 		const sent = page.locator('[data-user-message^="sent-"]');
 		await expect(sent).toBeInViewport();
-		await expect.poll(() => scroll.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
-		await expect(sent.locator(mode === "chat" ? ".message-user" : ".code-turn-user-bubble")).toHaveCSS("animation-duration", "0.26s");
+		await expect
+			.poll(() => scroll.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight))
+			.toBeLessThan(2);
+		await expect(sent.locator(mode === "chat" ? ".message-user" : ".code-turn-user-bubble")).toHaveCSS(
+			"animation-duration",
+			"0.26s",
+		);
 		await rail.focus();
 		await rail.press("Home");
 		await rail.press("Enter");
@@ -543,7 +559,9 @@ for (const mode of ["chat", "code"] as const) {
 		await expect(page.locator('[data-user-message="user-0"]')).toBeInViewport();
 	});
 
-	test(`${mode} plan and task cards have compact measured spacing and full header hit areas`, async ({ page }, info) => {
+	test(`${mode} plan and task cards have compact measured spacing and full header hit areas`, async ({
+		page,
+	}, info) => {
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.goto(`${url}?mode=${mode}&cards=1&count=0`);
 		const tasks = page.locator(".conversation-tasks");
@@ -562,28 +580,33 @@ for (const mode of ["chat", "code"] as const) {
 		await heading.press("Enter");
 		await expect(heading).toHaveAttribute("aria-expanded", "true");
 		await heading.press("Space");
-		await expect.poll(() => tasks.locator(".transcript-drawer").evaluate((element) => element.getBoundingClientRect().height)).toBeLessThan(1);
+		await expect
+			.poll(() => tasks.locator(".transcript-drawer").evaluate((element) => element.getBoundingClientRect().height))
+			.toBeLessThan(1);
 		const plan = page.locator(".plan-card");
 		await expect(plan.locator(".markdown, summary")).toHaveCount(0);
 		await expect(page.locator("[data-transcript-turn]")).toHaveCount(2);
-		const measureGeometry = () => plan.evaluate((card) => {
-			const row = card.closest<HTMLElement>("[data-index]")!;
-			const previous = row.previousElementSibling!;
-			const next = row.nextElementSibling!;
-			const lastTool = previous.querySelector(".code-execution > summary, .execution-chain > summary")!;
-			const answer = next.querySelector("[data-transcript-answer]")!;
-			return {
-				before: card.getBoundingClientRect().top - lastTool.getBoundingClientRect().bottom,
-				after: answer.getBoundingClientRect().top - card.getBoundingClientRect().bottom,
-				width: card.getBoundingClientRect().width - previous.getBoundingClientRect().width,
-				height: card.getBoundingClientRect().height,
-			};
-		});
+		const measureGeometry = () =>
+			plan.evaluate((card) => {
+				const row = card.closest<HTMLElement>("[data-index]")!;
+				const previous = row.previousElementSibling!;
+				const next = row.nextElementSibling!;
+				const lastTool = previous.querySelector(".code-execution > summary, .execution-chain > summary")!;
+				const answer = next.querySelector("[data-transcript-answer]")!;
+				return {
+					before: card.getBoundingClientRect().top - lastTool.getBoundingClientRect().bottom,
+					after: answer.getBoundingClientRect().top - card.getBoundingClientRect().bottom,
+					width: card.getBoundingClientRect().width - previous.getBoundingClientRect().width,
+					height: card.getBoundingClientRect().height,
+				};
+			});
 		// The virtualizer repositions adjacent rows after the drawer closes.
-		await expect.poll(async () => {
-			const { before, after } = await measureGeometry();
-			return Math.max(Math.abs(before - 12), Math.abs(after - 12));
-		}).toBeLessThanOrEqual(1);
+		await expect
+			.poll(async () => {
+				const { before, after } = await measureGeometry();
+				return Math.max(Math.abs(before - 12), Math.abs(after - 12));
+			})
+			.toBeLessThanOrEqual(1);
 		const geometry = await measureGeometry();
 		expect(Math.abs(geometry.before - 12)).toBeLessThanOrEqual(1);
 		expect(Math.abs(geometry.after - 12)).toBeLessThanOrEqual(1);
@@ -591,18 +614,25 @@ for (const mode of ["chat", "code"] as const) {
 		expect(geometry.height).toBeLessThan(130);
 		const actions = plan.locator(".plan-card-actions button");
 		await expect(actions).toHaveText(["取消计划", "修改计划", "开始执行"]);
-		expect(await actions.nth(2).evaluate((button) => getComputedStyle(button).backgroundColor)).not.toBe(await actions.nth(0).evaluate((button) => getComputedStyle(button).backgroundColor));
+		expect(await actions.nth(2).evaluate((button) => getComputedStyle(button).backgroundColor)).not.toBe(
+			await actions.nth(0).evaluate((button) => getComputedStyle(button).backgroundColor),
+		);
 		await page.screenshot({ path: info.outputPath(`compact-plan-${mode}.png`) });
 		const execution = page.locator(".code-execution, .execution-chain");
 		await execution.locator(":scope > summary").click();
-		await expect.poll(async () => {
-			const cardBounds = (await plan.boundingBox())!;
-			const toolBounds = (await execution.boundingBox())!;
-			return Math.abs(cardBounds.y - toolBounds.y - toolBounds.height - 12);
-		}).toBeLessThanOrEqual(1);
+		await expect
+			.poll(async () => {
+				const cardBounds = (await plan.boundingBox())!;
+				const toolBounds = (await execution.boundingBox())!;
+				return Math.abs(cardBounds.y - toolBounds.y - toolBounds.height - 12);
+			})
+			.toBeLessThanOrEqual(1);
 		await execution.locator(":scope > summary").click();
 		await page.setViewportSize({ width: 420, height: 800 });
-		await page.evaluate(() => { document.documentElement.dataset.theme = "light"; document.documentElement.dataset.motion = "reduced"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.theme = "light";
+			document.documentElement.dataset.motion = "reduced";
+		});
 		await expect(plan.locator('[data-plan-action="start"]')).toBeInViewport();
 		await expect(plan.locator(".plan-card-title")).toHaveCSS("color", "rgb(37, 35, 32)");
 		expect(await plan.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -610,11 +640,13 @@ for (const mode of ["chat", "code"] as const) {
 		await heading.press("Enter");
 		await expect(heading).toHaveAttribute("aria-expanded", "true");
 		await expect(tasks.locator("li")).toBeVisible();
-		await expect.poll(async () => {
-			const cardBounds = (await plan.boundingBox())!;
-			const summaryBounds = (await execution.locator(":scope > summary").boundingBox())!;
-			return Math.abs(cardBounds.y - summaryBounds.y - summaryBounds.height - 12);
-		}).toBeLessThanOrEqual(1);
+		await expect
+			.poll(async () => {
+				const cardBounds = (await plan.boundingBox())!;
+				const summaryBounds = (await execution.locator(":scope > summary").boundingBox())!;
+				return Math.abs(cardBounds.y - summaryBounds.y - summaryBounds.height - 12);
+			})
+			.toBeLessThanOrEqual(1);
 		await page.screenshot({ path: info.outputPath(`compact-plan-${mode}-narrow-light.png`) });
 	});
 }

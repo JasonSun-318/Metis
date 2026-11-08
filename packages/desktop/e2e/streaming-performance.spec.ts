@@ -5,7 +5,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	connectToApp,
 	desktopRoot,
@@ -27,13 +27,15 @@ const DELTA_COUNT = 400;
 test.use({ trace: { mode: "retain-on-failure", snapshots: false, screenshots: false } });
 
 function writeChunk(response: ServerResponse, delta: object, finishReason: string | null = null): void {
-	response.write(`data: ${JSON.stringify({
-		id: "stream-reply",
-		object: "chat.completion.chunk",
-		created: 1,
-		model: "stream-model",
-		choices: [{ index: 0, delta, finish_reason: finishReason }],
-	})}\n\n`);
+	response.write(
+		`data: ${JSON.stringify({
+			id: "stream-reply",
+			object: "chat.completion.chunk",
+			created: 1,
+			model: "stream-model",
+			choices: [{ index: 0, delta, finish_reason: finishReason }],
+		})}\n\n`,
+	);
 }
 
 async function launchWorkspace(): Promise<{
@@ -49,10 +51,16 @@ async function launchWorkspace(): Promise<{
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full" }): {
+			create(
+				cwd: string,
+				sessionDir: string,
+				options: { id: string; mode: "chat" | "code"; permissionPreset: "full" },
+			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -74,11 +82,11 @@ async function launchWorkspace(): Promise<{
 		{ id: ALPHA_ID, name: "Perf Alpha" },
 		{ id: BETA_ID, name: "Perf Beta" },
 	]) {
-		const manager = sessions.SessionManager.create(
-			projectDir,
-			sessions.getDefaultSessionDir(projectDir, agentDir),
-			{ id: seed.id, mode: "chat", permissionPreset: "full" },
-		);
+		const manager = sessions.SessionManager.create(projectDir, sessions.getDefaultSessionDir(projectDir, agentDir), {
+			id: seed.id,
+			mode: "chat",
+			permissionPreset: "full",
+		});
 		manager.appendSessionInfo(seed.name);
 		manager.close();
 	}
@@ -95,13 +103,15 @@ async function launchWorkspace(): Promise<{
 		const transcript = JSON.stringify(payload.messages ?? []);
 		if (transcript.includes("conversation title generator")) {
 			response.writeHead(200, { "content-type": "text/event-stream" });
-			response.end(`data: ${JSON.stringify({
-				id: "stream-title",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "stream-model",
-				choices: [{ index: 0, delta: { role: "assistant", content: "Stream title" }, finish_reason: "stop" }],
-			})}\n\ndata: [DONE]\n\n`);
+			response.end(
+				`data: ${JSON.stringify({
+					id: "stream-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "stream-model",
+					choices: [{ index: 0, delta: { role: "assistant", content: "Stream title" }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		response.writeHead(200, { "content-type": "text/event-stream" });
@@ -186,7 +196,8 @@ test("two visible sessions stream concurrently without long tasks", async () => 
 		// Split Alpha's chat tab while both streams are still running; the
 		// gesture focuses that pane so Alpha becomes the projected session and
 		// Beta keeps streaming in the background pane.
-		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Perf Alpha", exact: true }) })
+		await page
+			.locator(".tool-tab", { has: page.getByRole("tab", { name: "Perf Alpha", exact: true }) })
 			.click({ button: "right" });
 		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: "Split right", exact: true }).click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
@@ -201,10 +212,19 @@ test("two visible sessions stream concurrently without long tasks", async () => 
 		// Read completion directly: retrying text assertions builds accessibility
 		// snapshots while the streams are still growing, distorting the timing.
 		for (const panel of [alphaPanel, betaPanel]) {
-			await expect.poll(() => panel.locator(".transcript-scroll").evaluate((element, lastWord) => {
-				const text = element.textContent ?? "";
-				return text.includes(lastWord) && text.includes("stream-end");
-			}, `w${DELTA_COUNT - 1}`), { timeout: 30_000 }).toBe(true);
+			await expect
+				.poll(
+					() =>
+						panel.locator(".transcript-scroll").evaluate(
+							(element, lastWord) => {
+								const text = element.textContent ?? "";
+								return text.includes(lastWord) && text.includes("stream-end");
+							},
+							`w${DELTA_COUNT - 1}`,
+						),
+					{ timeout: 30_000 },
+				)
+				.toBe(true);
 		}
 
 		const measurement = await page.evaluate(async (mark) => {
@@ -214,7 +234,9 @@ test("two visible sessions stream concurrently without long tasks", async () => 
 				__longtaskObserver: PerformanceObserver;
 			};
 			const entries = state.__longtasks;
-			entries.push(...state.__longtaskObserver.takeRecords().map(({ startTime, duration }) => ({ startTime, duration })));
+			entries.push(
+				...state.__longtaskObserver.takeRecords().map(({ startTime, duration }) => ({ startTime, duration })),
+			);
 			state.__longtaskObserver.disconnect();
 			const baseline = entries.filter((entry) => entry.startTime < mark);
 			const streaming = entries.filter((entry) => entry.startTime >= mark);
@@ -241,7 +263,10 @@ test("two visible sessions stream concurrently without long tasks", async () => 
 		}
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
 		);

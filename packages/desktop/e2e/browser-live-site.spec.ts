@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import type { BrowserAction, BrowserObservation } from "@metis/app-protocol";
 import { expect, test } from "@playwright/test";
 import {
+	type BrowserScriptInstruction,
 	closeBrowserAgentApp,
 	createBrowserAgentEnvironment,
 	createBrowserAgentFixture,
@@ -9,14 +10,14 @@ import {
 	launchBrowserAgentApp,
 	observationInput,
 	parseToolJson,
+	type RunningBrowserAgentApp,
 	removeBrowserAgentEnvironment,
 	sendFixturePrompt,
-	type BrowserScriptInstruction,
-	type RunningBrowserAgentApp,
 } from "./browser-agent-fixture.ts";
 
 // Explicit opt-in: the public site's availability and UI are outside our control.
 for (const site of ["GitHub", "Wikipedia"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`packaged Metis controls ${site}'s live interface`, async ({}, testInfo) => {
 		test.skip(process.env.METIS_BROWSER_LIVE_TEST !== "1", "Requires the packaged app and internet access");
 		test.setTimeout(180_000);

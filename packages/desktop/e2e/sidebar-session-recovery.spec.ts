@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
 import { launchPermissionApp } from "./fixtures/permission-app.ts";
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged Code sidebar reports incompatible sessions without agent retry rows or source changes", async ({}, info) => {
 	test.setTimeout(90_000);
 	let futureFile = "";

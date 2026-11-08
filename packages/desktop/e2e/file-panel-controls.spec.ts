@@ -9,10 +9,10 @@ import { build } from "esbuild";
 declare global {
 	interface Window {
 		__filePanelFixture: {
-		setVisible(value: boolean): void;
-		setMounted(value: boolean): void;
-		setWidth(value: number): void;
-		calls: { clipboard: string[]; opens: string[]; saves: number; mutations: string[]; errors: string[] };
+			setVisible(value: boolean): void;
+			setMounted(value: boolean): void;
+			setWidth(value: number): void;
+			calls: { clipboard: string[]; opens: string[]; saves: number; mutations: string[]; errors: string[] };
 		};
 	}
 }

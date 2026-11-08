@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	connectToApp,
 	packagedExecutable,
@@ -11,7 +11,7 @@ import {
 	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
-test("packaged agent types settings CRUD reaches the user registry", async ({}, testInfo) => {
+test("packaged agent types settings CRUD reaches the user registry", async () => {
 	test.setTimeout(90_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -63,8 +63,8 @@ test("packaged agent types settings CRUD reaches the user registry", async ({}, 
 		phase = "listing built-in roles read-only";
 		const pageBody = dialog.locator(".settings-page-scroll");
 		await expect(pageBody.getByText("Built-in agent types", { exact: true })).toBeVisible();
-		await expect(pageBody.locator(".agent-types-card[data-builtin=\"true\"]")).toHaveCount(4);
-		await expect(pageBody.locator(".agent-types-card[data-builtin=\"true\"]").first()).toContainText("default");
+		await expect(pageBody.locator('.agent-types-card[data-builtin="true"]')).toHaveCount(4);
+		await expect(pageBody.locator('.agent-types-card[data-builtin="true"]').first()).toContainText("default");
 		await expect(pageBody.getByRole("button", { name: "Delete default", exact: true })).toHaveCount(0);
 		await expect(pageBody.getByText("No custom agent types yet")).toBeVisible();
 
@@ -79,8 +79,8 @@ test("packaged agent types settings CRUD reaches the user registry", async ({}, 
 		await pageBody.getByLabel("System prompt").fill("Cite file paths for every claim.");
 		await pageBody.getByRole("button", { name: "Save", exact: true }).click();
 
-		await expect(pageBody.locator(".agent-types-card[data-builtin=\"false\"]")).toHaveCount(1);
-		await expect(pageBody.locator(".agent-types-card[data-builtin=\"false\"]").first()).toContainText("E2E Auditor");
+		await expect(pageBody.locator('.agent-types-card[data-builtin="false"]')).toHaveCount(1);
+		await expect(pageBody.locator('.agent-types-card[data-builtin="false"]').first()).toContainText("E2E Auditor");
 		const registryFile = path.join(agentDir, "agent-types.json");
 		const registry = JSON.parse(await readFile(registryFile, "utf8")) as {
 			version: number;
@@ -97,7 +97,9 @@ test("packaged agent types settings CRUD reaches the user registry", async ({}, 
 		await expect(descriptionInput).toHaveValue("Read-only auditor created by e2e.");
 		await descriptionInput.fill("Updated by e2e.");
 		await pageBody.getByRole("button", { name: "Save", exact: true }).click();
-		await expect(pageBody.locator(".agent-types-card[data-builtin=\"false\"]").first()).toContainText("Updated by e2e.");
+		await expect(pageBody.locator('.agent-types-card[data-builtin="false"]').first()).toContainText(
+			"Updated by e2e.",
+		);
 
 		phase = "deleting the custom agent type";
 		page.once("dialog", (dialog) => void dialog.accept());
@@ -108,7 +110,10 @@ test("packaged agent types settings CRUD reaches the user registry", async ({}, 
 
 		await dialog.locator(".settings-page-scroll").evaluate((element) => element.scrollTo(0, 0));
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
 		);

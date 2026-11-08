@@ -1,14 +1,14 @@
-import { type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	connectToApp,
 	launchPackagedDesktop,
 	listen,
+	type OpenAiChatRequest,
 	packagedExecutable,
 	readOpenAiChatRequest,
 	reservePort,
@@ -16,12 +16,12 @@ import {
 	stopProcess,
 	waitForServerReady,
 	writeOfflineProviderConfig,
-	type OpenAiChatRequest,
 } from "./packaged-app-harness.ts";
 
 test.describe("Desktop Declarative Hooks System", () => {
 	test.setTimeout(90_000);
 
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test("creates hook via UI, verifies persistence in hooks.json, and blocks prompt with notification", async ({}, testInfo) => {
 		const executable = packagedExecutable();
 		expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -94,7 +94,10 @@ test.describe("Desktop Declarative Hooks System", () => {
 				.poll(() =>
 					dialog.evaluate((node) => {
 						const style = getComputedStyle(node);
-						return style.opacity === "1" && (style.transform === "none" || style.transform === "matrix(1, 0, 0, 1, 0, 0)");
+						return (
+							style.opacity === "1" &&
+							(style.transform === "none" || style.transform === "matrix(1, 0, 0, 1, 0, 0)")
+						);
 					}),
 				)
 				.toBe(true);
@@ -104,25 +107,41 @@ test.describe("Desktop Declarative Hooks System", () => {
 				{ width: 720, height: 620, theme: "light" },
 			]) {
 				await page.setViewportSize({ width: scenario.width, height: scenario.height });
-				await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, scenario.theme);
+				await page.evaluate((theme) => {
+					document.documentElement.dataset.theme = theme;
+				}, scenario.theme);
 				for (const label of ["Event", "Run mode", "Protocol"]) {
-					if (label === "Protocol") await page.getByRole("button", { name: "Advanced options", exact: true }).click();
+					if (label === "Protocol")
+						await page.getByRole("button", { name: "Advanced options", exact: true }).click();
 					const trigger = page.getByRole("button", { name: label, exact: true });
 					await trigger.click();
 					const menu = page.getByRole("listbox", { name: label, exact: true });
 					await expect(menu).toBeVisible();
-					await expect.poll(async () => {
-						const triggerBox = (await trigger.boundingBox())!;
-						const menuBox = (await menu.boundingBox())!;
-						const dialogBox = (await dialog.boundingBox())!;
-						return {
-							aligned: Math.abs(menuBox.x - triggerBox.x) <= 2,
-							matchedWidth: Math.abs(menuBox.width - triggerBox.width) <= 2,
-							adjacent: Math.min(Math.abs(menuBox.y - triggerBox.y - triggerBox.height - 6), Math.abs(triggerBox.y - menuBox.y - menuBox.height - 6)) <= 2,
-							inside: menuBox.x >= dialogBox.x && menuBox.x + menuBox.width <= dialogBox.x + dialogBox.width + 1 && menuBox.y >= dialogBox.y && menuBox.y + menuBox.height <= dialogBox.y + dialogBox.height + 1,
-						};
-					}).toEqual({ aligned: true, matchedWidth: true, adjacent: true, inside: true });
-					await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`hook-${scenario.theme}-${label.replaceAll(" ", "-")}.png`) });
+					await expect
+						.poll(async () => {
+							const triggerBox = (await trigger.boundingBox())!;
+							const menuBox = (await menu.boundingBox())!;
+							const dialogBox = (await dialog.boundingBox())!;
+							return {
+								aligned: Math.abs(menuBox.x - triggerBox.x) <= 2,
+								matchedWidth: Math.abs(menuBox.width - triggerBox.width) <= 2,
+								adjacent:
+									Math.min(
+										Math.abs(menuBox.y - triggerBox.y - triggerBox.height - 6),
+										Math.abs(triggerBox.y - menuBox.y - menuBox.height - 6),
+									) <= 2,
+								inside:
+									menuBox.x >= dialogBox.x &&
+									menuBox.x + menuBox.width <= dialogBox.x + dialogBox.width + 1 &&
+									menuBox.y >= dialogBox.y &&
+									menuBox.y + menuBox.height <= dialogBox.y + dialogBox.height + 1,
+							};
+						})
+						.toEqual({ aligned: true, matchedWidth: true, adjacent: true, inside: true });
+					await page.screenshot({
+						animations: "disabled",
+						path: testInfo.outputPath(`hook-${scenario.theme}-${label.replaceAll(" ", "-")}.png`),
+					});
 					await page.keyboard.press("Escape");
 					await expect(menu).toHaveCount(0);
 					await expect(trigger).toBeFocused();
@@ -132,7 +151,9 @@ test.describe("Desktop Declarative Hooks System", () => {
 				await expect.poll(() => dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 			}
 			await page.setViewportSize({ width: 1200, height: 800 });
-			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+			await page.evaluate(() => {
+				document.documentElement.dataset.theme = "dark";
+			});
 
 			await page.getByLabel("Hook name", { exact: true }).fill("e2e-block-hook");
 
@@ -189,13 +210,18 @@ test.describe("Desktop Declarative Hooks System", () => {
 			// Capture screenshot as evidence
 			const screenshotPath = testInfo.outputPath("desktop-hook-blocked.png");
 			await page.screenshot({ animations: "disabled", path: screenshotPath });
-			const evidencePath = path.resolve(process.cwd(), "../../docs/plans/hook-acceptance-round-2-evidence/desktop-hook-blocked.png");
+			const evidencePath = path.resolve(
+				process.cwd(),
+				"../../docs/plans/hook-acceptance-round-2-evidence/desktop-hook-blocked.png",
+			);
 			if (existsSync(path.dirname(evidencePath))) {
 				await page.screenshot({ animations: "disabled", path: evidencePath });
 			}
 
 			// Check the localized form used by the reported screenshot as well.
-			await page.evaluate(() => { localStorage.setItem("metis.locale.v1", "zh-CN"); });
+			await page.evaluate(() => {
+				localStorage.setItem("metis.locale.v1", "zh-CN");
+			});
 			await page.reload();
 			await waitForServerReady(page);
 			await page.getByRole("button", { name: "自定义", exact: true }).click();
@@ -211,12 +237,19 @@ test.describe("Desktop Declarative Hooks System", () => {
 			await page.screenshot({ animations: "disabled", path: testInfo.outputPath("hook-zh-event.png") });
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
-			await writeFile("/tmp/debug-hooks-e2e.txt", JSON.stringify({
-				bodyHtml,
-				diagnostics,
-				hooksFileExists: existsSync(path.join(agentDir, "hooks.json")),
-				error: String(error),
-			}, null, 2));
+			await writeFile(
+				"/tmp/debug-hooks-e2e.txt",
+				JSON.stringify(
+					{
+						bodyHtml,
+						diagnostics,
+						hooksFileExists: existsSync(path.join(agentDir, "hooks.json")),
+						error: String(error),
+					},
+					null,
+					2,
+				),
+			);
 			throw error;
 		} finally {
 			await browser?.close();

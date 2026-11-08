@@ -10,16 +10,19 @@ test("packaged sandbox executes an actual shell command", async () => {
 	const marker = "case-perf-shell-command";
 	const app = await launchPermissionApp({
 		preset: "auto",
-		tools: (text) => text.includes(marker)
-			? { name: "bash", arguments: { command: "echo sandbox-command-ok" } }
-			: undefined,
+		tools: (text) =>
+			text.includes(marker) ? { name: "bash", arguments: { command: "echo sandbox-command-ok" } } : undefined,
 	});
 	try {
 		await app.submit(marker);
-		await expect.poll(async () =>
-			(await app.approval.count()) > 0 || (await app.page.getByText(`done:${marker}`, { exact: true }).count()) > 0,
-			{ timeout: 45_000 },
-		).toBe(true);
+		await expect
+			.poll(
+				async () =>
+					(await app.approval.count()) > 0 ||
+					(await app.page.getByText(`done:${marker}`, { exact: true }).count()) > 0,
+				{ timeout: 45_000 },
+			)
+			.toBe(true);
 		if (await app.approval.count()) await app.allowOnce();
 		await app.waitDone(marker);
 		const primary = app.provider.calls.filter((call) => call.kind === "primary").at(-1);
@@ -48,9 +51,11 @@ test("packaged sandbox health allows a workspace write and denies a protected-ro
 	});
 	try {
 		const health = await app.page.evaluate(async (session) => {
-			const metis = (globalThis as unknown as {
-				metis: { openSession(input: { sessionId: string }): Promise<{ sandboxHealth?: string }> };
-			}).metis;
+			const metis = (
+				globalThis as unknown as {
+					metis: { openSession(input: { sessionId: string }): Promise<{ sandboxHealth?: string }> };
+				}
+			).metis;
 			return (await metis.openSession({ sessionId: session })).sandboxHealth;
 		}, app.sessionId);
 		expect(health, `sandbox must be healthy, got ${health}`).toBe("healthy");
@@ -64,9 +69,11 @@ test("packaged sandbox health allows a workspace write and denies a protected-ro
 		// The sandbox-health diagnosis is read-only: the same probe must not install
 		// helpers or change settings, and reports through the dedicated method.
 		const report = await app.page.evaluate(async () => {
-			const metis = (globalThis as unknown as {
-				metis: { getPermissionSandboxHealth(): Promise<{ status: string; code: string }> };
-			}).metis;
+			const metis = (
+				globalThis as unknown as {
+					metis: { getPermissionSandboxHealth(): Promise<{ status: string; code: string }> };
+				}
+			).metis;
 			return metis.getPermissionSandboxHealth();
 		});
 		expect(report.status).toBe("healthy");

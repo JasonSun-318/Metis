@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
-import { chromium, expect, type Browser, type Page } from "@playwright/test";
+import { type Browser, chromium, expect, type Page } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 // CDP pages are not covered by Playwright's `expect.timeout`; mirror the values in
@@ -34,11 +34,7 @@ export function nativePackageArch(): string {
 			: process.platform === "win32"
 				? (process.env.PROCESSOR_ARCHITEW6432 ?? process.env.PROCESSOR_ARCHITECTURE ?? process.arch)
 				: spawnSync("uname", ["-m"], { encoding: "utf8" }).stdout.trim();
-	return /^(arm64|aarch64)$/i.test(machine)
-		? "arm64"
-		: /^(x64|x86_64|amd64)$/i.test(machine)
-			? "x64"
-			: process.arch;
+	return /^(arm64|aarch64)$/i.test(machine) ? "arm64" : /^(x64|x86_64|amd64)$/i.test(machine) ? "x64" : process.arch;
 }
 
 export function packagedExecutable(): string {
@@ -68,30 +64,34 @@ export interface PackagedDesktopLaunchOptions {
 }
 
 export function launchPackagedDesktop(options: PackagedDesktopLaunchOptions): ChildProcess {
-	const child = spawn(options.executable, [
-		`--remote-debugging-port=${options.debuggingPort}`,
-		`--user-data-dir=${options.userDataDir}`,
-		// The packaged directory's chrome-sandbox helper is not setuid root and
-		// Ubuntu runners restrict unprivileged user namespaces via AppArmor, so
-		// Chromium cannot sandbox itself here. The probe covers Metis's own
-		// permission sandbox, not Chromium's.
-		...(process.platform === "linux" ? ["--no-sandbox"] : []),
-		...(options.extraArguments ?? []),
-	], {
-		cwd: options.projectDir,
-		env: {
-			...process.env,
-			ALL_PROXY: "",
-			METIS_CODING_AGENT_DIR: options.agentDir,
-			HOME: options.homeDir,
-			HTTP_PROXY: "",
-			HTTPS_PROXY: "",
-			NO_PROXY: "127.0.0.1,localhost",
-			USERPROFILE: options.homeDir,
-			...(options.env ?? {}),
+	const child = spawn(
+		options.executable,
+		[
+			`--remote-debugging-port=${options.debuggingPort}`,
+			`--user-data-dir=${options.userDataDir}`,
+			// The packaged directory's chrome-sandbox helper is not setuid root and
+			// Ubuntu runners restrict unprivileged user namespaces via AppArmor, so
+			// Chromium cannot sandbox itself here. The probe covers Metis's own
+			// permission sandbox, not Chromium's.
+			...(process.platform === "linux" ? ["--no-sandbox"] : []),
+			...(options.extraArguments ?? []),
+		],
+		{
+			cwd: options.projectDir,
+			env: {
+				...process.env,
+				ALL_PROXY: "",
+				METIS_CODING_AGENT_DIR: options.agentDir,
+				HOME: options.homeDir,
+				HTTP_PROXY: "",
+				HTTPS_PROXY: "",
+				NO_PROXY: "127.0.0.1,localhost",
+				USERPROFILE: options.homeDir,
+				...(options.env ?? {}),
+			},
+			stdio: ["ignore", "pipe", "pipe"],
 		},
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+	);
 	child.stdout?.on("data", (chunk) => options.diagnostics.push(String(chunk)));
 	child.stderr?.on("data", (chunk) => options.diagnostics.push(String(chunk)));
 	return child;
@@ -127,19 +127,23 @@ export function respondWithToolCall(
 		object: "chat.completion.chunk",
 		created: 1,
 		model: "browser-agent-fixture",
-		choices: [{
-			index: 0,
-			delta: {
-				role: "assistant",
-				tool_calls: [{
-					index: 0,
-					id: input.callId,
-					type: "function",
-					function: { name: input.name, arguments: JSON.stringify(input.arguments) },
-				}],
+		choices: [
+			{
+				index: 0,
+				delta: {
+					role: "assistant",
+					tool_calls: [
+						{
+							index: 0,
+							id: input.callId,
+							type: "function",
+							function: { name: input.name, arguments: JSON.stringify(input.arguments) },
+						},
+					],
+				},
+				finish_reason: "tool_calls",
 			},
-			finish_reason: "tool_calls",
-		}],
+		],
 	});
 }
 
@@ -326,11 +330,7 @@ export async function waitForServerReady(page: Page): Promise<void> {
 		.toBe("ready");
 }
 
-export async function createAndRestoreChatSession(
-	page: Page,
-	cwd: string,
-	waitForActive = true,
-): Promise<string> {
+export async function createAndRestoreChatSession(page: Page, cwd: string, waitForActive = true): Promise<string> {
 	const created = await page.evaluate(async (projectCwd) => {
 		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 		const result = await api.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd: projectCwd });
@@ -349,7 +349,9 @@ export async function createAndRestoreChatSession(
 		}
 	}
 	if (waitForActive) {
-		await page.locator(`[data-active-session-id="${created.sessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await page
+			.locator(`[data-active-session-id="${created.sessionId}"]`)
+			.waitFor({ state: "visible", timeout: 15_000 });
 	}
 	return created.sessionId;
 }

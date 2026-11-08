@@ -18,6 +18,7 @@ function selections(messages: RecordedModelMessage[]) {
 		.filter((action) => action?.type === "select");
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("real model selects grouped native options and recovers a page reset", async ({}, testInfo) => {
 	const site = await createModelControlsSite();
 	try {
@@ -107,6 +108,7 @@ test("real model selects grouped native options and recovers a page reset", asyn
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("real model distinguishes nested iframe controls and edits after navigation", async ({}, testInfo) => {
 	const site = await createModelControlsSite();
 	try {

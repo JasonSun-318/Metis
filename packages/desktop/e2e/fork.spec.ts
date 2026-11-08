@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	connectToApp,
 	desktopRoot,
@@ -16,16 +16,23 @@ import {
 	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("forks a conversation from an assistant reply and switches to the forked session", async ({}, testInfo) => {
 	test.setTimeout(180_000);
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat"; permissionPreset: "full" }): {
+			create(
+				cwd: string,
+				sessionDir: string,
+				options: { id: string; mode: "chat"; permissionPreset: "full" },
+			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -64,39 +71,55 @@ test("forks a conversation from an assistant reply and switches to the forked se
 		const transcript = JSON.stringify(payload.messages ?? []);
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		if (transcript.includes("conversation title generator")) {
-			response.end(`data: ${JSON.stringify({
-				id: "fork-title",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "fork-model",
-				choices: [{ index: 0, delta: { role: "assistant", content: "Fork source title" }, finish_reason: "stop" }],
-			})}\n\ndata: [DONE]\n\n`);
+			response.end(
+				`data: ${JSON.stringify({
+					id: "fork-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "fork-model",
+					choices: [
+						{ index: 0, delta: { role: "assistant", content: "Fork source title" }, finish_reason: "stop" },
+					],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		replyIndex += 1;
-		response.end(`data: ${JSON.stringify({
-			id: `fork-reply-${replyIndex}`,
-			object: "chat.completion.chunk",
-			created: 1,
-			model: "fork-model",
-			choices: [{ index: 0, delta: { role: "assistant", content: `fork-reply-${replyIndex}` }, finish_reason: "stop" }],
-		})}\n\ndata: [DONE]\n\n`);
+		response.end(
+			`data: ${JSON.stringify({
+				id: `fork-reply-${replyIndex}`,
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "fork-model",
+				choices: [
+					{ index: 0, delta: { role: "assistant", content: `fork-reply-${replyIndex}` }, finish_reason: "stop" },
+				],
+			})}\n\ndata: [DONE]\n\n`,
+		);
 	});
 	const providerPort = await listen(fakeProvider);
 	await Promise.all([
-		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
-			fork: {
-				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-				apiKey: "fork-key",
-				api: "openai-completions",
-				models: [{ id: "fork-model", name: "Fork Model", contextWindow: 32_000, maxTokens: 1_024 }],
-			},
-		} })),
-		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
-			defaultProvider: "fork",
-			defaultModel: "fork-model",
-			retry: { enabled: false },
-		})),
+		writeFile(
+			path.join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					fork: {
+						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+						apiKey: "fork-key",
+						api: "openai-completions",
+						models: [{ id: "fork-model", name: "Fork Model", contextWindow: 32_000, maxTokens: 1_024 }],
+					},
+				},
+			}),
+		),
+		writeFile(
+			path.join(agentDir, "settings.json"),
+			JSON.stringify({
+				defaultProvider: "fork",
+				defaultModel: "fork-model",
+				retry: { enabled: false },
+			}),
+		),
 	]);
 
 	const debuggingPort = await reservePort();
@@ -144,7 +167,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 		await expect(forkedSession).toHaveCount(1, { timeout: 20_000 });
 
 		// The view switches to the forked session.
-		await expect(page.locator('[data-active-session-id]').first()).not.toHaveAttribute(
+		await expect(page.locator("[data-active-session-id]").first()).not.toHaveAttribute(
 			"data-active-session-id",
 			sourceId,
 			{ timeout: 20_000 },

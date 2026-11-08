@@ -1,9 +1,9 @@
-import { build } from "esbuild";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { build } from "esbuild";
 
 test.use({ channel: "chrome" });
 let directory: string;
@@ -11,13 +11,22 @@ let server: Server;
 let url: string;
 test.beforeAll(async () => {
 	directory = await mkdtemp(path.join(tmpdir(), "metis-disclosure-"));
-	await build({ bundle: true, entryPoints: [path.join(__dirname, "disclosure-cache.fixture.tsx")],
-		outfile: path.join(directory, "fixture.js"), format: "esm", jsx: "automatic", platform: "browser", target: "es2022" });
+	await build({
+		bundle: true,
+		entryPoints: [path.join(__dirname, "disclosure-cache.fixture.tsx")],
+		outfile: path.join(directory, "fixture.js"),
+		format: "esm",
+		jsx: "automatic",
+		platform: "browser",
+		target: "es2022",
+	});
 	server = createServer(async (request, response) => {
 		const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
 		if (pathname === "/") {
 			response.setHeader("content-type", "text/html");
-			response.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root" style="width:100%"></div><script type="module" src="/fixture.js"></script></body></html>');
+			response.end(
+				'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root" style="width:100%"></div><script type="module" src="/fixture.js"></script></body></html>',
+			);
 		} else if (pathname === "/fixture.js" || pathname === "/fixture.css") {
 			response.setHeader("content-type", pathname.endsWith("css") ? "text/css" : "text/javascript");
 			response.end(await readFile(path.join(directory, pathname.slice(1))));
@@ -66,24 +75,22 @@ test("answers animate in both directions, support keyboard, and respect reduced 
 	const readTransitions = () =>
 		page.evaluate(
 			() =>
-				(window as typeof window & { __drawerTransitions?: Array<{ property: string }> })
-					.__drawerTransitions ?? [],
+				(window as typeof window & { __drawerTransitions?: Array<{ property: string }> }).__drawerTransitions ?? [],
 		);
 	const stopRecording = () =>
 		page.evaluate(() => {
 			const state = window as typeof window & {
 				__drawerListeners?: Array<{ target: Element; type: string; listener: EventListener }>;
 			};
-			for (const entry of state.__drawerListeners ?? []) entry.target.removeEventListener(entry.type, entry.listener);
+			for (const entry of state.__drawerListeners ?? [])
+				entry.target.removeEventListener(entry.type, entry.listener);
 			state.__drawerListeners = [];
 		});
 	const waitForDrawerTransition = async () => {
 		await expect
-			.poll(
-				async () =>
-					(await readTransitions()).some((entry) => entry.property === "grid-template-rows"),
-				{ timeout: 5_000 },
-			)
+			.poll(async () => (await readTransitions()).some((entry) => entry.property === "grid-template-rows"), {
+				timeout: 5_000,
+			})
 			.toBe(true);
 		await drawer.evaluate(async (element) => {
 			// Drain the drawer's own transitions; extra passes cover a second property
@@ -137,7 +144,13 @@ for (const width of [1000, 390]) {
 		await expect(tooltip).toBeHidden();
 		await page.locator(".ask-user-answer-summary > summary").click();
 		await expect(page.locator(".ask-user-answer-summary .transcript-drawer")).toHaveAttribute("data-open", "true");
-		await expect.poll(() => page.locator(".ask-user-answer-summary .transcript-drawer").evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(60);
+		await expect
+			.poll(() =>
+				page
+					.locator(".ask-user-answer-summary .transcript-drawer")
+					.evaluate((node) => node.getBoundingClientRect().height),
+			)
+			.toBeGreaterThan(60);
 		await page.screenshot({ path: testInfo.outputPath(`cache-drawer-${width}.png`), animations: "disabled" });
 	});
 }

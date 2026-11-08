@@ -12,7 +12,13 @@ test("packaged Windows repeated launch restores one existing desktop", async () 
 		const userData = app.dirs.userDataDir.replaceAll("'", "''");
 		const windowState = (minimize = false) => {
 			const script = `$ProgressPreference='SilentlyContinue'; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class StartupWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); }'; $items=@(Get-CimInstance Win32_Process -Filter "Name='Metis.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${userData}') -and -not $_.CommandLine.Contains('--type=') }); if($items.Count -ne 1){ @{count=$items.Count} | ConvertTo-Json -Compress; exit }; $p=Get-Process -Id $items[0].ProcessId; $h=$p.MainWindowHandle; ${minimize ? "$null=[StartupWindow]::ShowWindow($h,6);" : ""} @{count=1;minimized=[StartupWindow]::IsIconic($h)} | ConvertTo-Json -Compress`;
-			return JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true })) as { count: number; minimized?: boolean };
+			return JSON.parse(
+				execFileSync(
+					"powershell.exe",
+					["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+					{ encoding: "utf8", windowsHide: true },
+				),
+			) as { count: number; minimized?: boolean };
 		};
 		expect(windowState(true)).toEqual({ count: 1, minimized: true });
 		second = launchPackagedDesktop({

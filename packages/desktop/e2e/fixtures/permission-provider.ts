@@ -1,5 +1,5 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import path from "node:path";
 import {
 	closeServer,

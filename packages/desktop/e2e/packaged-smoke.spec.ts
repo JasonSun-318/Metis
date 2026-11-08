@@ -1,15 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import JSZip from "jszip";
-import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { createMcpTestServer } from "../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server for packaged app smoke coverage
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	appServerPid,
 	closeServer,
@@ -72,7 +72,13 @@ function authHasMcpServer(auth: Record<string, unknown>, name: string): boolean 
 
 interface FixtureSessionManager {
 	appendAgentControl(payload: object): string;
-	appendCompaction(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean): string;
+	appendCompaction(
+		summary: string,
+		firstKeptEntryId: string,
+		tokensBefore: number,
+		details?: unknown,
+		fromHook?: boolean,
+	): string;
 	appendCustomEntry(customType: string, data?: unknown): string;
 	appendMessage(message: object, toolOutput?: unknown): string;
 	appendSessionInfo(name: string): string;
@@ -113,7 +119,9 @@ interface CodingFixtures {
 	readonly getSessionAgentDir: (agentDir: string, sessionId: string) => string;
 	readonly getSessionToolOutputDir: (sessionFile: string) => string;
 	readonly moveSessionFileWithLease: (source: string, destination: string) => void;
-	readonly ProjectTrustStore: new (agentDir: string) => {
+	readonly ProjectTrustStore: new (
+		agentDir: string,
+	) => {
 		get(cwd: string): boolean | null;
 		set(cwd: string, decision: boolean): void;
 	};
@@ -157,7 +165,9 @@ interface CodingFixtures {
 
 async function loadCodingFixtures(): Promise<CodingFixtures> {
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	const [memory, vaultPaths, vaultProject, attachments, sessions, schedules, trust] = await Promise.all([
 		importEsm(pathToFileURL(path.join(coreRoot, "auto-memory.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "memory", "vault-paths.js")).href),
@@ -237,7 +247,10 @@ async function seedOwnedSessionData(
 	return Promise.all([
 		writeFixtureFile(path.join(imageDir, "image.png"), "chat image"),
 		writeFixtureFile(path.join(toolOutputDir, "tool.txt"), "chat tool output"),
-		writeFixtureFile(path.join(fixtures.getSessionAttachmentDir(agentDir, sessionId), "attachment.txt"), "chat attachment"),
+		writeFixtureFile(
+			path.join(fixtures.getSessionAttachmentDir(agentDir, sessionId), "attachment.txt"),
+			"chat attachment",
+		),
 		writeFixtureFile(path.join(fixtures.getSessionAgentDir(agentDir, sessionId), "owned-marker.txt"), "agent data"),
 		writeFixtureFile(path.join(workDir, "document.txt"), "chat document work"),
 	]);
@@ -250,12 +263,6 @@ function projectGroup(page: Page, name: string) {
 async function showProjectActions(group: Locator) {
 	await group.getByRole("button", { name: "Project actions" }).focus();
 	await expect(group.locator(".project-action-buttons")).toHaveCSS("opacity", "1");
-}
-
-async function clickCenter(page: Page, target: Locator): Promise<void> {
-	const box = await target.boundingBox();
-	if (!box) throw new Error("Interactive target has no bounding box");
-	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 
 async function resolvedColor(page: Page, property: string): Promise<string> {
@@ -280,11 +287,11 @@ function visibleToolPanel(page: Page): Locator {
 
 /** Opens a tool from the focused session's browser start page. */
 async function openTool(page: Page, name: string): Promise<void> {
-	if (!await page.locator(".tool-sidebar").isVisible()) {
+	if (!(await page.locator(".tool-sidebar").isVisible())) {
 		await page.locator(".details-sidebar-toggle").click();
 	}
 	const cards = page.locator(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu");
-	if (!await cards.count()) {
+	if (!(await cards.count())) {
 		const startTab = page.locator('.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]').first();
 		if (await startTab.count()) await startTab.click();
 		else await page.getByRole("button", { name: "New browser tab", exact: true }).click();
@@ -319,7 +326,9 @@ async function resizeWorkspacePanel(page: Page, targetWidth: number): Promise<vo
 	await page.mouse.down();
 	await page.mouse.move(x + current.width - sidebarWidth, y);
 	await page.mouse.up();
-	await expect.poll(async () => Math.round((await visibleToolPanel(page).boundingBox())?.width ?? 0)).toBe(targetWidth);
+	await expect
+		.poll(async () => Math.round((await visibleToolPanel(page).boundingBox())?.width ?? 0))
+		.toBe(targetWidth);
 }
 
 async function codeEditorText(editor: Locator): Promise<string> {
@@ -334,7 +343,10 @@ async function openSessionGroupingOptions(page: Page) {
 
 async function groupSessionsBy(page: Page, grouping: "Date" | "Project" | "Unread" | "None") {
 	await openSessionGroupingOptions(page);
-	await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitemradio", { name: grouping, exact: true }).click();
+	await page
+		.getByRole("menu", { name: "Session grouping" })
+		.getByRole("menuitemradio", { name: grouping, exact: true })
+		.click();
 }
 
 function launchPackagedApp(
@@ -348,25 +360,25 @@ function launchPackagedApp(
 	extraArguments: readonly string[] = [],
 	extraEnv: NodeJS.ProcessEnv = {},
 ) {
-	const app = spawn(executable, [
-		`--remote-debugging-port=${debuggingPort}`,
-		`--user-data-dir=${userDataDir}`,
-		...extraArguments,
-	], {
-		cwd: projectDir,
-		env: {
-			...process.env,
-			ALL_PROXY: "",
-			METIS_CODING_AGENT_DIR: agentDir,
-			HOME: homeDir,
-			HTTP_PROXY: "",
-			HTTPS_PROXY: "",
-			NO_PROXY: "127.0.0.1,localhost",
-			USERPROFILE: homeDir,
-			...extraEnv,
+	const app = spawn(
+		executable,
+		[`--remote-debugging-port=${debuggingPort}`, `--user-data-dir=${userDataDir}`, ...extraArguments],
+		{
+			cwd: projectDir,
+			env: {
+				...process.env,
+				ALL_PROXY: "",
+				METIS_CODING_AGENT_DIR: agentDir,
+				HOME: homeDir,
+				HTTP_PROXY: "",
+				HTTPS_PROXY: "",
+				NO_PROXY: "127.0.0.1,localhost",
+				USERPROFILE: homeDir,
+				...extraEnv,
+			},
+			stdio: ["ignore", "pipe", "pipe"],
 		},
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+	);
 	app.stdout?.on("data", (chunk) => diagnostics.push(String(chunk)));
 	app.stderr?.on("data", (chunk) => diagnostics.push(String(chunk)));
 	return app;
@@ -399,7 +411,9 @@ function windowsNtProcessControl(pid: number, method: "NtSuspendProcess" | "NtRe
 		"  [void][MetisProcessControl]::CloseHandle($handle)",
 		"}",
 	].join("\n");
-	const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+	const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+		encoding: "utf8",
+	});
 	if (result.status !== 0) throw new Error(result.stderr || `Could not ${method} process ${pid}`);
 }
 
@@ -413,6 +427,7 @@ function resumeAppServer(pid: number): void {
 	else process.kill(pid, "SIGCONT");
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged task list uses the Metis composer UI in Chat and Code", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
@@ -425,7 +440,13 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	const projectDir = path.join(tempRoot, "project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "transcript");
-	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir), mkdir(qaDir, { recursive: true })]);
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(homeDir),
+		mkdir(projectDir),
+		mkdir(userDataDir),
+		mkdir(qaDir, { recursive: true }),
+	]);
 
 	const taskItems = [
 		{ task: "Inspect implementation", completed: false },
@@ -443,11 +464,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		compacted = false,
 		withTranscriptFixture = false,
 	) => {
-		const manager = fixtures.SessionManager.create(
-			projectDir,
-			fixtures.getDefaultSessionDir(projectDir, agentDir),
-			{ id: sessionId, mode },
-		);
+		const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
+			id: sessionId,
+			mode,
+		});
 		manager.appendSessionInfo(name);
 		manager.appendMessage({
 			...assistantMessage(Date.now() - 3, 0),
@@ -458,10 +478,16 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			role: "toolResult",
 			toolCallId: `set-tasks-${mode}`,
 			toolName: "set_tasks",
-			content: [{
-				type: "text",
-				text: ["<task_list>", ...tasks.map(({ task, completed }) => `- [${completed ? "x" : " "}] ${task}`), "</task_list>"].join("\n"),
-			}],
+			content: [
+				{
+					type: "text",
+					text: [
+						"<task_list>",
+						...tasks.map(({ task, completed }) => `- [${completed ? "x" : " "}] ${task}`),
+						"</task_list>",
+					].join("\n"),
+				},
+			],
 			details: { tasks },
 			isError: false,
 			timestamp: Date.now(),
@@ -470,36 +496,48 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		if (withTranscriptFixture && mode === "chat") {
 			manager.appendMessage({
 				...assistantMessage(Date.now() + 1, 0),
-				content: [{
-					type: "toolCall",
-					id: "ask-user-chat",
-					name: "ask_user",
-					arguments: {
-						questions: [{
-							question: "How should Metis answer?",
-							multiple: false,
-							options: [{ label: "Concise", description: "Keep it short" }, { label: "Detailed", description: "Explain fully" }],
-						}],
+				content: [
+					{
+						type: "toolCall",
+						id: "ask-user-chat",
+						name: "ask_user",
+						arguments: {
+							questions: [
+								{
+									question: "How should Metis answer?",
+									multiple: false,
+									options: [
+										{ label: "Concise", description: "Keep it short" },
+										{ label: "Detailed", description: "Explain fully" },
+									],
+								},
+							],
+						},
 					},
-				}],
+				],
 				stopReason: "toolUse",
 			});
 			manager.appendMessage({
 				role: "toolResult",
 				toolCallId: "ask-user-chat",
 				toolName: "ask_user",
-				content: [{
-					type: "text",
-					text: `User answers:\n${JSON.stringify([{ question: "How should Metis answer?", selected: ["Concise"] }], null, 2)}`,
-				}],
+				content: [
+					{
+						type: "text",
+						text: `User answers:\n${JSON.stringify([{ question: "How should Metis answer?", selected: ["Concise"] }], null, 2)}`,
+					},
+				],
 				isError: false,
 				timestamp: Date.now() + 2,
 			});
 		}
-		if (withTranscriptFixture) manager.appendMessage({
-			...assistantMessage(Date.now() + 3, 0),
-			content: [{ type: "text", text: "Metis keeps readable content rhythm while the selected font size changes." }],
-		});
+		if (withTranscriptFixture)
+			manager.appendMessage({
+				...assistantMessage(Date.now() + 3, 0),
+				content: [
+					{ type: "text", text: "Metis keeps readable content rhythm while the selected font size changes." },
+				],
+			});
 		manager.close();
 	};
 	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture", taskItems, true, true);
@@ -547,7 +585,11 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 				document.documentElement.style.setProperty("--content-font-size", `${fontSize}px`);
 			}, size);
 			await expect(page.locator(".turn-answer").first()).toHaveCSS("font-size", `${size}px`);
-			expect(await visiblePanel(page).locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+			expect(
+				await visiblePanel(page)
+					.locator(".transcript-scroll")
+					.evaluate((element) => element.scrollWidth <= element.clientWidth),
+			).toBe(true);
 			await page.screenshot({
 				animations: "disabled",
 				path: path.join(qaDir, `chat-dark-${size}px-1280x840.png`),
@@ -562,22 +604,16 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(slashMenu).toBeVisible();
 		await expect(slashMenu.getByText("skill:e2e-skill", { exact: true })).toBeVisible();
 		const slashLabels = await slashMenu.locator("[role=option] strong").allTextContents();
-		expect(slashLabels.slice(0, 7)).toEqual([
-			"/compact",
-			"/goal",
-			"/plan",
-			"/model",
-			"/thinking",
-			"/status",
-			"/mcp",
-		]);
+		expect(slashLabels.slice(0, 7)).toEqual(["/compact", "/goal", "/plan", "/model", "/thinking", "/status", "/mcp"]);
 		expect(slashLabels).toContain("/mcp");
 		expect(slashLabels).toContain("skill:e2e-skill");
 		await expect(slashMenu).not.toContainText("/usage");
-		await visiblePanel(page).locator(".composer-dock").screenshot({
-			animations: "disabled",
-			path: testInfo.outputPath("slash-command-menu.png"),
-		});
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({
+				animations: "disabled",
+				path: testInfo.outputPath("slash-command-menu.png"),
+			});
 		await composerInput.fill("/com");
 		await expect(slashMenu.getByRole("option")).toHaveCount(1);
 		await expect(slashMenu.locator("strong")).toHaveText("/compact");
@@ -588,10 +624,12 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(statusPanel).toBeVisible();
 		await expect(statusPanel).toContainText("Context usage unavailable");
 		await expect(statusPanel).not.toContainText(CHAT_ACTIVE_ID);
-		await visiblePanel(page).locator(".composer-dock").screenshot({
-			animations: "disabled",
-			path: testInfo.outputPath("slash-status-panel.png"),
-		});
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({
+				animations: "disabled",
+				path: testInfo.outputPath("slash-status-panel.png"),
+			});
 		await page.keyboard.press("Escape");
 		await expect(statusPanel).toHaveCount(0);
 		await expect(page.locator(".transcript-compaction-row")).toHaveText("Compacted");
@@ -606,10 +644,12 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
 		await composerInput.pressSequentially("Use the packaged fixture");
 		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(165, 214, 255)");
-		await visiblePanel(page).locator(".composer-dock").screenshot({
-			animations: "disabled",
-			path: testInfo.outputPath("slash-skill-token.png"),
-		});
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({
+				animations: "disabled",
+				path: testInfo.outputPath("slash-skill-token.png"),
+			});
 		await composerInput.fill("");
 		await composerInput.press("Backspace");
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toHaveCount(0);
@@ -635,7 +675,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			path: testInfo.outputPath("task-list-expanded-chat.png"),
 		});
 		await page.evaluate(() => {
-			const state = window as typeof window & { __taskListLongTasks?: number[]; __taskListLongTaskObserver?: PerformanceObserver };
+			const state = window as typeof window & {
+				__taskListLongTasks?: number[];
+				__taskListLongTaskObserver?: PerformanceObserver;
+			};
 			state.__taskListLongTasks = [];
 			if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
 				state.__taskListLongTaskObserver = new PerformanceObserver((list) => {
@@ -698,7 +741,11 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(panel).not.toContainText('"tasks"');
 		await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
 		await expect(page.locator(".code-turn-answer").first()).toHaveCSS("font-size", "20px");
-		expect(await visiblePanel(page).locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		expect(
+			await visiblePanel(page)
+				.locator(".transcript-scroll")
+				.evaluate((element) => element.scrollWidth <= element.clientWidth),
+		).toBe(true);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "code-dark-20px-1280x840.png") });
 		await page.evaluate(() => document.documentElement.style.removeProperty("--content-font-size"));
 		panel = page.getByRole("region", { name: "Tasks", exact: true });
@@ -725,7 +772,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(page.locator(".new-task-home-backdrop")).toHaveCount(0);
 		await page.locator(".new-task-home").screenshot({ path: testInfo.outputPath("new-task-centered-home.png") });
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -736,6 +786,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged queued messages edit, guide, drain in order, and pause across App Server recovery", async ({}, testInfo) => {
 	test.setTimeout(180_000);
 	const fixtures = await loadCodingFixtures();
@@ -749,11 +800,11 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 	const userDataDir = path.join(tempRoot, "electron");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 	const sessionId = "71000000-0000-4000-8000-000000000001";
-	const manager = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "chat", permissionPreset: "full" },
-	);
+	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
+		id: sessionId,
+		mode: "chat",
+		permissionPreset: "full",
+	});
 	manager.appendSessionInfo("Queued message session");
 	manager.close();
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
@@ -781,13 +832,17 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		const transcript = JSON.stringify(payload.messages ?? []);
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		if (transcript.includes("conversation title generator")) {
-			response.end(`data: ${JSON.stringify({
-				id: "queued-title",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "queued-model",
-				choices: [{ index: 0, delta: { role: "assistant", content: "Queued message session" }, finish_reason: "stop" }],
-			})}\n\ndata: [DONE]\n\n`);
+			response.end(
+				`data: ${JSON.stringify({
+					id: "queued-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "queued-model",
+					choices: [
+						{ index: 0, delta: { role: "assistant", content: "Queued message session" }, finish_reason: "stop" },
+					],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		const lastUser = [...(payload.messages ?? [])].reverse().find((message) => message.role === "user");
@@ -798,13 +853,16 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 			return;
 		}
 		requestMarkers.push(marker);
-		const complete = () => response.end(`data: ${JSON.stringify({
-			id: `queued-${marker}`,
-			object: "chat.completion.chunk",
-			created: 1,
-			model: "queued-model",
-			choices: [{ index: 0, delta: { role: "assistant", content: `done:${marker}` }, finish_reason: "stop" }],
-		})}\n\ndata: [DONE]\n\n`);
+		const complete = () =>
+			response.end(
+				`data: ${JSON.stringify({
+					id: `queued-${marker}`,
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "queued-model",
+					choices: [{ index: 0, delta: { role: "assistant", content: `done:${marker}` }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 		if (!heldMarkers.has(marker)) {
 			complete();
 			return;
@@ -820,19 +878,27 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 	});
 	const providerPort = await listen(fakeProvider);
 	await Promise.all([
-		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
-			queued: {
-				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-				apiKey: "queued-key",
-				api: "openai-completions",
-				models: [{ id: "queued-model", name: "Queued Model", contextWindow: 32_000, maxTokens: 1_024 }],
-			},
-		} })),
-		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
-			defaultProvider: "queued",
-			defaultModel: "queued-model",
-			retry: { enabled: false },
-		})),
+		writeFile(
+			path.join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					queued: {
+						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+						apiKey: "queued-key",
+						api: "openai-completions",
+						models: [{ id: "queued-model", name: "Queued Model", contextWindow: 32_000, maxTokens: 1_024 }],
+					},
+				},
+			}),
+		),
+		writeFile(
+			path.join(agentDir, "settings.json"),
+			JSON.stringify({
+				defaultProvider: "queued",
+				defaultModel: "queued-model",
+				retry: { enabled: false },
+			}),
+		),
 	]);
 
 	const debuggingPort = await reservePort();
@@ -880,10 +946,14 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await expect(guideRow).toContainText("guide-edited");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-left-radius", "21px");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-right-radius", "21px");
-		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-edited.png") });
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({ animations: "disabled", path: testInfo.outputPath("queued-edited.png") });
 		await guideRow.getByRole("button", { name: "Guide with queued message", exact: true }).click();
 		await expect(guideRow).toContainText("Sending…");
-		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-guiding.png") });
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({ animations: "disabled", path: testInfo.outputPath("queued-guiding.png") });
 		release("guide-first");
 		await waitForMarker("guide-edited");
 		await expect(page.getByText("done:guide-edited", { exact: true })).toBeVisible();
@@ -898,11 +968,9 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await expect(queuedRows.nth(0)).toContainText("fifo-second");
 		await expect(queuedRows.nth(1)).toContainText("fifo-third");
 		release("fifo-first");
-		await expect.poll(() => requestMarkers.filter((marker) => marker.startsWith("fifo-"))).toEqual([
-			"fifo-first",
-			"fifo-second",
-			"fifo-third",
-		]);
+		await expect
+			.poll(() => requestMarkers.filter((marker) => marker.startsWith("fifo-")))
+			.toEqual(["fifo-first", "fifo-second", "fifo-third"]);
 		await expect(page.getByText("done:fifo-third", { exact: true })).toBeVisible();
 		await expect(queuedRows).toHaveCount(0);
 
@@ -916,22 +984,29 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		const firstUtilityPid = appServerPid(rootPid);
 		if (!firstUtilityPid) throw new Error("Could not find the packaged App Server");
 		process.kill(firstUtilityPid, "SIGKILL");
-		await expect.poll(() => {
-			const current = appServerPid(rootPid);
-			return current !== undefined && current !== firstUtilityPid;
-		}).toBe(true);
+		await expect
+			.poll(() => {
+				const current = appServerPid(rootPid);
+				return current !== undefined && current !== firstUtilityPid;
+			})
+			.toBe(true);
 		await waitForServerReady(page);
 		const pausedRow = page.getByRole("group", { name: "Queued message 1", exact: true });
 		await expect(pausedRow).toContainText("Paused", { timeout: 20_000 });
 		await expect(pausedRow).toContainText("restart-queued");
 		expect(requestMarkers.filter((marker) => marker.startsWith("restart-"))).toEqual(["restart-first"]);
-		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-paused-after-restart.png") });
+		await visiblePanel(page)
+			.locator(".composer-dock")
+			.screenshot({ animations: "disabled", path: testInfo.outputPath("queued-paused-after-restart.png") });
 		await pausedRow.getByRole("button", { name: "Send queued message", exact: true }).click();
 		await waitForMarker("restart-queued");
 		await expect(page.getByText("done:restart-queued", { exact: true })).toBeVisible();
 		await expect(queuedRows).toHaveCount(0);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${requestMarkers.join(",")}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -957,11 +1032,11 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 	const userDataDir = path.join(tempRoot, "electron");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(outsideDir), mkdir(userDataDir)]);
 	const sessionId = "70000000-0000-4000-8000-000000000001";
-	const manager = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "chat", permissionPreset: "auto" },
-	);
+	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
+		id: sessionId,
+		mode: "chat",
+		permissionPreset: "auto",
+	});
 	manager.appendSessionInfo("Permission sandbox session");
 	manager.close();
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
@@ -991,38 +1066,46 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		const transcript = JSON.stringify(payload.messages ?? []);
 		response.writeHead(200, { "content-type": "text/event-stream" });
 		if (transcript.includes("You are an isolated permission reviewer.")) {
-			response.end(`data: ${JSON.stringify({
-				id: "permission-review",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "permission-model",
-				choices: [{
-					index: 0,
-					delta: {
-						role: "assistant",
-						tool_calls: [{
+			response.end(
+				`data: ${JSON.stringify({
+					id: "permission-review",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "permission-model",
+					choices: [
+						{
 							index: 0,
-							id: "permission-review-call",
-							type: "function",
-							function: {
-								name: "submit_permission_review",
-								arguments: JSON.stringify({ decision: "deny" }),
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: "permission-review-call",
+										type: "function",
+										function: {
+											name: "submit_permission_review",
+											arguments: JSON.stringify({ decision: "deny" }),
+										},
+									},
+								],
 							},
-						}],
-					},
-					finish_reason: "tool_calls",
-				}],
-			})}\n\ndata: [DONE]\n\n`);
+							finish_reason: "tool_calls",
+						},
+					],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		if (transcript.includes("conversation title generator")) {
-			response.end(`data: ${JSON.stringify({
-				id: "permission-title",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "permission-model",
-				choices: [{ index: 0, delta: { role: "assistant", content: "Permission test" }, finish_reason: "stop" }],
-			})}\n\ndata: [DONE]\n\n`);
+			response.end(
+				`data: ${JSON.stringify({
+					id: "permission-title",
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "permission-model",
+					choices: [{ index: 0, delta: { role: "assistant", content: "Permission test" }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+			);
 			return;
 		}
 		const lastUser = [...(payload.messages ?? [])].reverse().find((message) => message.role === "user");
@@ -1030,50 +1113,70 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		const marker = [...cases.keys()].find((candidate) => lastUserText.includes(candidate));
 		const callId = marker ? `call-${marker}` : undefined;
 		if (marker && callId && !transcript.includes(callId)) {
-			response.end(`data: ${JSON.stringify({
-				id: `permission-${marker}`,
+			response.end(
+				`data: ${JSON.stringify({
+					id: `permission-${marker}`,
+					object: "chat.completion.chunk",
+					created: 1,
+					model: "permission-model",
+					choices: [
+						{
+							index: 0,
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: callId,
+										type: "function",
+										function: { name: "bash", arguments: JSON.stringify({ command: cases.get(marker) }) },
+									},
+								],
+							},
+							finish_reason: "tool_calls",
+						},
+					],
+				})}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
+		response.end(
+			`data: ${JSON.stringify({
+				id: `permission-done-${marker ?? "plain"}`,
 				object: "chat.completion.chunk",
 				created: 1,
 				model: "permission-model",
-				choices: [{
-					index: 0,
-					delta: {
-						role: "assistant",
-						tool_calls: [{
-							index: 0,
-							id: callId,
-							type: "function",
-							function: { name: "bash", arguments: JSON.stringify({ command: cases.get(marker) }) },
-						}],
-					},
-					finish_reason: "tool_calls",
-				}],
-			})}\n\ndata: [DONE]\n\n`);
-			return;
-		}
-		response.end(`data: ${JSON.stringify({
-			id: `permission-done-${marker ?? "plain"}`,
-			object: "chat.completion.chunk",
-			created: 1,
-			model: "permission-model",
-			choices: [{ index: 0, delta: { role: "assistant", content: `done:${marker ?? "plain"}` }, finish_reason: "stop" }],
-		})}\n\ndata: [DONE]\n\n`);
+				choices: [
+					{ index: 0, delta: { role: "assistant", content: `done:${marker ?? "plain"}` }, finish_reason: "stop" },
+				],
+			})}\n\ndata: [DONE]\n\n`,
+		);
 	});
 	const providerPort = await listen(fakeProvider);
 	await Promise.all([
-		writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
-			permission: {
-				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-				apiKey: "permission-key",
-				api: "openai-completions",
-				models: [{ id: "permission-model", name: "Permission Model", contextWindow: 32_000, maxTokens: 1_024 }],
-			},
-		} })),
-		writeFile(path.join(agentDir, "settings.json"), JSON.stringify({
-			defaultProvider: "permission",
-			defaultModel: "permission-model",
-			retry: { enabled: false },
-		})),
+		writeFile(
+			path.join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					permission: {
+						baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+						apiKey: "permission-key",
+						api: "openai-completions",
+						models: [
+							{ id: "permission-model", name: "Permission Model", contextWindow: 32_000, maxTokens: 1_024 },
+						],
+					},
+				},
+			}),
+		),
+		writeFile(
+			path.join(agentDir, "settings.json"),
+			JSON.stringify({
+				defaultProvider: "permission",
+				defaultModel: "permission-model",
+				retry: { enabled: false },
+			}),
+		),
 	]);
 
 	let app: ReturnType<typeof launchPackagedApp> | undefined;
@@ -1100,7 +1203,9 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 	const setMode = async (current: "Ask" | "Auto" | "Full", option: string, next: "Ask" | "Auto" | "Full") => {
 		await page!.getByRole("button", { name: `Select permissions, current ${current}`, exact: true }).click();
 		await page!.getByRole("menuitemradio", { name: new RegExp(option, "u") }).click();
-		await expect(page!.getByRole("button", { name: `Select permissions, current ${next}`, exact: true })).toBeVisible();
+		await expect(
+			page!.getByRole("button", { name: `Select permissions, current ${next}`, exact: true }),
+		).toBeVisible();
 	};
 	try {
 		await launch();
@@ -1114,7 +1219,10 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await submit("case-auto-outside");
 		const outsideApproval = page!.locator(".permission-approval-panel");
 		const outsideOutcome = await Promise.race([
-			page!.getByText("done:case-auto-outside", { exact: true }).waitFor({ timeout: 20_000 }).then(() => "done" as const),
+			page!
+				.getByText("done:case-auto-outside", { exact: true })
+				.waitFor({ timeout: 20_000 })
+				.then(() => "done" as const),
 			outsideApproval.waitFor({ timeout: 20_000 }).then(() => "panel" as const),
 		]);
 		if (outsideOutcome === "panel") {
@@ -1139,8 +1247,10 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 			await expect(approval.locator(".permission-approval-scope code")).toHaveText(path.join(projectDir, "build"));
 		}
 		await approval.getByRole("button", { name: "More approval options", exact: true }).click();
-		await page!.getByRole("listbox", { name: "More approval options", exact: true })
-			.getByRole("option", { name: "Remember for this project", exact: true }).click();
+		await page!
+			.getByRole("listbox", { name: "More approval options", exact: true })
+			.getByRole("option", { name: "Remember for this project", exact: true })
+			.click();
 		await waitDone("case-exact-one");
 		expect(existsSync(path.join(projectDir, "build"))).toBe(false);
 
@@ -1183,13 +1293,19 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await mkdir(path.join(projectDir, "build"));
 		await submit("case-exact-four");
 		await expect(page!.locator(".permission-approval-panel")).toBeVisible();
-		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
+		await page!
+			.locator(".permission-approval-panel")
+			.getByRole("button", { name: "Allow once", exact: true })
+			.click();
 		await waitDone("case-exact-four");
 
 		phase = "checking Ask sandbox and Full host disclosure";
 		await submit("case-ask-pwd");
 		await expect(page!.locator(".permission-approval-panel .permission-approval-command code")).toHaveText("pwd");
-		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
+		await page!
+			.locator(".permission-approval-panel")
+			.getByRole("button", { name: "Allow once", exact: true })
+			.click();
 		await waitDone("case-ask-pwd");
 		await setMode("Ask", "Full", "Full");
 		await submit("case-host-reject");
@@ -1202,8 +1318,13 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		expect(await readFile(fullFile, "utf8")).toBe("full");
 		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`);
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
+		);
 	} finally {
 		await browser?.close().catch(() => undefined);
 		if (app) await stopProcess(app);
@@ -1276,7 +1397,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 					object: "chat.completion.chunk",
 					created: 1,
 					model: "packaged-smoke-model",
-					choices: [{ index: 0, delta: { role: "assistant", content: "Packaged smoke title" }, finish_reason: "stop" }],
+					choices: [
+						{ index: 0, delta: { role: "assistant", content: "Packaged smoke title" }, finish_reason: "stop" },
+					],
 				})}\n\ndata: [DONE]\n\n`,
 			);
 			return;
@@ -1296,25 +1419,29 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 					object: "chat.completion.chunk",
 					created: 1,
 					model: "packaged-smoke-model",
-					choices: [{
-						index: 0,
-						delta: toolAlreadyCalled
-							? { role: "assistant", content: "" }
-							: {
-								role: "assistant",
-								tool_calls: [{
-									index: 0,
-									id: "call-packaged-memory",
-									type: "function",
-									function: {
-										name: "memory_write",
-										arguments:
-											'{"op":"create","scope":"global","target":{"slug":"packaged-smoke"},"frontmatter":{"name":"Packaged smoke","type":"reference"},"content":"packaged smoke note"}',
+					choices: [
+						{
+							index: 0,
+							delta: toolAlreadyCalled
+								? { role: "assistant", content: "" }
+								: {
+										role: "assistant",
+										tool_calls: [
+											{
+												index: 0,
+												id: "call-packaged-memory",
+												type: "function",
+												function: {
+													name: "memory_write",
+													arguments:
+														'{"op":"create","scope":"global","target":{"slug":"packaged-smoke"},"frontmatter":{"name":"Packaged smoke","type":"reference"},"content":"packaged smoke note"}',
+												},
+											},
+										],
 									},
-								}],
-							},
-						finish_reason: toolAlreadyCalled ? "stop" : "tool_calls",
-					}],
+							finish_reason: toolAlreadyCalled ? "stop" : "tool_calls",
+						},
+					],
 				})}\n\ndata: [DONE]\n\n`,
 			);
 			return;
@@ -1323,90 +1450,106 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		providerToolNames.push(toolNames);
 		providerRequests += 1;
 		response.writeHead(200, { "content-type": "text/event-stream" });
-		if (providerTranscript.includes("request packaged questions") && !providerTranscript.includes("call-packaged-questions")) {
+		if (
+			providerTranscript.includes("request packaged questions") &&
+			!providerTranscript.includes("call-packaged-questions")
+		) {
 			response.end(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-packaged-questions",
 					object: "chat.completion.chunk",
 					created: 1,
 					model: "packaged-smoke-model",
-					choices: [{
-						index: 0,
-						delta: {
-							role: "assistant",
-							tool_calls: [{
-								index: 0,
-								id: "call-packaged-questions",
-								type: "function",
-								function: {
-									name: "ask_user",
-									arguments: JSON.stringify({
-										questions: [
-											{
-												question: "How should Metis answer?",
-												multiple: true,
-												options: [
-													{ label: "Fast and concise" },
-													{ label: "Detailed explanation" },
-													{ label: "Adapt to context" },
-													{ label: "Summary first" },
+					choices: [
+						{
+							index: 0,
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: "call-packaged-questions",
+										type: "function",
+										function: {
+											name: "ask_user",
+											arguments: JSON.stringify({
+												questions: [
+													{
+														question: "How should Metis answer?",
+														multiple: true,
+														options: [
+															{ label: "Fast and concise" },
+															{ label: "Detailed explanation" },
+															{ label: "Adapt to context" },
+															{ label: "Summary first" },
+														],
+													},
+													{
+														question: "Which communication style should Metis use?",
+														multiple: true,
+														options: [
+															{ label: "Professional" },
+															{ label: "Friendly" },
+															{ label: "Contextual" },
+															{ label: "Warm" },
+														],
+													},
 												],
-											},
-											{
-												question: "Which communication style should Metis use?",
-												multiple: true,
-												options: [
-													{ label: "Professional" },
-													{ label: "Friendly" },
-													{ label: "Contextual" },
-													{ label: "Warm" },
-												],
-											},
-										],
-									}),
-								},
-							}],
+											}),
+										},
+									},
+								],
+							},
+							finish_reason: "tool_calls",
 						},
-						finish_reason: "tool_calls",
-					}],
+					],
 				})}\n\ndata: [DONE]\n\n`,
 			);
 			return;
 		}
-		if (providerTranscript.includes("request packaged single question") && !providerTranscript.includes("call-packaged-single-question")) {
+		if (
+			providerTranscript.includes("request packaged single question") &&
+			!providerTranscript.includes("call-packaged-single-question")
+		) {
 			response.end(
 				`data: ${JSON.stringify({
 					id: "chatcmpl-packaged-single-question",
 					object: "chat.completion.chunk",
 					created: 1,
 					model: "packaged-smoke-model",
-					choices: [{
-						index: 0,
-						delta: {
-							role: "assistant",
-							tool_calls: [{
-								index: 0,
-								id: "call-packaged-single-question",
-								type: "function",
-								function: {
-									name: "ask_user",
-									arguments: JSON.stringify({
-										questions: [{
-											question: "Where should Metis store the task data?",
-											multiple: false,
-											options: [
-												{ label: "Local database" },
-												{ label: "Cloud sync" },
-												{ label: "Shared file" },
-												{ label: "Ask each time" },
-											],
-										}],
-									}),
-								},
-							}],
+					choices: [
+						{
+							index: 0,
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: "call-packaged-single-question",
+										type: "function",
+										function: {
+											name: "ask_user",
+											arguments: JSON.stringify({
+												questions: [
+													{
+														question: "Where should Metis store the task data?",
+														multiple: false,
+														options: [
+															{ label: "Local database" },
+															{ label: "Cloud sync" },
+															{ label: "Shared file" },
+															{ label: "Ask each time" },
+														],
+													},
+												],
+											}),
+										},
+									},
+								],
+							},
+							finish_reason: "tool_calls",
 						},
-						finish_reason: "tool_calls",
-					}],
+					],
 				})}\n\ndata: [DONE]\n\n`,
 			);
 			return;
@@ -1419,19 +1562,23 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 					object: "chat.completion.chunk",
 					created: 1,
 					model: "packaged-smoke-model",
-					choices: [{
-						index: 0,
-						delta: {
-							role: "assistant",
-							tool_calls: [{
-								index: 0,
-								id: "call-packaged-approval",
-								type: "function",
-								function: { name: "bash", arguments: '{"command":"pwd"}' },
-							}],
+					choices: [
+						{
+							index: 0,
+							delta: {
+								role: "assistant",
+								tool_calls: [
+									{
+										index: 0,
+										id: "call-packaged-approval",
+										type: "function",
+										function: { name: "bash", arguments: '{"command":"pwd"}' },
+									},
+								],
+							},
+							finish_reason: "tool_calls",
 						},
-						finish_reason: "tool_calls",
-					}],
+					],
 				})}\n\ndata: [DONE]\n\n`,
 			);
 			return;
@@ -1442,9 +1589,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 				object: "chat.completion.chunk",
 				created: 1,
 				model: "packaged-smoke-model",
-				choices: [
-					{ index: 0, delta: { role: "assistant", content: "packaged-turn-ok" }, finish_reason: null },
-				],
+				choices: [{ index: 0, delta: { role: "assistant", content: "packaged-turn-ok" }, finish_reason: null }],
 			})}\n\ndata: ${JSON.stringify({
 				id: "chatcmpl-packaged-smoke",
 				object: "chat.completion.chunk",
@@ -1560,7 +1705,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 	let finalUtilityPid: number | undefined;
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
-		page.on("console", (entry) => { if (entry.type() === "error") consoleErrors.push(entry.text()); });
+		page.on("console", (entry) => {
+			if (entry.type() === "error") consoleErrors.push(entry.text());
+		});
 		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
 		phase = "verifying draft creation timing";
 		await waitForServerReady(page);
@@ -1568,15 +1715,26 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		phase = "verifying packaged Plugin Center Skill lifecycle";
 		await page.getByRole("button", { name: "Customize", exact: true }).click();
 		await expect(page.locator(".plugins-section-switch").getByRole("tab")).toHaveCount(4);
-		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Skills", exact: true })).toBeVisible();
-		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true })).toBeVisible();
-		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Hooks", exact: true })).toBeVisible();
-		await expect(page.locator(".plugins-section-switch").getByRole("tab", { name: "Plugins", exact: true })).toBeVisible();
+		await expect(
+			page.locator(".plugins-section-switch").getByRole("tab", { name: "Skills", exact: true }),
+		).toBeVisible();
+		await expect(
+			page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }),
+		).toBeVisible();
+		await expect(
+			page.locator(".plugins-section-switch").getByRole("tab", { name: "Hooks", exact: true }),
+		).toBeVisible();
+		await expect(
+			page.locator(".plugins-section-switch").getByRole("tab", { name: "Plugins", exact: true }),
+		).toBeVisible();
 		await expect(page.getByRole("option", { name: "writing-plans", exact: true })).toBeVisible();
 
 		phase = "verifying packaged Skill creation methods and assisted Chat";
 		await page.getByRole("button", { name: "New Skill", exact: true }).click();
-		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "Project", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "New Skill", exact: true })
+			.getByRole("menuitem", { name: "Project", exact: true })
+			.click();
 		let createSkillDialog = page.getByRole("dialog", { name: "Create Project Skill" });
 		const projectSelector = createSkillDialog.getByRole("button", { name: "Create in", exact: true });
 		expect(await projectSelector.evaluate((element) => element.tagName)).toBe("BUTTON");
@@ -1585,10 +1743,16 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.screenshot({ path: path.join(pluginQaDir, "actual-project-skill-menu.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
 		await expect(createSkillDialog.getByRole("button", { name: "Create with Metis", exact: true })).toBeDisabled();
-		await page.screenshot({ path: path.join(pluginQaDir, "actual-project-skill-target.png"), animations: "disabled" });
+		await page.screenshot({
+			path: path.join(pluginQaDir, "actual-project-skill-target.png"),
+			animations: "disabled",
+		});
 		await createSkillDialog.getByRole("button", { name: "Cancel", exact: true }).click();
 		await page.getByRole("button", { name: "New Skill", exact: true }).click();
-		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "New Skill", exact: true })
+			.getByRole("menuitem", { name: "User", exact: true })
+			.click();
 		createSkillDialog = page.getByRole("dialog", { name: "Create User Skill" });
 		await expect(createSkillDialog.locator(".skill-create-methods > button")).toHaveCount(4);
 		await expect(createSkillDialog.locator(".skill-create-methods > button strong")).toHaveText([
@@ -1610,7 +1774,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await createSkillDialog.getByRole("button", { name: "Back", exact: true }).click();
 		await createSkillDialog.getByRole("button", { name: "Create with Metis", exact: true }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
-		const assistedPrompt = "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
+		const assistedPrompt =
+			"I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
 		await expect.poll(() => providerTranscripts.some((transcript) => transcript.includes(assistedPrompt))).toBe(true);
 		await expect.poll(() => titleRequests).toBe(1);
 		const assistedSessions = await page.evaluate(() =>
@@ -1624,14 +1789,24 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 				requestId: crypto.randomUUID(),
 			});
 		}, assistedSessions.sessions[0]!.sessionId);
-		await expect.poll(async () => (await page!.evaluate(() =>
-			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
-		)).sessions.length).toBe(0);
+		await expect
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(() =>
+							(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
+						)
+					).sessions.length,
+			)
+			.toBe(0);
 		await page.getByRole("button", { name: "Customize", exact: true }).click();
 
 		phase = "creating a custom Skill from semantic fields";
 		await page.getByRole("button", { name: "New Skill", exact: true }).click();
-		await page.getByRole("menu", { name: "New Skill", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "New Skill", exact: true })
+			.getByRole("menuitem", { name: "User", exact: true })
+			.click();
 		createSkillDialog = page.getByRole("dialog", { name: "Create User Skill" });
 		await createSkillDialog.getByRole("button", { name: "Custom", exact: true }).click();
 		const customSkillDialog = page.getByRole("dialog", { name: "Write skill instructions" });
@@ -1647,36 +1822,52 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.getByRole("button", { name: "Back to Skills", exact: true }).click();
 
 		phase = "importing one selected Skill from a packaged multi-Skill archive";
-		const inspectedImport = await page.evaluate((archivePath) =>
-			(globalThis as unknown as { metis: MetisDesktopApi }).metis.inspectSkillImport({
-				cwd: null,
-				source: "user",
-				input: { kind: "archive", path: archivePath },
-			}), importArchive);
-		expect(inspectedImport.candidates.map((candidate) => candidate.name)).toEqual(["packaged-alpha", "packaged-beta"]);
+		const inspectedImport = await page.evaluate(
+			(archivePath) =>
+				(globalThis as unknown as { metis: MetisDesktopApi }).metis.inspectSkillImport({
+					cwd: null,
+					source: "user",
+					input: { kind: "archive", path: archivePath },
+				}),
+			importArchive,
+		);
+		expect(inspectedImport.candidates.map((candidate) => candidate.name)).toEqual([
+			"packaged-alpha",
+			"packaged-beta",
+		]);
 		const alphaCandidate = inspectedImport.candidates.find((candidate) => candidate.name === "packaged-alpha")!;
-		await page.evaluate(async ({ archivePath, candidateId, revision }) => {
-			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
-				requestId: crypto.randomUUID(),
-				cwd: null,
-				source: "user",
-				input: { kind: "archive", path: archivePath },
-				sourceRevision: revision,
-				candidateIds: [candidateId],
-			});
-		}, { archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision });
-		expect(await readFile(path.join(agentDir, "skills", "packaged-alpha", "references", "example.md"), "utf8")).toBe("alpha example");
+		await page.evaluate(
+			async ({ archivePath, candidateId, revision }) => {
+				await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
+					requestId: crypto.randomUUID(),
+					cwd: null,
+					source: "user",
+					input: { kind: "archive", path: archivePath },
+					sourceRevision: revision,
+					candidateIds: [candidateId],
+				});
+			},
+			{ archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision },
+		);
+		expect(await readFile(path.join(agentDir, "skills", "packaged-alpha", "references", "example.md"), "utf8")).toBe(
+			"alpha example",
+		);
 		expect(existsSync(path.join(agentDir, "skills", "packaged-beta"))).toBe(false);
-		await expect(page.evaluate(async ({ archivePath, candidateId, revision }) => {
-			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
-				requestId: crypto.randomUUID(),
-				cwd: null,
-				source: "user",
-				input: { kind: "archive", path: archivePath },
-				sourceRevision: revision,
-				candidateIds: [candidateId],
-			});
-		}, { archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision })).rejects.toThrow();
+		await expect(
+			page.evaluate(
+				async ({ archivePath, candidateId, revision }) => {
+					await (globalThis as unknown as { metis: MetisDesktopApi }).metis.importSkills({
+						requestId: crypto.randomUUID(),
+						cwd: null,
+						source: "user",
+						input: { kind: "archive", path: archivePath },
+						sourceRevision: revision,
+						candidateIds: [candidateId],
+					});
+				},
+				{ archivePath: importArchive, candidateId: alphaCandidate.id, revision: inspectedImport.revision },
+			),
+		).rejects.toThrow();
 		await page.getByRole("button", { name: "Reload Skills", exact: true }).click();
 		await expect(page.getByRole("option", { name: "packaged-alpha", exact: true })).toBeVisible();
 		await page.screenshot({ path: path.join(pluginQaDir, "actual-skill-list.png"), animations: "disabled" });
@@ -1686,7 +1877,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const packagedSkillCodeBlock = packagedSkillDocument.locator("pre").first();
 		await expect(packagedSkillCodeBlock).toBeVisible();
 		expect(await packagedSkillCodeBlock.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto");
-		expect(await packagedSkillDocument.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+		expect(await packagedSkillDocument.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+			true,
+		);
 		await expect(page.getByRole("button", { name: "Open containing folder", exact: true })).toHaveCount(0);
 		await page.getByRole("button", { name: "Back to Skills", exact: true }).click();
 		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
@@ -1702,7 +1895,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.screenshot({ path: path.join(pluginQaDir, "actual-skill-detail.png"), animations: "disabled" });
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		const editSkillDialog = page.getByRole("dialog", { name: "Edit Skill" });
-		const editedSkillContent = "---\nname: writing-plans\ndescription: Build a clear implementation plan\n---\n\n# Instructions\n\n## Workflow\n\n1. Clarify the goal.\n2. Write the plan.\n3. Verify the result.\n";
+		const editedSkillContent =
+			"---\nname: writing-plans\ndescription: Build a clear implementation plan\n---\n\n# Instructions\n\n## Workflow\n\n1. Clarify the goal.\n2. Write the plan.\n3. Verify the result.\n";
 		await editSkillDialog.getByLabel("SKILL.md").fill(editedSkillContent);
 		await editSkillDialog.getByRole("button", { name: "Save", exact: true }).click();
 		await expect(editSkillDialog).toHaveCount(0);
@@ -1714,13 +1908,21 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await removeSkillDialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
 		await expect(removeSkillDialog).toHaveCount(0);
 		expect(existsSync(userSkillDir)).toBe(false);
-		expect((await readdir(path.join(agentDir, "skills", ".trash"))).some((entry) => entry.endsWith("-writing-plans"))).toBe(true);
+		expect(
+			(await readdir(path.join(agentDir, "skills", ".trash"))).some((entry) => entry.endsWith("-writing-plans")),
+		).toBe(true);
 
 		phase = "adding and editing a packaged MCP definition";
 		await page.locator(".plugins-section-switch").getByRole("tab", { name: "MCP", exact: true }).click();
 		await page.getByRole("button", { name: "New MCP", exact: true }).click();
-		await page.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: "User", exact: true }).click();
-		await page.getByRole("dialog", { name: "Create User MCP" }).getByRole("button", { name: "Custom MCP", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "New MCP", exact: true })
+			.getByRole("menuitem", { name: "User", exact: true })
+			.click();
+		await page
+			.getByRole("dialog", { name: "Create User MCP" })
+			.getByRole("button", { name: "Custom MCP", exact: true })
+			.click();
 		const addMcpDialog = page.getByRole("dialog", { name: "MCP configuration" });
 		await addMcpDialog.getByLabel("Server name", { exact: true }).fill("packaged-http");
 		await addMcpDialog.getByLabel("Server URL").fill("https://mcp.example.test/rpc");
@@ -1733,9 +1935,11 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toBeVisible();
 		await page.getByRole("option", { name: "packaged-http", exact: true }).click();
 		await page.setViewportSize({ width: 900, height: 720 });
-		expect(await page.locator('[data-plugin-detail="mcp"] .plugins-detail-grid').evaluate((element) =>
-			getComputedStyle(element).gridTemplateColumns.split(" ").length,
-		)).toBe(1);
+		expect(
+			await page
+				.locator('[data-plugin-detail="mcp"] .plugins-detail-grid')
+				.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+		).toBe(1);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
 		await page.setViewportSize({ width: 1440, height: 1024 });
 		await page.getByRole("button", { name: "Edit MCP server", exact: true }).click();
@@ -1759,7 +1963,14 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 				hasMcpCatalogDetail: typeof api.getMcpCatalogItem === "function",
 			};
 		});
-		expect(bridge).toEqual({ hasAttachmentPicker: true, hasSkillImport: true, hasSkillList: true, hasMcpImport: true, hasMcpList: true, hasMcpCatalogDetail: true });
+		expect(bridge).toEqual({
+			hasAttachmentPicker: true,
+			hasSkillImport: true,
+			hasSkillList: true,
+			hasMcpImport: true,
+			hasMcpList: true,
+			hasMcpCatalogDetail: true,
+		});
 		const sessionsBeforeDraft = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
@@ -1774,12 +1985,14 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(page.getByText("packaged-turn-ok", { exact: true }).first()).toBeVisible();
 		expect(providerToolNames[0]).toEqual(expect.arrayContaining(["ask_user", "web_fetch", "web_search"]));
 		await expect.poll(() => titleRequests).toBe(2);
-		await expect.poll(async () => {
-			const sessions = await page!.evaluate(() =>
-				(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
-			);
-			return sessions.sessions[0]?.name;
-		}).toBe("Packaged smoke title");
+		await expect
+			.poll(async () => {
+				const sessions = await page!.evaluate(() =>
+					(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
+				);
+				return sessions.sessions[0]?.name;
+			})
+			.toBe("Packaged smoke title");
 		const sessionsAfterFirstSend = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
@@ -1789,7 +2002,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			cwdOrigin: "managed",
 			name: "Packaged smoke title",
 		});
-		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Packaged smoke title", exact: true })).toBeVisible();
+		await expect(
+			page.locator(".session-sidebar").getByRole("button", { name: "Packaged smoke title", exact: true }),
+		).toBeVisible();
 		await page.screenshot({ path: path.join(groupingQaDir, "generated-title-and-message.png") });
 		// Session actions live on the sidebar row; the workspace has no title header any more.
 		const sessionSidebar = page.locator(".session-sidebar");
@@ -1802,7 +2017,10 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await titleInput.fill("Pinned packaged title");
 		await titleInput.press("Enter");
 		await expect(sessionSidebar.getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
-		const titleActions = sessionSidebar.getByRole("button", { name: "Actions for Pinned packaged title", exact: true });
+		const titleActions = sessionSidebar.getByRole("button", {
+			name: "Actions for Pinned packaged title",
+			exact: true,
+		});
 		await titleActions.click();
 		let titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
 		await expect(titleMenu.getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Rename", "Delete"]);
@@ -1812,7 +2030,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			has: page.getByRole("button", { name: "Pinned", exact: true }),
 		});
 		await expect(pinnedSection.getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
-		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true })).toHaveCount(1);
+		await expect(
+			page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true }),
+		).toHaveCount(1);
 		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "pinned-session.png") });
 		expect(await page.evaluate(() => localStorage.getItem("metis.sessionPins.v1"))).toBe(
 			JSON.stringify({ version: 1, sessionIds: [sessionsAfterFirstSend.sessions[0]!.sessionId] }),
@@ -1830,8 +2050,12 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
 		await titleMenu.getByRole("menuitem", { name: "Unpin", exact: true }).click();
 		await expect(pinnedSection).toHaveCount(0);
-		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true })).toHaveCount(1);
-		const todaySection = page.locator(".session-section").filter({ has: page.getByRole("button", { name: "Today", exact: true }) });
+		await expect(
+			page.locator(".session-sidebar").getByRole("button", { name: "Pinned packaged title", exact: true }),
+		).toHaveCount(1);
+		const todaySection = page
+			.locator(".session-section")
+			.filter({ has: page.getByRole("button", { name: "Today", exact: true }) });
 		await expect(todaySection).toBeVisible();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "date-default.png") });
 		await todaySection.getByRole("button", { name: "Today", exact: true }).click();
@@ -1839,7 +2063,10 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await todaySection.getByRole("button", { name: "Today", exact: true }).click();
 		await openSessionGroupingOptions(page);
 		await page.screenshot({ path: path.join(groupingQaDir, "group-menu.png") });
-		await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitemradio", { name: "Unread", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "Session grouping" })
+			.getByRole("menuitemradio", { name: "Unread", exact: true })
+			.click();
 		await expect(page.getByRole("button", { name: "Read", exact: true })).toBeVisible();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(groupingQaDir, "unread.png") });
 		await groupSessionsBy(page, "None");
@@ -1857,7 +2084,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(page.getByRole("heading", { name: "Packaged image pipeline" })).toBeVisible();
 		await expect(page.getByText("Worker and WASM returned 1x1", { exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Confirm" }).click();
-		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await page
+			.locator(`[data-active-session-id="${trustedSessionId}"]`)
+			.waitFor({ state: "visible", timeout: 15_000 });
 
 		phase = "verifying packaged Project Skill catalog";
 		await page.getByRole("button", { name: "Customize", exact: true }).click();
@@ -1873,7 +2102,10 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(userCredentialDialog).toHaveCount(0);
 		await page.getByRole("button", { name: "Back to MCP", exact: true }).click();
 		await page.getByRole("button", { name: "New MCP", exact: true }).click();
-		await page.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: "Project", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "New MCP", exact: true })
+			.getByRole("menuitem", { name: "Project", exact: true })
+			.click();
 		const projectMcpDialog = page.getByRole("dialog", { name: "Create Project MCP" });
 		await projectMcpDialog.getByRole("button", { name: "Import JSON", exact: true }).click();
 		await projectMcpDialog.getByLabel("MCP JSON or JSONC", { exact: true }).fill(`{
@@ -1901,7 +2133,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const authPath = path.join(agentDir, "auth.json");
 		const authText = await readFile(authPath, "utf8");
 		const auth = JSON.parse(authText) as Record<string, unknown>;
-		const packagedCredentialKeys = Object.keys(auth).filter((key) => authHasMcpServer({ [key]: true }, "packaged-http"));
+		const packagedCredentialKeys = Object.keys(auth).filter((key) =>
+			authHasMcpServer({ [key]: true }, "packaged-http"),
+		);
 		expect(packagedCredentialKeys).toHaveLength(2);
 		expect(authText).toContain("METIS_E2E_USER_MCP_SECRET");
 		expect(authText).toContain("METIS_E2E_PROJECT_MCP_SECRET");
@@ -1941,12 +2175,22 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await removeMcpDialog.getByRole("button", { name: "Remove", exact: true }).click();
 		await expect(removeMcpDialog).toHaveCount(0);
 		await expect(page.getByRole("option", { name: "packaged-http", exact: true })).toHaveCount(0);
-		const globalSettings = JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8")) as { mcpServers?: Record<string, unknown> };
+		const globalSettings = JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8")) as {
+			mcpServers?: Record<string, unknown>;
+		};
 		expect(globalSettings.mcpServers?.["packaged-http"]).toBeUndefined();
-		const projectSettings = JSON.parse(await readFile(path.join(projectDir, ".metis", "settings.json"), "utf8")) as { mcpServers?: Record<string, unknown> };
+		const projectSettings = JSON.parse(await readFile(path.join(projectDir, ".metis", "settings.json"), "utf8")) as {
+			mcpServers?: Record<string, unknown>;
+		};
 		expect(projectSettings.mcpServers?.["packaged-http"]).toBeUndefined();
-		await page.locator(".project-group").filter({ hasText: path.basename(projectDir) }).locator(".session-button").click();
-		await page.locator(`[data-active-session-id="${trustedSessionId}"]`).waitFor({ state: "visible", timeout: 15_000 });
+		await page
+			.locator(".project-group")
+			.filter({ hasText: path.basename(projectDir) })
+			.locator(".session-button")
+			.click();
+		await page
+			.locator(`[data-active-session-id="${trustedSessionId}"]`)
+			.waitFor({ state: "visible", timeout: 15_000 });
 
 		const rootPid = app.pid;
 		if (!rootPid) throw new Error("Packaged app has no process id");
@@ -1980,7 +2224,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const customAnswer = questionPanel.getByLabel("Something else");
 		await expect(customAnswer).toBeVisible();
 		await expect(customAnswer).toHaveValue("");
-		await expect(page.locator(".transcript .conversation-interaction-card").filter({ has: questionPanel })).toHaveCount(1);
+		await expect(
+			page.locator(".transcript .conversation-interaction-card").filter({ has: questionPanel }),
+		).toHaveCount(1);
 		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeQuestions);
 		await questionPanel.getByRole("checkbox", { name: "Fast and concise", exact: true }).click();
 		await questionPanel.getByRole("checkbox", { name: "Adapt to context", exact: true }).click();
@@ -1996,15 +2242,23 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await questionPanel.getByRole("checkbox", { name: "Contextual", exact: true }).click();
 		await questionPanel.getByRole("checkbox", { name: "Friendly", exact: true }).focus();
 		await expect(questionPanel.getByRole("checkbox", { checked: true })).toHaveCount(2);
-		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-last.png") });
+		await page.screenshot({
+			animations: "disabled",
+			path: path.join(askUserQaDir, "inline-question-multi-last.png"),
+		});
 		phase = "filling the packaged multi-select custom answer";
 		await questionPanel.getByLabel("Something else").fill("Linux later", { timeout: 5_000 });
 		phase = "submitting packaged structured questions";
-		await page.screenshot({ animations: "disabled", path: path.join(askUserQaDir, "inline-question-multi-custom.png") });
+		await page.screenshot({
+			animations: "disabled",
+			path: path.join(askUserQaDir, "inline-question-multi-custom.png"),
+		});
 		await questionPanel.getByRole("button", { name: "Confirm and continue", exact: true }).click();
 		await expect(questionPanel).toHaveCount(0);
 		await expect.poll(() => providerRequests).toBe(5);
-		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeQuestions);
+		await expect
+			.poll(() => transcriptScroll.evaluate((element) => element.clientHeight))
+			.toBe(transcriptHeightBeforeQuestions);
 
 		phase = "answering a packaged single-select question";
 		await page.locator("#composer-input").fill("request packaged single question");
@@ -2034,18 +2288,22 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(approvalPanel).not.toContainText("Arguments:");
 		await expect(approvalPanel.locator("details")).toHaveCount(0);
 		// The approval renders inline in the transcript, so the transcript viewport is unchanged.
-		await expect(page.locator(".transcript .conversation-interaction-card").filter({ has: approvalPanel })).toHaveCount(1);
+		await expect(
+			page.locator(".transcript .conversation-interaction-card").filter({ has: approvalPanel }),
+		).toHaveCount(1);
 		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
 		const denyButton = approvalPanel.getByRole("button", { name: /Reject/u });
 		const allowButton = approvalPanel.getByRole("button", { name: "Allow once", exact: true });
 		const [denyBox, allowBox] = await Promise.all([denyButton.boundingBox(), allowButton.boundingBox()]);
-		expect((allowBox?.x ?? 0)).toBeGreaterThan(denyBox?.x ?? 0);
+		expect(allowBox?.x ?? 0).toBeGreaterThan(denyBox?.x ?? 0);
 		await page.screenshot({ path: path.join(permissionQaDir, "modal-approval.png") });
 		await allowButton.click();
 		await expect(approvalPanel).toHaveCount(0);
 		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
 		await expect.poll(() => providerRequests).toBe(9);
-		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
+		await expect
+			.poll(() => transcriptScroll.evaluate((element) => element.clientHeight))
+			.toBe(transcriptHeightBeforeApproval);
 
 		phase = "creating and running a packaged scheduled task";
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
@@ -2057,7 +2315,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(page.getByRole("listbox", { name: "Sort scheduled tasks" })).toBeVisible();
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-sort-menu.png") });
 		await page.getByRole("option", { name: "Next run", exact: true }).click();
-		const headerNewTaskTrigger = page.locator(".scheduled-tasks-header").getByRole("button", { name: "Create scheduled task", exact: true });
+		const headerNewTaskTrigger = page
+			.locator(".scheduled-tasks-header")
+			.getByRole("button", { name: "Create scheduled task", exact: true });
 		await headerNewTaskTrigger.click();
 		await expect(page.getByRole("listbox", { name: "Create scheduled task" })).toBeVisible();
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-new-task-menu-top.png") });
@@ -2066,9 +2326,18 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const newTaskMenu = page.getByRole("listbox", { name: "Create scheduled task" });
 		await expect(newTaskMenu).toBeVisible();
 		await expect.poll(async () => (await newTaskMenu.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(204);
-		const [newTaskTriggerBox, newTaskMenuBox] = await Promise.all([headerNewTaskTrigger.boundingBox(), newTaskMenu.boundingBox()]);
+		const [newTaskTriggerBox, newTaskMenuBox] = await Promise.all([
+			headerNewTaskTrigger.boundingBox(),
+			newTaskMenu.boundingBox(),
+		]);
 		expect(newTaskMenuBox?.width).toBeGreaterThanOrEqual(204);
-		expect(Math.abs((newTaskMenuBox?.x ?? 0) + (newTaskMenuBox?.width ?? 0) - ((newTaskTriggerBox?.x ?? 0) + (newTaskTriggerBox?.width ?? 0)))).toBeLessThanOrEqual(1);
+		expect(
+			Math.abs(
+				(newTaskMenuBox?.x ?? 0) +
+					(newTaskMenuBox?.width ?? 0) -
+					((newTaskTriggerBox?.x ?? 0) + (newTaskTriggerBox?.width ?? 0)),
+			),
+		).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: path.join(scheduleQaDir, "overview-new-task-menu.png") });
 		await page.getByRole("option", { name: "Create with Metis", exact: true }).click();
 		const workspaceDialog = page.getByRole("dialog", { name: "Where should this task work?" });
@@ -2100,25 +2369,36 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		const runNowButton = page.getByRole("button", { name: "Run now", exact: true });
 		await runNowButton.click();
 		await expect(runNowButton).toBeDisabled();
-		await expect(page.locator(".scheduled-task-history").getByText("succeeded", { exact: true })).toBeVisible({ timeout: 20_000 });
+		await expect(page.locator(".scheduled-task-history").getByText("succeeded", { exact: true })).toBeVisible({
+			timeout: 20_000,
+		});
 		expect(providerRequests).toBe(11);
 		expect(providerToolNames.at(-1)?.sort()).toEqual(
 			["bash", "edit", "find", "grep", "ls", "read", "web_fetch", "web_search", "write"].sort(),
 		);
 		await expect(runNowButton).toBeEnabled();
 		await page.mouse.move(0, 0);
-		expect(await runNowButton.evaluate((element) => {
-			const style = getComputedStyle(element);
-			return { backgroundColor: style.backgroundColor, opacity: style.opacity };
-		})).toEqual({ backgroundColor: await resolvedColor(page, "--button-primary-bg"), opacity: "1" });
+		expect(
+			await runNowButton.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { backgroundColor: style.backgroundColor, opacity: style.opacity };
+			}),
+		).toEqual({ backgroundColor: await resolvedColor(page, "--button-primary-bg"), opacity: "1" });
 		await page.screenshot({ path: path.join(scheduleQaDir, "task-detail.png") });
 		await page.locator(".scheduled-task-history").getByRole("button").click();
-		await expect(visiblePanel(page).locator(".transcript-scroll").getByText("Summarize the current project status.", { exact: true })).toBeVisible();
+		await expect(
+			visiblePanel(page)
+				.locator(".transcript-scroll")
+				.getByText("Summarize the current project status.", { exact: true }),
+		).toBeVisible();
 
 		phase = "retaining and deleting a packaged scheduled session from the sidebar";
 		await page.locator(".session-sidebar").getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await expect(page.locator("main").getByRole("heading", { name: "Scheduled tasks", exact: true })).toBeVisible();
-		await page.locator(".scheduled-task-quick-list").getByRole("button", { name: "Morning brief", exact: true }).click();
+		await page
+			.locator(".scheduled-task-quick-list")
+			.getByRole("button", { name: "Morning brief", exact: true })
+			.click();
 		await expect(page.locator("main").getByRole("heading", { name: "Morning brief", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Delete task" }).click();
 		const deleteTaskDialog = page.getByRole("dialog", { name: "Delete “Morning brief”?" });
@@ -2133,19 +2413,35 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(retainedSessionDot).toHaveCSS("width", "6px");
 		await expect(retainedSessionDot).toHaveCSS("height", "6px");
 		await expect(retainedSessionDot).toHaveCSS("border-radius", "50%");
-		await expect(page.locator(".scheduled-task-quick-list").getByRole("heading", { name: "Scheduled tasks" })).toBeVisible();
-		expect(await page.locator(".project-list").locator(
-			".session-grouping-label, .loose-tasks > h2, .scheduled-task-quick-list > h2",
-		).allTextContents()).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
-		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar.png") });
+		await expect(
+			page.locator(".scheduled-task-quick-list").getByRole("heading", { name: "Scheduled tasks" }),
+		).toBeVisible();
+		expect(
+			await page
+				.locator(".project-list")
+				.locator(".session-grouping-label, .loose-tasks > h2, .scheduled-task-quick-list > h2")
+				.allTextContents(),
+		).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
+		await page
+			.locator(".session-sidebar")
+			.screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar.png") });
 		const retainedSessionName = await retainedSessionRow.locator(".session-button").getAttribute("aria-label");
 		expect(retainedSessionName).toBeTruthy();
 		await retainedSessionRow.hover();
-		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar-actions.png") });
+		await page
+			.locator(".session-sidebar")
+			.screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar-actions.png") });
 		await retainedSessionRow.getByRole("button", { name: `Actions for ${retainedSessionName}`, exact: true }).click();
-		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Delete"]);
+		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText([
+			"Pin",
+			"Copy title",
+			"Delete",
+		]);
 		await page.locator(".session-action-menu").getByRole("menuitem", { name: "Delete" }).click();
-		await page.getByRole("dialog", { name: "Delete session?" }).getByRole("button", { name: "Move to Trash" }).click();
+		await page
+			.getByRole("dialog", { name: "Delete session?" })
+			.getByRole("button", { name: "Move to Trash" })
+			.click();
 		await expect(retainedSessionRow).toHaveCount(0);
 		await expect(page.locator(".scheduled-task-quick-list")).toHaveCount(0);
 		const remainingSessions = await page.evaluate(() =>
@@ -2156,7 +2452,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		);
 		await page.locator(".session-sidebar").getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Scheduled tasks", exact: true })).toBeVisible();
-		await expect(page.locator(".scheduled-task-quick-list").getByText("Morning brief", { exact: true })).toHaveCount(0);
+		await expect(page.locator(".scheduled-task-quick-list").getByText("Morning brief", { exact: true })).toHaveCount(
+			0,
+		);
 
 		phase = "reloading and restarting";
 		await page.reload({ waitUntil: "domcontentloaded" });
@@ -2179,7 +2477,10 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await stopProcess(app);
 		await expect.poll(() => processIsAlive(finalUtilityPid!)).toBe(false);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${providerRequests}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -2216,16 +2517,18 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	const skillNames = ["pdf", "ponytail", "writing-plans"];
 	for (let index = 0; index < 18; index += 1) {
 		const mode = index < 12 ? "code" : "chat";
-		const manager = fixtures.SessionManager.create(
-			projectDir,
-			fixtures.getDefaultSessionDir(projectDir, agentDir),
-			{ id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, mode },
-		);
+		const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
+			id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+			mode,
+		});
 		const timestamp = now - index * 2 * 86_400_000;
 		manager.appendMessage({ role: "user", content: `profile fixture ${index}`, timestamp });
 		manager.appendThinkingLevelChange(index < 12 ? "high" : "medium");
 		manager.appendMessage(assistantMessage(timestamp + 30 * 60_000, (index + 1) * 850));
-		manager.appendCustomEntry("metis.skill_usage.v1", { name: skillNames[index % skillNames.length], trigger: "read" });
+		manager.appendCustomEntry("metis.skill_usage.v1", {
+			name: skillNames[index % skillNames.length],
+			trigger: "read",
+		});
 		manager.close();
 	}
 
@@ -2239,7 +2542,9 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await waitForServerReady(page);
 
@@ -2257,9 +2562,13 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		});
 		await expect(page.locator(".profile-avatar img")).toBeVisible();
 		await expect(page.locator(".account-mark img")).toBeVisible();
-		const storedAvatar = await page.evaluate(() =>
-			(JSON.parse(localStorage.getItem("metis.profile.identity.v1") ?? "null") as { avatarDataUrl?: string } | null)
-				?.avatarDataUrl,
+		const storedAvatar = await page.evaluate(
+			() =>
+				(
+					JSON.parse(localStorage.getItem("metis.profile.identity.v1") ?? "null") as {
+						avatarDataUrl?: string;
+					} | null
+				)?.avatarDataUrl,
 		);
 		expect(storedAvatar).toMatch(/^data:image\/webp;base64,/u);
 		expect(storedAvatar!.length).toBeLessThan(50_000);
@@ -2291,14 +2600,14 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		const { generatedAt: secondGeneratedAt, ...secondProfile } = measurements.second;
 		expect(firstProfile).toEqual(secondProfile);
 		expect(Date.parse(secondGeneratedAt)).toBeGreaterThanOrEqual(Date.parse(firstGeneratedAt));
-			expect(measurements.first).toMatchObject({
-				totalTokens: 145_350,
-				sessionCount: 18,
-				mostUsedMode: "code",
-				mostUsedModePercent: 67,
-				mostUsedThinkingLevel: "high",
-				mostUsedThinkingLevelPercent: 67,
-				usedSkillCount: 3,
+		expect(measurements.first).toMatchObject({
+			totalTokens: 145_350,
+			sessionCount: 18,
+			mostUsedMode: "code",
+			mostUsedModePercent: 67,
+			mostUsedThinkingLevel: "high",
+			mostUsedThinkingLevelPercent: 67,
+			usedSkillCount: 3,
 			skillUseCount: 18,
 			topSkills: [
 				{ name: "pdf", count: 6 },
@@ -2342,22 +2651,32 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		// pointer-only pseudo-class so the hover event reaches Chromium.
 		await page.bringToFront();
 		await tooltipCell.hover();
-		await expect.poll(() => tooltipCell.evaluate((cell) => {
-			const box = cell.getBoundingClientRect();
-			const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-			return {
-				hovered: cell.matches(":hover"),
-				hit: hit ? `${hit.tagName}.${hit.className}` : null,
-				hoverChain: Array.from(document.querySelectorAll(":hover"))
-					.map((element) => `${element.tagName}.${element.className}`)
-					.slice(-6),
-				box: [box.left, box.top, box.width, box.height],
-			};
-		})).toMatchObject({ hovered: true });
+		await expect
+			.poll(() =>
+				tooltipCell.evaluate((cell) => {
+					const box = cell.getBoundingClientRect();
+					const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+					return {
+						hovered: cell.matches(":hover"),
+						hit: hit ? `${hit.tagName}.${hit.className}` : null,
+						hoverChain: Array.from(document.querySelectorAll(":hover"))
+							.map((element) => `${element.tagName}.${element.className}`)
+							.slice(-6),
+						box: [box.left, box.top, box.width, box.height],
+					};
+				}),
+			)
+			.toMatchObject({ hovered: true });
 		await expect.poll(() => tooltipCell.evaluate((cell) => getComputedStyle(cell, "::after").opacity)).toBe("1");
-		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell).zIndex, 10))).toBeGreaterThan(0);
-		expect.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell.parentElement!).zIndex, 10))).toBeGreaterThan(0);
-		const profileOverflow = await page.locator(".settings-page-scroll").evaluate((element) => element.scrollHeight - element.clientHeight);
+		expect
+			.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell).zIndex, 10)))
+			.toBeGreaterThan(0);
+		expect
+			.soft(await tooltipCell.evaluate((cell) => Number.parseInt(getComputedStyle(cell.parentElement!).zIndex, 10)))
+			.toBeGreaterThan(0);
+		const profileOverflow = await page
+			.locator(".settings-page-scroll")
+			.evaluate((element) => element.scrollHeight - element.clientHeight);
 		expect(profileOverflow).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: path.join(qaDir, "profile-1440x900.png") });
 		await page.screenshot({ path: path.join(qaDir, "profile-tooltip-1440x900.png") });
@@ -2382,26 +2701,32 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await page.setViewportSize({ width: 1440, height: 820 });
 		await expect(page.locator(".usage-toolbar")).toHaveCSS("margin-bottom", "8px");
 		await expect(page.locator(".usage-details-grid")).toHaveCSS("gap", "14px");
-		const chartOverflow = await page.locator(".settings-page-scroll-profile").evaluate(
-			(element) => element.scrollHeight - element.clientHeight,
-		);
+		const chartOverflow = await page
+			.locator(".settings-page-scroll-profile")
+			.evaluate((element) => element.scrollHeight - element.clientHeight);
 		expect(chartOverflow).toBeGreaterThan(0);
 		expect(chartOverflow).toBeLessThanOrEqual(240);
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-1440x820.png") });
 		const tableView = page.getByRole("button", { name: "Table view", exact: true });
 		const chartView = page.getByRole("button", { name: "Chart view", exact: true });
-		const chartCardHeight = await page.locator(".usage-chart-card").evaluate((element) => element.getBoundingClientRect().height);
+		const chartCardHeight = await page
+			.locator(".usage-chart-card")
+			.evaluate((element) => element.getBoundingClientRect().height);
 		await tableView.click();
 		await expect(tableView).toHaveAttribute("aria-pressed", "true");
 		expect(await page.locator(".usage-table-wrap tbody tr")).toHaveCount(30);
-		const tableCardHeight = await page.locator(".usage-chart-card").evaluate((element) => element.getBoundingClientRect().height);
+		const tableCardHeight = await page
+			.locator(".usage-chart-card")
+			.evaluate((element) => element.getBoundingClientRect().height);
 		expect(Math.abs(chartCardHeight - tableCardHeight)).toBeLessThanOrEqual(1);
-		const tableOverflow = await page.locator(".settings-page-scroll-profile").evaluate(
-			(element) => element.scrollHeight - element.clientHeight,
-		);
+		const tableOverflow = await page
+			.locator(".settings-page-scroll-profile")
+			.evaluate((element) => element.scrollHeight - element.clientHeight);
 		expect(tableOverflow).toBeGreaterThan(0);
 		expect(tableOverflow).toBeLessThanOrEqual(240);
-		expect(await page.locator(".usage-view-toggle").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+		expect(
+			await page.locator(".usage-view-toggle").evaluate((element) => getComputedStyle(element).backgroundColor),
+		).toBe("rgba(0, 0, 0, 0)");
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-30d-1440x820.png") });
 		await chartView.click();
 		await expect(chartView).toHaveAttribute("aria-pressed", "true");
@@ -2410,9 +2735,9 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await tableView.click();
 		await expect(tableView).toHaveAttribute("aria-pressed", "true");
 		await expect(page.locator(".usage-table-wrap tbody tr")).toHaveCount(7);
-		const compactTableOverflow = await page.locator(".settings-page-scroll-profile").evaluate(
-			(element) => element.scrollHeight - element.clientHeight,
-		);
+		const compactTableOverflow = await page
+			.locator(".settings-page-scroll-profile")
+			.evaluate((element) => element.scrollHeight - element.clientHeight);
 		expect(compactTableOverflow).toBeGreaterThan(0);
 		expect(compactTableOverflow).toBeLessThanOrEqual(240);
 		await page.screenshot({ path: path.join(settingsQaDir, "usage-table-1440x820.png") });
@@ -2422,14 +2747,18 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 
 		phase = "checking Model settings";
 		await page.getByRole("button", { name: "Model", exact: true }).click();
-		await expect(page.locator(".settings-main-header").getByRole("heading", { name: "Model", exact: true })).toBeVisible();
+		await expect(
+			page.locator(".settings-main-header").getByRole("heading", { name: "Model", exact: true }),
+		).toBeVisible();
 		await page.getByRole("button", { name: "Add provider", exact: true }).click();
 		const providerCatalog = page.getByRole("dialog", { name: "Add provider", exact: true });
 		await expect(providerCatalog).toBeVisible();
 		const providerGrid = providerCatalog.locator(".model-provider-grid");
 		await expect(providerGrid.locator(".model-provider-card")).not.toHaveCount(0);
 		await page.screenshot({ path: path.join(settingsQaDir, "model-grid-1440x820.png") });
-		expect(cssGridTrackCount(await providerGrid.evaluate((grid) => getComputedStyle(grid).gridTemplateColumns))).toBe(2);
+		expect(cssGridTrackCount(await providerGrid.evaluate((grid) => getComputedStyle(grid).gridTemplateColumns))).toBe(
+			2,
+		);
 		// The catalog paginates its providers and OpenAI is not on the first page.
 		const catalogSearch = providerCatalog.getByRole("searchbox", { name: "Search providers" });
 		await catalogSearch.fill("OpenAI");
@@ -2450,9 +2779,10 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await builtinEditor.getByRole("button", { name: "Set as default for new tasks", exact: true }).click();
 		await expect(page.getByText("Defaults saved", { exact: true })).toBeVisible();
 		await expect(page.locator(".settings-page-scroll-model")).toHaveCSS("overflow-y", "auto");
-		expect((await page.evaluate(() =>
-			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings(),
-		)).defaultModel?.provider).toBe("openai");
+		expect(
+			(await page.evaluate(() => (globalThis as unknown as { metis: MetisDesktopApi }).metis.getModelSettings()))
+				.defaultModel?.provider,
+		).toBe("openai");
 		await page.screenshot({ path: path.join(settingsQaDir, "model-builtin-1440x820.png") });
 		await builtinEditor.getByRole("button", { name: "Clear credentials", exact: true }).click();
 		await builtinEditor.getByRole("button", { name: "Confirm clear credentials", exact: true }).click();
@@ -2477,9 +2807,9 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await page.setViewportSize({ width: 960, height: 720 });
 		await expect(page.getByRole("heading", { name: "Metis User", exact: true })).toBeVisible();
 		expect(
-			await page.locator(".profile-stats").evaluate((element) =>
-				getComputedStyle(element).gridTemplateColumns.split(" ").length,
-			),
+			await page
+				.locator(".profile-stats")
+				.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
 		).toBe(3);
 		expect(
 			await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
@@ -2487,7 +2817,10 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		await page.screenshot({ path: path.join(qaDir, "profile-960x720.png") });
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -2558,7 +2891,10 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 
 		const openCreation = async (scope: "User" | "Project") => {
 			await page!.getByRole("button", { name: "New MCP", exact: true }).click();
-			await page!.getByRole("menu", { name: "New MCP", exact: true }).getByRole("menuitem", { name: scope, exact: true }).click();
+			await page!
+				.getByRole("menu", { name: "New MCP", exact: true })
+				.getByRole("menuitem", { name: scope, exact: true })
+				.click();
 			return page!.getByRole("dialog", { name: `Create ${scope} MCP` });
 		};
 		const expectConnected = async (name: string, tool: string, inspectCatalog = false) => {
@@ -2673,7 +3009,10 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		await dialog.getByRole("button", { name: "Import selected servers", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
 
-		for (const [name, tool] of [["json-http", "search_docs"], ["json-stdio", "env_status"]] as const) {
+		for (const [name, tool] of [
+			["json-http", "search_docs"],
+			["json-stdio", "env_status"],
+		] as const) {
 			await page.getByLabel("Search MCP servers").fill(name);
 			await page.getByRole("option", { name, exact: true }).click();
 			await expectConnected(name, tool);
@@ -2687,7 +3026,10 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		expect(Object.keys(globalSettings.mcpServers ?? {}).sort()).toEqual(["custom-http", "custom-stdio", "url-http"]);
 		expect(Object.keys(projectSettings.mcpServers ?? {}).sort()).toEqual(["json-http", "json-stdio"]);
 		expect(globalSettings.mcpServers?.["url-http"]).toMatchObject({ description: "URL smoke server" });
-		for (const server of Object.values({ ...(globalSettings.mcpServers ?? {}), ...(projectSettings.mcpServers ?? {}) })) {
+		for (const server of Object.values({
+			...(globalSettings.mcpServers ?? {}),
+			...(projectSettings.mcpServers ?? {}),
+		})) {
 			expect(server).not.toHaveProperty("enabledTools");
 			expect(server).not.toHaveProperty("disabledTools");
 		}
@@ -2703,14 +3045,18 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		const auth = JSON.parse(authText) as Record<string, unknown>;
 		expect(Object.keys(auth)).toHaveLength(5);
 		for (const name of ["url-http", "custom-http", "custom-stdio", "json-http", "json-stdio"]) {
-			expect(authHasMcpServer(auth, name), `missing MCP credential for ${name} in ${Object.keys(auth).join(", ")}`).toBe(
-				true,
-			);
+			expect(
+				authHasMcpServer(auth, name),
+				`missing MCP credential for ${name} in ${Object.keys(auth).join(", ")}`,
+			).toBe(true);
 		}
 		for (const secret of secrets) expect(authText).toContain(secret);
 		if (process.platform !== "win32") expect((await stat(authPath)).mode & 0o077).toBe(0);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -2722,7 +3068,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 	}
 });
 
-test("packaged Code agent sidebar lists durable work and opens its transcript", async () => {
+test("packaged Code session tree lists durable agents and opens their conversations", async () => {
 	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
@@ -2766,16 +3112,12 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		timeoutSeconds: 60,
 		mayDelegate: true,
 	};
-	const child = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getSessionAgentDir(agentDir, CODE_ID),
-		{
-			id: childId,
-			mode: "code",
-			permissionPreset: "ask",
-			agent: agentHeader,
-		},
-	);
+	const child = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
+		id: childId,
+		mode: "code",
+		permissionPreset: "ask",
+		agent: agentHeader,
+	});
 	child.appendAgentControl({
 		type: "agent_task",
 		agentId: childId,
@@ -2871,33 +3213,29 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	});
 	child.close();
 
-	const nested = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getSessionAgentDir(agentDir, CODE_ID),
-		{
-			id: nestedId,
-			mode: "code",
-			permissionPreset: "ask",
-			agent: {
-				agentId: nestedId,
-				name: "Nested verifier",
-				agentType: "reviewer" as const,
-				parentSessionId: childId,
-				rootSessionId: CODE_ID,
-				agentPath: [childId, nestedId],
-				cwd: projectDir,
-				tools: ["read"],
-				writePolicy: "deny" as const,
-				permissionPreset: "ask" as const,
-				model: { provider: "fixture", modelId: "fixture-model" },
-				thinkingLevel: "off",
-				initialTask: "Verify nested packaged state",
-				forkTurns: 0,
-				timeoutSeconds: 60,
-				mayDelegate: false,
-			},
+	const nested = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
+		id: nestedId,
+		mode: "code",
+		permissionPreset: "ask",
+		agent: {
+			agentId: nestedId,
+			name: "Nested verifier",
+			agentType: "reviewer" as const,
+			parentSessionId: childId,
+			rootSessionId: CODE_ID,
+			agentPath: [childId, nestedId],
+			cwd: projectDir,
+			tools: ["read"],
+			writePolicy: "deny" as const,
+			permissionPreset: "ask" as const,
+			model: { provider: "fixture", modelId: "fixture-model" },
+			thinkingLevel: "off",
+			initialTask: "Verify nested packaged state",
+			forkTurns: 0,
+			timeoutSeconds: 60,
+			mayDelegate: false,
 		},
-	);
+	});
 	nested.appendAgentControl({
 		type: "agent_task",
 		agentId: nestedId,
@@ -2922,33 +3260,29 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	});
 	nested.close();
 
-	const archived = fixtures.SessionManager.create(
-		projectDir,
-		fixtures.getSessionAgentDir(agentDir, CODE_ID),
-		{
-			id: archivedId,
-			mode: "code",
-			permissionPreset: "ask",
-			agent: {
-				agentId: archivedId,
-				name: "Archived result reviewer",
-				agentType: "reviewer" as const,
-				parentSessionId: CODE_ID,
-				rootSessionId: CODE_ID,
-				agentPath: [archivedId],
-				cwd: projectDir,
-				tools: ["read"],
-				writePolicy: "deny" as const,
-				permissionPreset: "ask" as const,
-				model: { provider: "fixture", modelId: "fixture-model" },
-				thinkingLevel: "off",
-				initialTask: "Review archived result",
-				forkTurns: 0,
-				timeoutSeconds: 60,
-				mayDelegate: false,
-			},
+	const archived = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
+		id: archivedId,
+		mode: "code",
+		permissionPreset: "ask",
+		agent: {
+			agentId: archivedId,
+			name: "Archived result reviewer",
+			agentType: "reviewer" as const,
+			parentSessionId: CODE_ID,
+			rootSessionId: CODE_ID,
+			agentPath: [archivedId],
+			cwd: projectDir,
+			tools: ["read"],
+			writePolicy: "deny" as const,
+			permissionPreset: "ask" as const,
+			model: { provider: "fixture", modelId: "fixture-model" },
+			thinkingLevel: "off",
+			initialTask: "Review archived result",
+			forkTurns: 0,
+			timeoutSeconds: 60,
+			mayDelegate: false,
 		},
-	);
+	});
 	const archivedTaskId = "30000000-0000-4000-8000-000000000004";
 	archived.appendAgentControl({
 		type: "agent_task",
@@ -2985,7 +3319,9 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
 		await page.setViewportSize({ width: 1280, height: 1000 });
 		await waitForServerReady(page);
@@ -2993,60 +3329,40 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
-		expect(await page.evaluate(() => typeof (window as Window & { metis?: { interruptAgent?: unknown } }).metis?.interruptAgent)).toBe("function");
+		expect(
+			await page.evaluate(
+				() => typeof (window as Window & { metis?: { interruptAgent?: unknown } }).metis?.interruptAgent,
+			),
+		).toBe("function");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
-		phase = "opening the Agents tool";
-		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await openTool(page, "Agents");
-		await expect(page.locator(".subagent-panel-heading").getByText("Agents", { exact: true })).toBeVisible();
-		await expect(page.getByText("Inspect packaged project", { exact: true })).toBeVisible();
-		const agentTree = page.getByRole("tree", { name: "Agent tree", exact: true });
+		phase = "opening the left agent tree";
+		const agentTree = page.getByRole("tree", { name: "Agent conversations", exact: true });
 		await expect(agentTree.getByRole("treeitem")).toHaveCount(2);
-		await expect(agentTree.getByRole("treeitem").nth(0)).toHaveAttribute("aria-level", "1");
-		await expect(agentTree.getByRole("treeitem").nth(0)).toHaveAttribute("aria-expanded", "true");
-		await expect(agentTree.getByRole("treeitem").nth(1)).toHaveAttribute("aria-level", "2");
-		await expect(page.getByText("35 tokens", { exact: true })).toBeVisible();
-		await expect(page.getByText("1 tool use", { exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Collapse Packaged project inspector", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toHaveCount(0);
-		await page.getByRole("button", { name: "Expand Packaged project inspector", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Show archived", exact: true }).click();
-		// Selecting an agent routes the full center conversation; the sidebar tree stays mounted beside it.
-		await page.getByRole("button", { name: "View summary for Archived result reviewer", exact: true }).click();
-		const archivedConversation = page.getByRole("region", { name: "Agent conversation", exact: true });
-		await expect(archivedConversation).toBeVisible();
-		await expect(page.getByRole("heading", { name: "Archived result", exact: true })).toBeVisible();
-		await expect(page.getByText("no remaining issues", { exact: true })).toBeVisible();
-		// Archive state is managed from the sidebar card while the conversation stays open.
-		const archivedCard = page.locator(".subagent-card").filter({ hasText: "Archived result reviewer" });
-		await archivedCard.getByRole("button", { name: "Unarchive agent", exact: true }).click();
-		await expect(archivedCard.getByRole("button", { name: "Archive agent", exact: true })).toBeVisible();
-		await expect(page.getByRole("button", { name: "View transcript for Archived result reviewer", exact: true })).toBeVisible();
-		await archivedCard.getByRole("button", { name: "Archive agent", exact: true }).click();
-		await expect(archivedCard.getByRole("button", { name: "Unarchive agent", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "Open parent conversation", exact: true }).first().click();
-		await resizeWorkspacePanel(page, 392);
-		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "New browser tab", exact: true }).first()).toBeInViewport();
-		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "list-392x986.png") });
-		await resizeWorkspacePanel(page, 280);
-		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "New browser tab", exact: true })).toBeInViewport();
-		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "list-280x986.png") });
-		await resizeWorkspacePanel(page, 392);
+		const inspectorNode = agentTree.getByRole("treeitem", { name: "Packaged project inspector", exact: true });
+		await expect(inspectorNode).toHaveAttribute("aria-expanded", "true");
+		await expect(inspectorNode.getByRole("treeitem", { name: "Nested verifier", exact: true })).toBeVisible();
+		await expect(agentTree.getByRole("button", { name: "Archived result reviewer", exact: true })).toHaveCount(0);
+		await inspectorNode.getByRole("button", { name: "Collapse agent tasks", exact: true }).click();
+		await expect(inspectorNode).toHaveAttribute("aria-expanded", "false");
+		await expect(agentTree.getByRole("button", { name: "Nested verifier", exact: true })).toHaveCount(0);
+		await inspectorNode.getByRole("button", { name: "Expand agent tasks", exact: true }).click();
+		await expect(agentTree.getByRole("button", { name: "Nested verifier", exact: true })).toBeVisible();
+		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-agent-tree.png") });
 
 		phase = "opening the child transcript";
-		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
+		await agentTree.getByRole("button", { name: "Packaged project inspector", exact: true }).click();
 		const transcript = page.getByRole("region", { name: "Agent conversation", exact: true });
 		await expect(transcript).toBeVisible();
+		await expect(inspectorNode).toHaveAttribute("aria-selected", "true");
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		await transcript.locator(".code-execution > summary").last().click();
 		await transcript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(transcript.getByText("Packaged tool output", { exact: true })).toBeVisible();
-		expect(await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow)).toBe("auto");
+		expect(
+			await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow),
+		).toBe("auto");
 		// The full conversation integrates every task; load the earliest page to reach the first task.
 		await page.getByRole("button", { name: "Load older messages", exact: true }).click();
 		await expect(transcript.getByRole("button", { name: "Load older messages", exact: true })).toHaveCount(0);
@@ -3056,33 +3372,36 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await expect(page.getByText("Inspect initial packaged state", { exact: true })).toBeVisible();
 		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
 		expect(await transcript.locator("[data-transcript-item]").count()).toBeLessThanOrEqual(24);
-		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-392x986.png") });
-		await page.setViewportSize({ width: 1280, height: 938 });
-		await resizeWorkspacePanel(page, 856);
-		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-856x924.png") });
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "agent-history.png") });
 
-		phase = "reopening the Agents tab";
-		await page.getByRole("button", { name: "Close Agents", exact: true }).click();
-		await openTool(page, "Agents");
-		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
-		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
-		await expect(page.getByText("Initial packaged handoff", { exact: true })).toBeVisible();
+		phase = "reopening the child from the session tree";
+		await page.getByRole("button", { name: "Open parent conversation", exact: true }).first().click();
+		await expect(visiblePanel(page)).not.toContainText("Initial packaged handoff");
+		await agentTree.getByRole("button", { name: "Packaged project inspector", exact: true }).click();
+		await expect(transcript).toBeVisible();
+		await expect(transcript.getByRole("button", { name: "Load older messages", exact: true })).toHaveCount(0);
+		await transcript.locator(".transcript-scroll").evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+		await expect(transcript.getByText("Packaged child completed", { exact: true })).toBeVisible();
 
-		phase = "deleting a nested agent";
-		await page.getByRole("button", { name: "View transcript for Nested verifier", exact: true }).click();
-		const nestedCard = page.locator(".subagent-card").filter({ hasText: "Nested verifier" });
-		page.once("dialog", (dialog) => dialog.accept());
-		await nestedCard.getByRole("button", { name: "Delete", exact: true }).click();
-		await expect(page.getByRole("button", { name: "View transcript for Nested verifier", exact: true })).toHaveCount(0);
-		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
-		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
+		phase = "opening a nested agent and returning to its parent";
+		await agentTree.getByRole("button", { name: "Nested verifier", exact: true }).click();
+		await expect(transcript.getByText("Nested packaged verification complete", { exact: true })).toBeVisible();
+		await expect(transcript).not.toContainText("Packaged child completed");
+		await page.getByRole("button", { name: "Open parent conversation", exact: true }).first().click();
+		await expect(transcript.getByText("Packaged child completed", { exact: true })).toBeVisible();
+		await expect(inspectorNode).toHaveAttribute("aria-selected", "true");
 
 		phase = "checking a narrow app window";
 		await page.setViewportSize({ width: 900, height: 640 });
-		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "New browser tab", exact: true }).first()).toBeInViewport();
+		expect(
+			await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+		).toBeLessThanOrEqual(0);
+		await expect(agentTree.getByRole("button", { name: "Packaged project inspector", exact: true })).toBeInViewport();
+		await expect(
+			page.getByRole("button", { name: "Open parent conversation", exact: true }).first(),
+		).toBeInViewport();
 		await page.screenshot({ path: path.join(qaDir, "narrow-window-900x640.png") });
 
 		phase = "restoring the child after app restart";
@@ -3094,7 +3413,9 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
@@ -3102,10 +3423,10 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await openTool(page, "Agents");
-		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
-		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
+		const restoredTree = page.getByRole("tree", { name: "Agent conversations", exact: true });
+		await expect(restoredTree.getByRole("treeitem")).toHaveCount(2);
+		await expect(restoredTree.getByRole("button", { name: "Archived result reviewer", exact: true })).toHaveCount(0);
+		await restoredTree.getByRole("button", { name: "Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
 		const restoredTranscript = page.getByRole("region", { name: "Agent conversation", exact: true });
 		await restoredTranscript.locator(".code-execution > summary").last().click();
@@ -3115,7 +3436,10 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -3155,7 +3479,9 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
 		await createAndRestoreChatSession(page, projectDir);
@@ -3169,21 +3495,30 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		const firstTerminalId = await page.locator('.terminal-panel[aria-hidden="false"]').getAttribute("id");
 		if (!firstTerminalId?.startsWith("terminal-panel-")) throw new Error("Terminal panel id is missing");
 		const terminalId = firstTerminalId.slice("terminal-panel-".length);
-		await expect.poll(async () => page!.evaluate(async (id) => {
-			try {
-				await (globalThis as unknown as { metis: MetisDesktopApi }).metis.writeTerminal({ terminalId: id, data: "" });
-				return true;
-			} catch {
-				return false;
-			}
-		}, terminalId)).toBe(true);
+		await expect
+			.poll(async () =>
+				page!.evaluate(async (id) => {
+					try {
+						await (globalThis as unknown as { metis: MetisDesktopApi }).metis.writeTerminal({
+							terminalId: id,
+							data: "",
+						});
+						return true;
+					} catch {
+						return false;
+					}
+				}, terminalId),
+			)
+			.toBe(true);
 		await page.evaluate(async (id) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.writeTerminal({
 				terminalId: id,
 				data: "printf '\\x4d\\x45\\x54\\x49\\x53\\x5f\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x45\\x32\\x45\\n'\r",
 			});
 		}, terminalId);
-		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText("METIS_TERMINAL_E2E");
+		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText(
+			"METIS_TERMINAL_E2E",
+		);
 		// The add button follows the last tab in the strip.
 		const strip = page.locator(".tool-sidebar-tabbar");
 		const [lastTabBox, addButtonBox] = await Promise.all([
@@ -3216,7 +3551,10 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal - 1);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -3270,7 +3608,9 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1304, height: 1000 });
 		await waitForServerReady(page);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
@@ -3351,13 +3691,18 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		const treeScrollBox = await treeScroll.boundingBox();
 		if (!treeScrollBox) throw new Error("Missing file tree");
 		await treeScroll.click({ button: "right", position: { x: 16, y: Math.max(24, treeScrollBox.height - 18) } });
-		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "New file", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "File actions", exact: true })
+			.getByRole("menuitem", { name: "New file", exact: true })
+			.click();
 		await page.getByRole("textbox", { name: "Name", exact: true }).fill("scratch.ts");
 		await page.getByRole("textbox", { name: "Name", exact: true }).press("Enter");
 		let scratchEditor = page.getByRole("textbox", { name: "Edit scratch.ts", exact: true });
 		await expect(scratchEditor).toBeVisible();
 		await expect(page.locator(".cm-gutters")).toBeVisible();
-		await expect(page.getByRole("tab", { name: "scratch.ts", exact: true }).locator(".file-kind-icon.is-typescript")).toBeVisible();
+		await expect(
+			page.getByRole("tab", { name: "scratch.ts", exact: true }).locator(".file-kind-icon.is-typescript"),
+		).toBeVisible();
 		await scratchEditor.fill("export const managed = true;\n");
 		await expect(scratchEditor.locator("span", { hasText: /^export$/u })).toHaveCSS("color", "rgb(255, 123, 114)");
 		await expect(page.locator('.file-tree-row [title="scratch.ts"] .file-kind-icon.is-typescript')).toBeVisible();
@@ -3367,7 +3712,10 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await scratchEditor.press("Escape");
 
 		await page.locator('.file-tree-row [title="scratch.ts"]').click({ button: "right" });
-		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Rename", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "File actions", exact: true })
+			.getByRole("menuitem", { name: "Rename", exact: true })
+			.click();
 		await page.getByRole("textbox", { name: "Name", exact: true }).fill("managed.ts");
 		await panel.screenshot({ path: path.join(qaDir, "rename-file-dialog.png") });
 		await page.getByRole("textbox", { name: "Name", exact: true }).press("Enter");
@@ -3378,11 +3726,15 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 
 		await scratchEditor.press("ControlOrMeta+s");
 		await expect(page.locator(".file-preview-notice")).toHaveText("File saved");
-		await expect.poll(() => readFile(path.join(projectDir, "managed.ts"), "utf8"))
+		await expect
+			.poll(() => readFile(path.join(projectDir, "managed.ts"), "utf8"))
 			.toBe("export const managed = true;\n");
 
 		await page.locator('.file-tree-row [title="managed.ts"]').click({ button: "right" });
-		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Move to Trash", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "File actions", exact: true })
+			.getByRole("menuitem", { name: "Move to Trash", exact: true })
+			.click();
 		const mutationDialog = page.getByRole("dialog", { name: "Move managed.ts to Trash?" });
 		await expect(mutationDialog).toContainText("The saved version can be recovered from Trash.");
 		await panel.screenshot({ path: path.join(qaDir, "move-file-to-trash-dialog.png") });
@@ -3445,7 +3797,10 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(editor).toHaveCount(0);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -3460,261 +3815,334 @@ const reviewPerformanceTest = test.extend({
 	trace: { mode: "retain-on-failure", snapshots: false, screenshots: true },
 });
 
-reviewPerformanceTest("packaged Code review lazily renders diffs and keeps folder-controlled details responsive", async () => {
-	test.setTimeout(120_000);
-	const fixtures = await loadCodingFixtures();
-	const executable = packagedExecutable();
-	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
+reviewPerformanceTest(
+	"packaged Code review lazily renders diffs and keeps folder-controlled details responsive",
+	async () => {
+		test.setTimeout(120_000);
+		const fixtures = await loadCodingFixtures();
+		const executable = packagedExecutable();
+		expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-review-"));
-	const agentDir = path.join(tempRoot, "agent");
-	const homeDir = path.join(tempRoot, "home");
-	const projectDir = path.join(tempRoot, "review-project");
-	const userDataDir = path.join(tempRoot, "electron");
-	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "review");
-	await Promise.all([
-		mkdir(agentDir),
-		mkdir(homeDir),
-		mkdir(projectDir),
-		mkdir(userDataDir),
-		mkdir(qaDir, { recursive: true }),
-	]);
-	const readme = `${Array.from({ length: 120 }, (_, index) =>
-		index === 104 ? "hidden-context-marker" : `README line ${index + 1}`).join("\n")}\n`;
-	await Promise.all([
-		writeFixtureFile(path.join(projectDir, ".codegraph", ".gitignore"), "initial\n"),
-		writeFixtureFile(path.join(projectDir, "context.md"), readme),
-		writeFixtureFile(path.join(projectDir, "src", "app.ts"), "export const app = true;\n"),
-	]);
-	git(projectDir, "init", "-b", "master");
-	git(projectDir, "config", "user.email", "review@example.com");
-	git(projectDir, "config", "user.name", "Metis Review");
-	git(projectDir, "add", ".");
-	git(projectDir, "commit", "-m", "initial");
-	await writeFixtureFile(path.join(projectDir, "history-only.txt"), "history\n");
-	git(projectDir, "add", ".");
-	git(projectDir, "commit", "-m", "history fixture");
-	git(projectDir, "commit", "--allow-empty", "-m", "empty fixture");
-	await writeFile(path.join(projectDir, ".codegraph", ".gitignore"), "changed\n");
-	await writeFile(path.join(projectDir, "context.md"), `${readme}Changed in review.\n`);
-	await writeFixtureFile(path.join(projectDir, "packages", "nested", "current.ts"), "export const current = true;\n");
-	for (let index = 0; index < 175; index += 1) {
+		const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-review-"));
+		const agentDir = path.join(tempRoot, "agent");
+		const homeDir = path.join(tempRoot, "home");
+		const projectDir = path.join(tempRoot, "review-project");
+		const userDataDir = path.join(tempRoot, "electron");
+		const qaDir = path.join(desktopRoot, "test-results", "design-qa", "review");
+		await Promise.all([
+			mkdir(agentDir),
+			mkdir(homeDir),
+			mkdir(projectDir),
+			mkdir(userDataDir),
+			mkdir(qaDir, { recursive: true }),
+		]);
+		const readme = `${Array.from({ length: 120 }, (_, index) =>
+			index === 104 ? "hidden-context-marker" : `README line ${index + 1}`,
+		).join("\n")}\n`;
+		await Promise.all([
+			writeFixtureFile(path.join(projectDir, ".codegraph", ".gitignore"), "initial\n"),
+			writeFixtureFile(path.join(projectDir, "context.md"), readme),
+			writeFixtureFile(path.join(projectDir, "src", "app.ts"), "export const app = true;\n"),
+		]);
+		git(projectDir, "init", "-b", "master");
+		git(projectDir, "config", "user.email", "review@example.com");
+		git(projectDir, "config", "user.name", "Metis Review");
+		git(projectDir, "add", ".");
+		git(projectDir, "commit", "-m", "initial");
+		await writeFixtureFile(path.join(projectDir, "history-only.txt"), "history\n");
+		git(projectDir, "add", ".");
+		git(projectDir, "commit", "-m", "history fixture");
+		git(projectDir, "commit", "--allow-empty", "-m", "empty fixture");
+		await writeFile(path.join(projectDir, ".codegraph", ".gitignore"), "changed\n");
+		await writeFile(path.join(projectDir, "context.md"), `${readme}Changed in review.\n`);
 		await writeFixtureFile(
-			path.join(projectDir, "packages", `group-${Math.floor(index / 16)}`, `change-${index}.ts`),
-			`export const change${index} = ${index};\n`,
+			path.join(projectDir, "packages", "nested", "current.ts"),
+			"export const current = true;\n",
 		);
-	}
-	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Review fixture");
+		for (let index = 0; index < 175; index += 1) {
+			await writeFixtureFile(
+				path.join(projectDir, "packages", `group-${Math.floor(index / 16)}`, `change-${index}.ts`),
+				`export const change${index} = ${index};\n`,
+			);
+		}
+		createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Review fixture");
 
-	const debuggingPort = await reservePort();
-	const diagnostics: string[] = [];
-	const consoleErrors: string[] = [];
-	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
-	let browser: Browser | undefined;
-	let page: Page | undefined;
-	let phase = "connecting";
-	try {
-		({ browser, page } = await connectToApp(debuggingPort));
-		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-		await page.setViewportSize({ width: 1280, height: 840 });
-		await waitForServerReady(page);
-		await page.getByRole("button", { name: "Code", exact: true }).click();
-		await page.keyboard.press("Escape");
-		await page.getByRole("button", { name: "Review fixture", exact: true }).click();
-		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
-		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
-
-		phase = "opening collapsed review files";
-		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await openTool(page, "Review");
-		const panel = visibleToolPanel(page);
-		const fileHeaders = page.locator(".review-file-header");
-		// Virtualization must mount the rows covering the scroll viewport; the
-		// >0/<178 pair alone would also pass if the window shrank to one row.
-		// The row height is measured from the rendered list so no ReviewPanel
-		// layout constant is duplicated in this spec.
-		// Virtualization must mount the rows covering the scroll viewport; the
-		// >0/<178 pair alone would also pass if the window shrank to one row.
-		// Lists shorter than one viewport must have every row mounted instead, and
-		// the row height is measured from the rendered header so no ReviewPanel
-		// layout constant is duplicated in this spec.
-		const expectReviewWindow = async () => {
-			await expect
-				.poll(
-					async () => {
-						const metrics = await page!.evaluate(() => {
-							const scroll = document.querySelector<HTMLElement>(".review-content");
-							const header = document.querySelector<HTMLElement>(".review-file-header");
-							if (!scroll || !header) return null;
-							return {
-								viewport: scroll.clientHeight,
-								row: header.getBoundingClientRect().height,
-								mounted: document.querySelectorAll(".review-file-header").length,
-								overflows: scroll.scrollHeight > scroll.clientHeight + 1,
-							};
-						});
-						if (!metrics || metrics.row <= 0) return false;
-						if (!metrics.overflows) return metrics.mounted > 0;
-						return metrics.mounted >= Math.floor(metrics.viewport / metrics.row);
-					},
-					{ timeout: 15_000 },
-				)
-				.toBe(true);
-		};
-		await expect(page.locator(".review-details")).toHaveCount(0);
-		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
-		expect(await fileHeaders.count()).toBeLessThan(178);
-		await expectReviewWindow();
-		await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
-		await expect(page.locator(".review-patch")).toHaveCount(0);
-		const contextHeader = fileHeaders.filter({ hasText: "context.md" });
-		await contextHeader.click();
-		await expect(page.locator(".review-patch diffs-container")).toHaveCount(1);
-		const changedLine = page.locator(".review-patch diffs-container [data-line]").filter({ hasText: "Changed in review." });
-		await expect(changedLine).toHaveCount(1);
-		await expect(page.locator('.review-patch [data-separator="line-info-basic"]').first()).toBeVisible();
-		const unmodifiedLines = page.locator(".review-patch [data-unmodified-lines]").filter({ hasText: "117 unmodified lines" }).first();
-		await expect(unmodifiedLines).toBeVisible();
-		await expect(page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" })).toHaveCount(0);
-		await unmodifiedLines.click();
-		await expect(page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" })).toHaveCount(1);
-		const reviewToolbar = panel.locator(".review-toolbar");
-		const reviewHistory = panel.locator(".review-history");
-		const captureReview = async (filename: string) => {
-			await page!.evaluate(async () => {
-				// Keep the drawer's own transition tail in the app timing window.
-				await Promise.all(
-					Array.from(document.querySelectorAll(".review-layout, .review-history"))
-						.flatMap((node) => node.getAnimations({ subtree: false }))
-						.map((animation) => animation.finished),
-				);
-				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-				const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
-				state.__reviewLongTasks?.push(...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration));
-				state.__reviewLongTaskObserver?.disconnect();
+		const debuggingPort = await reservePort();
+		const diagnostics: string[] = [];
+		const consoleErrors: string[] = [];
+		const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
+		let browser: Browser | undefined;
+		let page: Page | undefined;
+		let phase = "connecting";
+		try {
+			({ browser, page } = await connectToApp(debuggingPort));
+			page.setDefaultTimeout(10_000);
+			page.on("console", (message) => {
+				if (message.type() === "error") consoleErrors.push(message.text());
 			});
-			await panel.screenshot({ path: path.join(qaDir, filename) });
-			await page!.evaluate(async () => {
-				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-				(window as typeof window & { __reviewLongTaskObserver?: PerformanceObserver }).__reviewLongTaskObserver?.observe({ entryTypes: ["longtask"] });
-			});
-		};
+			await page.setViewportSize({ width: 1280, height: 840 });
+			await waitForServerReady(page);
+			await page.getByRole("button", { name: "Code", exact: true }).click();
+			await page.keyboard.press("Escape");
+			await page.getByRole("button", { name: "Review fixture", exact: true }).click();
+			page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
+			await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 
-		// Trace DOM snapshots and QA screenshots execute in the renderer too. Keep
-		// that instrumentation out of the app's timing window, retaining every click.
-		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
-		expect(await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes("longtask"))).toBe(true);
-		await page.evaluate(async () => {
-			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-			const state = window as typeof window & { __reviewLongTasks?: number[]; __reviewLongTaskObserver?: PerformanceObserver };
-			state.__reviewLongTasks = [];
-			if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
-				state.__reviewLongTaskObserver = new PerformanceObserver((list) => {
-					state.__reviewLongTasks?.push(...list.getEntries().map((entry) => entry.duration));
-				});
-				state.__reviewLongTaskObserver.observe({ entryTypes: ["longtask"] });
-			}
-		});
-
-		phase = "opening complete information from the folder button";
-		await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
-		await expect.poll(() => panel.getByRole("complementary", { name: "Review details", exact: true }).isVisible()).toBe(true);
-		await expect.poll(() => panel.locator(".review-toolbar > span").textContent()).toBe("master → review-project");
-		await expect.poll(() => panel.locator(".review-toolbar > span").getAttribute("title")).toBe(await realpath(projectDir));
-		await expect.poll(() => reviewHistory.getByRole("button", { name: "All Changes", exact: true }).isVisible()).toBe(true);
-		await expect.poll(() => panel.locator('.review-commits button[title="history fixture"]').isVisible()).toBe(true);
-		await expect(page.locator('.review-details button[aria-expanded="false"]')).toHaveCount(0);
-		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: ".gitignore" }).isVisible()).toBe(true);
-		await expect.poll(() => panel.locator(".review-tree button").filter({ hasText: "current.ts" }).isVisible()).toBe(true);
-		await captureReview("context-expanded-folder-open.png");
-
-		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
-		await resizePanel(680);
-		let [detailsBox, contentBox] = await Promise.all([
-			page.locator(".review-details").boundingBox(),
-			page.locator(".review-content").boundingBox(),
-		]);
-		if (!detailsBox || !contentBox) throw new Error("Wide review layout is missing");
-		expect(contentBox.x).toBeGreaterThanOrEqual(detailsBox.x + detailsBox.width - 1);
-		await captureReview("details-wide.png");
-
-		await resizePanel(500);
-		[detailsBox, contentBox] = await Promise.all([
-			page.locator(".review-details").boundingBox(),
-			page.locator(".review-content").boundingBox(),
-		]);
-		if (!detailsBox || !contentBox) throw new Error("Narrow review drawer is missing");
-		expect(Math.abs(detailsBox.x - contentBox.x)).toBeLessThanOrEqual(1);
-		await expect.poll(() => reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).getAttribute("aria-expanded")).toBe("true");
-		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).getAttribute("aria-expanded")).toBe("true");
-		await captureReview("details-narrow-drawer.png");
-
-		phase = "preserving state and switching revisions";
-		await reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).click();
-		await expect(changedLine).toHaveCount(1);
-		await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
-		await page.evaluate(() => {
-			const state = window as typeof window & { __reviewBlankTransitions?: number; __reviewBlankObserver?: MutationObserver };
-			state.__reviewBlankTransitions = 0;
-			const content = document.querySelector(".review-content");
-			state.__reviewBlankObserver = new MutationObserver(() => {
-				if (content && !content.querySelector(".review-files, .review-empty")) state.__reviewBlankTransitions = (state.__reviewBlankTransitions ?? 0) + 1;
-			});
-			if (content) state.__reviewBlankObserver.observe(content, { childList: true, subtree: true });
-		});
-		await page.locator('.review-commits button[title="empty fixture"]').click();
-		await expect.poll(() => panel.locator(".review-empty").textContent()).toBe("No changes");
-		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
-		await page.locator('.review-commits button[title="history fixture"]').click();
-		await expect(fileHeaders).toHaveCount(1);
-		await expect.poll(() => fileHeaders.filter({ hasText: "history-only.txt" }).isVisible()).toBe(true);
-		await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
-		await expect.poll(() => panel.locator('.review-commits button[title="history fixture"]').getAttribute("aria-pressed")).toBe("true");
-		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
-		await page.locator('.review-commits button[title="initial"]').click();
-		await expect(fileHeaders).toHaveCount(3);
-		await expect(page.locator(".app-error-boundary")).toHaveCount(0);
-		await reviewHistory.getByRole("button", { name: "All Changes", exact: true }).click();
-		await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
-		expect(await fileHeaders.count()).toBeLessThan(178);
-		await expectReviewWindow();
-		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
-		await page.locator(".review-tree button").filter({ hasText: "current.ts" }).click();
-		await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).isVisible()).toBe(true);
-		await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).getAttribute("aria-expanded")).toBe("true");
-		await page.locator(".review-tree button").filter({ hasText: "context.md" }).click();
-		await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
-		await expect.poll(() => reviewHistory.getByRole("button", { name: "All Changes", exact: true }).getAttribute("aria-pressed")).toBe("true");
-		expect(await page.evaluate(() => (window as typeof window & { __reviewBlankTransitions?: number }).__reviewBlankTransitions ?? -1)).toBe(0);
-		await reviewToolbar.getByRole("button", { name: "Refresh review", exact: true }).click();
-		await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
-		await expect.poll(() => panel.locator(".review-layout").getAttribute("aria-busy")).toBe("false");
-		const longestTask = await page.evaluate(async () => {
-			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-			const state = window as typeof window & {
-				__reviewBlankObserver?: MutationObserver;
-				__reviewLongTaskObserver?: PerformanceObserver;
-				__reviewLongTasks?: number[];
+			phase = "opening collapsed review files";
+			await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
+			await openTool(page, "Review");
+			const panel = visibleToolPanel(page);
+			const fileHeaders = page.locator(".review-file-header");
+			// Virtualization must mount the rows covering the scroll viewport; the
+			// >0/<178 pair alone would also pass if the window shrank to one row.
+			// The row height is measured from the rendered list so no ReviewPanel
+			// layout constant is duplicated in this spec.
+			// Virtualization must mount the rows covering the scroll viewport; the
+			// >0/<178 pair alone would also pass if the window shrank to one row.
+			// Lists shorter than one viewport must have every row mounted instead, and
+			// the row height is measured from the rendered header so no ReviewPanel
+			// layout constant is duplicated in this spec.
+			const expectReviewWindow = async () => {
+				await expect
+					.poll(
+						async () => {
+							const metrics = await page!.evaluate(() => {
+								const scroll = document.querySelector<HTMLElement>(".review-content");
+								const header = document.querySelector<HTMLElement>(".review-file-header");
+								if (!scroll || !header) return null;
+								return {
+									viewport: scroll.clientHeight,
+									row: header.getBoundingClientRect().height,
+									mounted: document.querySelectorAll(".review-file-header").length,
+									overflows: scroll.scrollHeight > scroll.clientHeight + 1,
+								};
+							});
+							if (!metrics || metrics.row <= 0) return false;
+							if (!metrics.overflows) return metrics.mounted > 0;
+							return metrics.mounted >= Math.floor(metrics.viewport / metrics.row);
+						},
+						{ timeout: 15_000 },
+					)
+					.toBe(true);
 			};
-			state.__reviewBlankObserver?.disconnect();
-			state.__reviewLongTasks?.push(...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration));
-			state.__reviewLongTaskObserver?.disconnect();
-			return Math.max(0, ...(state.__reviewLongTasks ?? []));
-		});
-		expect(longestTask).toBeLessThan(LONG_TASK_BUDGET_MS);
-		expect(consoleErrors).toEqual([]);
-	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
-		);
-	} finally {
-		await browser?.close().catch(() => undefined);
-		await stopProcess(app);
-		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
-	}
-});
+			await expect(page.locator(".review-details")).toHaveCount(0);
+			await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
+			expect(await fileHeaders.count()).toBeLessThan(178);
+			await expectReviewWindow();
+			await expect(fileHeaders.first()).toHaveAttribute("aria-expanded", "false");
+			await expect(page.locator(".review-patch")).toHaveCount(0);
+			const contextHeader = fileHeaders.filter({ hasText: "context.md" });
+			await contextHeader.click();
+			await expect(page.locator(".review-patch diffs-container")).toHaveCount(1);
+			const changedLine = page
+				.locator(".review-patch diffs-container [data-line]")
+				.filter({ hasText: "Changed in review." });
+			await expect(changedLine).toHaveCount(1);
+			await expect(page.locator('.review-patch [data-separator="line-info-basic"]').first()).toBeVisible();
+			const unmodifiedLines = page
+				.locator(".review-patch [data-unmodified-lines]")
+				.filter({ hasText: "117 unmodified lines" })
+				.first();
+			await expect(unmodifiedLines).toBeVisible();
+			await expect(
+				page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" }),
+			).toHaveCount(0);
+			await unmodifiedLines.click();
+			await expect(
+				page.locator(".review-patch [data-line]").filter({ hasText: "hidden-context-marker" }),
+			).toHaveCount(1);
+			const reviewToolbar = panel.locator(".review-toolbar");
+			const reviewHistory = panel.locator(".review-history");
+			const captureReview = async (filename: string) => {
+				await page!.evaluate(async () => {
+					// Keep the drawer's own transition tail in the app timing window.
+					await Promise.all(
+						Array.from(document.querySelectorAll(".review-layout, .review-history"))
+							.flatMap((node) => node.getAnimations({ subtree: false }))
+							.map((animation) => animation.finished),
+					);
+					await new Promise<void>((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+					);
+					const state = window as typeof window & {
+						__reviewLongTasks?: number[];
+						__reviewLongTaskObserver?: PerformanceObserver;
+					};
+					state.__reviewLongTasks?.push(
+						...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration),
+					);
+					state.__reviewLongTaskObserver?.disconnect();
+				});
+				await panel.screenshot({ path: path.join(qaDir, filename) });
+				await page!.evaluate(async () => {
+					await new Promise<void>((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+					);
+					(
+						window as typeof window & { __reviewLongTaskObserver?: PerformanceObserver }
+					).__reviewLongTaskObserver?.observe({ entryTypes: ["longtask"] });
+				});
+			};
+
+			// Trace DOM snapshots and QA screenshots execute in the renderer too. Keep
+			// that instrumentation out of the app's timing window, retaining every click.
+			await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
+			expect(await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes("longtask"))).toBe(true);
+			await page.evaluate(async () => {
+				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+				const state = window as typeof window & {
+					__reviewLongTasks?: number[];
+					__reviewLongTaskObserver?: PerformanceObserver;
+				};
+				state.__reviewLongTasks = [];
+				if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
+					state.__reviewLongTaskObserver = new PerformanceObserver((list) => {
+						state.__reviewLongTasks?.push(...list.getEntries().map((entry) => entry.duration));
+					});
+					state.__reviewLongTaskObserver.observe({ entryTypes: ["longtask"] });
+				}
+			});
+
+			phase = "opening complete information from the folder button";
+			await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
+			await expect
+				.poll(() => panel.getByRole("complementary", { name: "Review details", exact: true }).isVisible())
+				.toBe(true);
+			await expect.poll(() => panel.locator(".review-toolbar > span").textContent()).toBe("master → review-project");
+			await expect
+				.poll(() => panel.locator(".review-toolbar > span").getAttribute("title"))
+				.toBe(await realpath(projectDir));
+			await expect
+				.poll(() => reviewHistory.getByRole("button", { name: "All Changes", exact: true }).isVisible())
+				.toBe(true);
+			await expect
+				.poll(() => panel.locator('.review-commits button[title="history fixture"]').isVisible())
+				.toBe(true);
+			await expect(page.locator('.review-details button[aria-expanded="false"]')).toHaveCount(0);
+			await expect
+				.poll(() => panel.locator(".review-tree button").filter({ hasText: ".gitignore" }).isVisible())
+				.toBe(true);
+			await expect
+				.poll(() => panel.locator(".review-tree button").filter({ hasText: "current.ts" }).isVisible())
+				.toBe(true);
+			await captureReview("context-expanded-folder-open.png");
+
+			const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
+			await resizePanel(680);
+			let [detailsBox, contentBox] = await Promise.all([
+				page.locator(".review-details").boundingBox(),
+				page.locator(".review-content").boundingBox(),
+			]);
+			if (!detailsBox || !contentBox) throw new Error("Wide review layout is missing");
+			expect(contentBox.x).toBeGreaterThanOrEqual(detailsBox.x + detailsBox.width - 1);
+			await captureReview("details-wide.png");
+
+			await resizePanel(500);
+			[detailsBox, contentBox] = await Promise.all([
+				page.locator(".review-details").boundingBox(),
+				page.locator(".review-content").boundingBox(),
+			]);
+			if (!detailsBox || !contentBox) throw new Error("Narrow review drawer is missing");
+			expect(Math.abs(detailsBox.x - contentBox.x)).toBeLessThanOrEqual(1);
+			await expect
+				.poll(() =>
+					reviewToolbar
+						.getByRole("button", { name: "Hide review details", exact: true })
+						.getAttribute("aria-expanded"),
+				)
+				.toBe("true");
+			await expect
+				.poll(() => fileHeaders.filter({ hasText: "context.md" }).getAttribute("aria-expanded"))
+				.toBe("true");
+			await captureReview("details-narrow-drawer.png");
+
+			phase = "preserving state and switching revisions";
+			await reviewToolbar.getByRole("button", { name: "Hide review details", exact: true }).click();
+			await expect(changedLine).toHaveCount(1);
+			await reviewToolbar.getByRole("button", { name: "Show review details", exact: true }).click();
+			await page.evaluate(() => {
+				const state = window as typeof window & {
+					__reviewBlankTransitions?: number;
+					__reviewBlankObserver?: MutationObserver;
+				};
+				state.__reviewBlankTransitions = 0;
+				const content = document.querySelector(".review-content");
+				state.__reviewBlankObserver = new MutationObserver(() => {
+					if (content && !content.querySelector(".review-files, .review-empty"))
+						state.__reviewBlankTransitions = (state.__reviewBlankTransitions ?? 0) + 1;
+				});
+				if (content) state.__reviewBlankObserver.observe(content, { childList: true, subtree: true });
+			});
+			await page.locator('.review-commits button[title="empty fixture"]').click();
+			await expect.poll(() => panel.locator(".review-empty").textContent()).toBe("No changes");
+			await expect(page.locator(".app-error-boundary")).toHaveCount(0);
+			await page.locator('.review-commits button[title="history fixture"]').click();
+			await expect(fileHeaders).toHaveCount(1);
+			await expect.poll(() => fileHeaders.filter({ hasText: "history-only.txt" }).isVisible()).toBe(true);
+			await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
+			await expect
+				.poll(() => panel.locator('.review-commits button[title="history fixture"]').getAttribute("aria-pressed"))
+				.toBe("true");
+			await expect(page.locator(".app-error-boundary")).toHaveCount(0);
+			await page.locator('.review-commits button[title="initial"]').click();
+			await expect(fileHeaders).toHaveCount(3);
+			await expect(page.locator(".app-error-boundary")).toHaveCount(0);
+			await reviewHistory.getByRole("button", { name: "All Changes", exact: true }).click();
+			await expect.poll(() => fileHeaders.count()).toBeGreaterThan(0);
+			expect(await fileHeaders.count()).toBeLessThan(178);
+			await expectReviewWindow();
+			await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
+			await page.locator(".review-tree button").filter({ hasText: "current.ts" }).click();
+			await expect.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).isVisible()).toBe(true);
+			await expect
+				.poll(() => fileHeaders.filter({ hasText: "packages/nested/current.ts" }).getAttribute("aria-expanded"))
+				.toBe("true");
+			await page.locator(".review-tree button").filter({ hasText: "context.md" }).click();
+			await expect.poll(() => fileHeaders.filter({ hasText: "context.md" }).isVisible()).toBe(true);
+			await expect
+				.poll(() =>
+					reviewHistory.getByRole("button", { name: "All Changes", exact: true }).getAttribute("aria-pressed"),
+				)
+				.toBe("true");
+			expect(
+				await page.evaluate(
+					() => (window as typeof window & { __reviewBlankTransitions?: number }).__reviewBlankTransitions ?? -1,
+				),
+			).toBe(0);
+			await reviewToolbar.getByRole("button", { name: "Refresh review", exact: true }).click();
+			await expect.poll(() => fileHeaders.first().getAttribute("aria-expanded")).toBe("false");
+			await expect.poll(() => panel.locator(".review-layout").getAttribute("aria-busy")).toBe("false");
+			const longestTask = await page.evaluate(async () => {
+				await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+				const state = window as typeof window & {
+					__reviewBlankObserver?: MutationObserver;
+					__reviewLongTaskObserver?: PerformanceObserver;
+					__reviewLongTasks?: number[];
+				};
+				state.__reviewBlankObserver?.disconnect();
+				state.__reviewLongTasks?.push(
+					...(state.__reviewLongTaskObserver?.takeRecords() ?? []).map((entry) => entry.duration),
+				);
+				state.__reviewLongTaskObserver?.disconnect();
+				return Math.max(0, ...(state.__reviewLongTasks ?? []));
+			});
+			expect(longestTask).toBeLessThan(LONG_TASK_BUDGET_MS);
+			expect(consoleErrors).toEqual([]);
+		} catch (error) {
+			const bodyText = await page
+				?.locator("body")
+				.innerText()
+				.catch(() => "renderer unavailable");
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
+			);
+		} finally {
+			await browser?.close().catch(() => undefined);
+			await stopProcess(app);
+			await rm(tempRoot, TEMP_REMOVE_OPTIONS);
+		}
+	},
+);
 
 test("packaged browser sidebar loads real pages and persists its isolated profile", async () => {
 	test.setTimeout(90_000);
@@ -3733,7 +4161,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 			return;
 		}
 		if (request.url === "/cookie") {
-			response.end(`<!doctype html><title>Metis Cookie Check</title><main>${request.headers.cookie ?? "missing"}</main>`);
+			response.end(
+				`<!doctype html><title>Metis Cookie Check</title><main>${request.headers.cookie ?? "missing"}</main>`,
+			);
 			return;
 		}
 		if (request.url === "/searchable") {
@@ -3742,11 +4172,15 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		}
 		if (request.url === "/stateful") {
 			response.setHeader("Set-Cookie", "metis-browser=ready; Max-Age=3600; Path=/; SameSite=Lax");
-			response.end("<!doctype html><title>Stateful Fixture</title><script>localStorage.setItem('metis-browser','ready')</script><main>state stored</main>");
+			response.end(
+				"<!doctype html><title>Stateful Fixture</title><script>localStorage.setItem('metis-browser','ready')</script><main>state stored</main>",
+			);
 			return;
 		}
 		if (request.url === "/inspect-state") {
-			response.end("<!doctype html><title>Inspect State</title><main></main><script>document.querySelector('main').textContent = document.cookie + '|' + (localStorage.getItem('metis-browser') || '')</script>");
+			response.end(
+				"<!doctype html><title>Inspect State</title><main></main><script>document.querySelector('main').textContent = document.cookie + '|' + (localStorage.getItem('metis-browser') || '')</script>",
+			);
 			return;
 		}
 		response.writeHead(404).end();
@@ -3787,7 +4221,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
 		const sessionId = await createAndRestoreChatSession(page, projectDir);
@@ -3814,10 +4250,17 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const address = page.getByRole("textbox", { name: "Browser address", exact: true });
 		await address.fill(`${fixtureOrigin}/first`);
 		await address.press("Enter");
-		await expect.poll(() =>
-			browser!.contexts().flatMap((context) => context.pages()).some((candidate) => candidate.url() === `${fixtureOrigin}/first`),
-		).toBe(true);
-		let embeddedPage = browser.contexts().flatMap((context) => context.pages())
+		await expect
+			.poll(() =>
+				browser!
+					.contexts()
+					.flatMap((context) => context.pages())
+					.some((candidate) => candidate.url() === `${fixtureOrigin}/first`),
+			)
+			.toBe(true);
+		let embeddedPage = browser
+			.contexts()
+			.flatMap((context) => context.pages())
 			.find((candidate) => candidate.url() === `${fixtureOrigin}/first`);
 		if (!embeddedPage) throw new Error("Embedded browser target was not exposed");
 		await expect(embeddedPage.locator("main")).toHaveText("first page");
@@ -3832,11 +4275,15 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await page.locator(".app-shell").evaluate(async (element) => {
 			await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
 		});
-		await expect.poll(async () => {
-			const resizedEmbeddedWidth = await embeddedPage!.evaluate(() => window.innerWidth);
-			const resizedAnchorWidth = await anchor.evaluate((element) => Math.round(element.getBoundingClientRect().width));
-			return Math.abs(resizedEmbeddedWidth - resizedAnchorWidth);
-		}).toBeLessThanOrEqual(1);
+		await expect
+			.poll(async () => {
+				const resizedEmbeddedWidth = await embeddedPage!.evaluate(() => window.innerWidth);
+				const resizedAnchorWidth = await anchor.evaluate((element) =>
+					Math.round(element.getBoundingClientRect().width),
+				);
+				return Math.abs(resizedEmbeddedWidth - resizedAnchorWidth);
+			})
+			.toBeLessThanOrEqual(1);
 		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "First fixture page", exact: true })).toBeVisible();
 
@@ -3851,10 +4298,17 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 
 		await address.fill(`${fixtureOrigin}/set-cookie`);
 		await address.press("Enter");
-		await expect.poll(() =>
-			browser!.contexts().flatMap((context) => context.pages()).some((candidate) => candidate.url() === `${fixtureOrigin}/set-cookie`),
-		).toBe(true);
-		embeddedPage = browser.contexts().flatMap((context) => context.pages())
+		await expect
+			.poll(() =>
+				browser!
+					.contexts()
+					.flatMap((context) => context.pages())
+					.some((candidate) => candidate.url() === `${fixtureOrigin}/set-cookie`),
+			)
+			.toBe(true);
+		embeddedPage = browser
+			.contexts()
+			.flatMap((context) => context.pages())
 			.find((candidate) => candidate.url() === `${fixtureOrigin}/set-cookie`);
 		if (!embeddedPage) throw new Error("Embedded browser did not navigate to the cookie fixture");
 		await expect(embeddedPage.locator("main")).toHaveText("cookie stored");
@@ -3895,7 +4349,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		);
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
 		await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
@@ -3903,10 +4359,17 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const restartedAddress = page.getByRole("textbox", { name: "Browser address", exact: true });
 		await restartedAddress.fill(`${fixtureOrigin}/cookie`);
 		await restartedAddress.press("Enter");
-		await expect.poll(() =>
-			browser!.contexts().flatMap((context) => context.pages()).some((candidate) => candidate.url() === `${fixtureOrigin}/cookie`),
-		).toBe(true);
-		const cookiePage = browser.contexts().flatMap((context) => context.pages())
+		await expect
+			.poll(() =>
+				browser!
+					.contexts()
+					.flatMap((context) => context.pages())
+					.some((candidate) => candidate.url() === `${fixtureOrigin}/cookie`),
+			)
+			.toBe(true);
+		const cookiePage = browser
+			.contexts()
+			.flatMap((context) => context.pages())
 			.find((candidate) => candidate.url() === `${fixtureOrigin}/cookie`);
 		if (!cookiePage) throw new Error("Restarted embedded browser target was not exposed");
 		await expect(cookiePage.locator("main")).toContainText("metis-browser=ready");
@@ -3992,7 +4455,10 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await expect(page.getByRole("tab", { name: "Inspect State", exact: true })).toHaveCount(0);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -4024,37 +4490,83 @@ test("packaged General settings and Personalization persist across restart", asy
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	await writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: { local: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "fixture", api: "openai-completions", models: [{ id: "cache-test", name: "Cache test", contextWindow: 1000000, maxTokens: 1024 }] } } }));
-	await writeFile(path.join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "local", defaultModel: "cache-test", retry: { enabled: false } }));
-	const cacheSessionFile = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Settings session");
+	await writeFile(
+		path.join(agentDir, "models.json"),
+		JSON.stringify({
+			providers: {
+				local: {
+					baseUrl: "http://127.0.0.1:1/v1",
+					apiKey: "fixture",
+					api: "openai-completions",
+					models: [{ id: "cache-test", name: "Cache test", contextWindow: 1000000, maxTokens: 1024 }],
+				},
+			},
+		}),
+	);
+	await writeFile(
+		path.join(agentDir, "settings.json"),
+		JSON.stringify({ defaultProvider: "local", defaultModel: "cache-test", retry: { enabled: false } }),
+	);
+	const cacheSessionFile = createStoredSession(
+		fixtures,
+		agentDir,
+		projectDir,
+		CHAT_ACTIVE_ID,
+		"chat",
+		false,
+		"Settings session",
+	);
 	const cacheSession = fixtures.SessionManager.open(cacheSessionFile);
 	cacheSession.appendMessage({ role: "user", content: "Context usage fixture", timestamp: Date.now() - 1 });
-	cacheSession.appendMessage({ ...assistantMessage(Date.now(), 10400), api: "openai-completions", provider: "local", model: "cache-test", usage: { input: 400, output: 400, cacheRead: 9600, cacheWrite: 0, cacheReported: true, totalTokens: 10400, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+	cacheSession.appendMessage({
+		...assistantMessage(Date.now(), 10400),
+		api: "openai-completions",
+		provider: "local",
+		model: "cache-test",
+		usage: {
+			input: 400,
+			output: 400,
+			cacheRead: 9600,
+			cacheWrite: 0,
+			cacheReported: true,
+			totalTokens: 10400,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+	});
 	cacheSession.close();
-	createStoredSession(fixtures, agentDir, projectDir, "11111111-2222-4333-8444-555566667778", "code", false, "修复登录与账户同步");
-	createStoredSession(fixtures, agentDir, projectDir, "11111111-2222-4333-8444-555566667779", "chat", true, "产品设计讨论 · 已归档");
+	createStoredSession(
+		fixtures,
+		agentDir,
+		projectDir,
+		"11111111-2222-4333-8444-555566667778",
+		"code",
+		false,
+		"修复登录与账户同步",
+	);
+	createStoredSession(
+		fixtures,
+		agentDir,
+		projectDir,
+		"11111111-2222-4333-8444-555566667779",
+		"chat",
+		true,
+		"产品设计讨论 · 已归档",
+	);
 
 	const diagnostics: string[] = [];
 	const firstPort = await reservePort();
-	let app = launchPackagedApp(
-		executable,
-		firstPort,
-		userDataDir,
-		projectDir,
-		agentDir,
-		homeDir,
-		diagnostics,
-	);
+	let app = launchPackagedApp(executable, firstPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
 	const consoleErrors: string[] = [];
-	const captureConsoleErrors = (target: Page) => target.on("console", (message) => {
-		// Shared CI runners can refuse WebGL contexts under GPU memory pressure.
-		if (message.type() === "error" && message.text() !== "unable to create webgl context") {
-			consoleErrors.push(message.text());
-		}
-	});
+	const captureConsoleErrors = (target: Page) =>
+		target.on("console", (message) => {
+			// Shared CI runners can refuse WebGL contexts under GPU memory pressure.
+			if (message.type() === "error" && message.text() !== "unable to create webgl context") {
+				consoleErrors.push(message.text());
+			}
+		});
 	try {
 		({ browser, page } = await connectToApp(firstPort));
 		captureConsoleErrors(page);
@@ -4095,17 +4607,22 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("option", { name: "系统无衬线", exact: true }).click();
 		await page.getByRole("button", { name: "Code 回复字体", exact: true }).click();
 		await page.getByRole("option", { name: "系统衬线", exact: true }).click();
-		const measureFixedSettingsLayout = () => page!.evaluate(() => ({
-			settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
-			sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
-			controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
-		}));
+		const measureFixedSettingsLayout = () =>
+			page!.evaluate(() => ({
+				settingsWidth: document.querySelector(".settings-dialog")?.getBoundingClientRect().width,
+				sidebarWidth: document.querySelector(".settings-sidebar")?.getBoundingClientRect().width,
+				controlHeight: document.querySelector('[aria-label="内容字号"]')?.getBoundingClientRect().height,
+			}));
 		const fixedLayoutBeforeFontSizeChange = await measureFixedSettingsLayout();
 		await page.getByRole("button", { name: "内容字号", exact: true }).click();
 		await page.getByRole("option", { name: "20 px", exact: true }).click();
-		await expect.poll(() => page!.evaluate(() =>
-			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
-		)).toBe("20px");
+		await expect
+			.poll(() =>
+				page!.evaluate(() =>
+					getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
+				),
+			)
+			.toBe("20px");
 		expect(await measureFixedSettingsLayout()).toEqual(fixedLayoutBeforeFontSizeChange);
 		await page.getByRole("button", { name: "减少动效", exact: true }).click();
 		expect(await page.locator("html").getAttribute("data-motion")).toBe("reduced");
@@ -4150,8 +4667,11 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-dark-1280x840.png") });
 
 		phase = "saving global instructions without reloading the open session";
-		const statusBefore = await page.evaluate(async (sessionId) =>
-			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
+		const statusBefore = await page.evaluate(
+			async (sessionId) =>
+				(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }),
+			CHAT_ACTIVE_ID,
+		);
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		const instructions = page.getByRole("textbox", { name: "全局指令", exact: true });
 		await expect(instructions).toBeVisible();
@@ -4159,8 +4679,11 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "保存指令", exact: true }).click();
 		await expect(page.getByRole("status")).toContainText("已保存");
 		expect(await readFile(path.join(agentDir, "AGENTS.md"), "utf8")).toBe("Prefer concise answers.");
-		const statusAfter = await page.evaluate(async (sessionId) =>
-			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }), CHAT_ACTIVE_ID);
+		const statusAfter = await page.evaluate(
+			async (sessionId) =>
+				(globalThis as unknown as { metis: MetisDesktopApi }).metis.getSessionStatus({ sessionId }),
+			CHAT_ACTIVE_ID,
+		);
 		expect(statusAfter).toEqual(statusBefore);
 		await instructions.focus();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1280x840.png") });
@@ -4194,11 +4717,17 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByLabel("最小间隔（小时）", { exact: true })).toHaveValue("48");
 		await page.keyboard.press("Escape");
 		await page.setViewportSize({ width: 720, height: 900 });
-		await page.locator(".settings-page-scroll").evaluate((element) => { element.scrollTop = 0; });
-		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.locator(".settings-page-scroll").evaluate((element) => {
+			element.scrollTop = 0;
+		});
+		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+			true,
+		);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-narrow-720x900.png") });
 		await page.setViewportSize({ width: 600, height: 900 });
-		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+			true,
+		);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-narrow-600x900.png") });
 		await page.setViewportSize(viewport);
 		await page.getByRole("button", { name: "管理已保存的记忆", exact: true }).click();
@@ -4207,7 +4736,11 @@ test("packaged General settings and Personalization persist across restart", asy
 			const icon = label.querySelector("svg")!.getBoundingClientRect();
 			const input = label.querySelector("input")!;
 			const box = input.getBoundingClientRect();
-			return { centerOffset: Math.abs(icon.y + icon.height / 2 - box.y - box.height / 2), border: getComputedStyle(input).borderTopWidth, overflow: label.scrollWidth > label.clientWidth };
+			return {
+				centerOffset: Math.abs(icon.y + icon.height / 2 - box.y - box.height / 2),
+				border: getComputedStyle(input).borderTopWidth,
+				overflow: label.scrollWidth > label.clientWidth,
+			};
 		});
 		expect(searchLayout.centerOffset).toBeLessThan(2);
 		expect(searchLayout.border).toBe("0px");
@@ -4225,13 +4758,16 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "保存笔记", exact: true }).click();
 		// Read-only RPC as an independent observation; writes still come from the real UI.
 		await expect
-			.poll(async () =>
-				(await page!.evaluate(async () =>
-					(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
-						scope: "global",
-						slug: "repair-smoke",
-					}),
-				)).note.body,
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(async () =>
+							(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
+								scope: "global",
+								slug: "repair-smoke",
+							}),
+						)
+					).note.body,
 			)
 			.toBe("edited body");
 
@@ -4241,10 +4777,13 @@ test("packaged General settings and Personalization persist across restart", asy
 		phase = "undoing a memory edit through history";
 		await page.getByRole("button", { name: "最近变更", exact: true }).click();
 		await expect
-			.poll(async () =>
-				(await page!.evaluate(async () =>
-					(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
-				)).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(async () =>
+							(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
+						)
+					).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
 			)
 			.toBe("replace");
 		const editHistory = page.locator(".memory-history-row").filter({ hasText: "repair-smoke" }).first();
@@ -4254,13 +4793,16 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("dialog", { name: "最近变更", exact: true })).toBeVisible();
 		await editHistory.getByRole("button", { name: "撤销记忆变更", exact: true }).click();
 		await expect
-			.poll(async () =>
-				(await page!.evaluate(async () =>
-					(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
-						scope: "global",
-						slug: "repair-smoke",
-					}),
-				)).note.body,
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(async () =>
+							(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
+								scope: "global",
+								slug: "repair-smoke",
+							}),
+						)
+					).note.body,
 			)
 			.toBe("original body");
 		await page.getByRole("button", { name: "关闭最近变更", exact: true }).click();
@@ -4272,10 +4814,13 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "删除记忆笔记", exact: true }).click();
 		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(0);
 		await expect
-			.poll(async () =>
-				(await page!.evaluate(async () =>
-					(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
-				)).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(async () =>
+							(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
+						)
+					).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
 			)
 			.toBe("delete");
 		await page.getByRole("button", { name: "关闭已记住的内容", exact: true }).click();
@@ -4295,7 +4840,9 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
 
 		await page.getByRole("button", { name: "关闭已记住的内容", exact: true }).click();
-		await page.locator(".settings-page-scroll").evaluate((element) => { element.scrollTop = 0; });
+		await page.locator(".settings-page-scroll").evaluate((element) => {
+			element.scrollTop = 0;
+		});
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-dark-1280x840.png") });
 
 		phase = "selecting conversation memory exceptions";
@@ -4305,7 +4852,18 @@ test("packaged General settings and Personalization persist across restart", asy
 		const excludeLearning = sessionRow.getByRole("switch", { name: "保存新记忆：Settings session", exact: true });
 		await excludeLearning.locator("..").click();
 		await expect(excludeLearning).not.toBeChecked();
-		await expect.poll(async () => (await page!.evaluate(async (sessionId) => (globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }), CHAT_ACTIVE_ID)).session?.contributeMemory).toBe(false);
+		await expect
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(
+							async (sessionId) =>
+								(globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }),
+							CHAT_ACTIVE_ID,
+						)
+					).session?.contributeMemory,
+			)
+			.toBe(false);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-session-exceptions.png") });
 		await expect(page.locator(".memory-session-row")).toHaveCount(3);
 		await page.getByRole("button", { name: "已调整", exact: true }).click();
@@ -4315,9 +4873,13 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.locator(".memory-session-row")).toHaveCount(1);
 		await page.getByRole("searchbox", { name: "按会话名称或项目搜索", exact: true }).fill("");
 		await page.keyboard.press("Tab");
-		expect(await page.locator(".memory-session-dialog").evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
+		expect(
+			await page.locator(".memory-session-dialog").evaluate((dialog) => dialog.contains(document.activeElement)),
+		).toBe(true);
 		await page.setViewportSize({ width: 600, height: 900 });
-		expect(await page.locator(".memory-session-dialog").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+		expect(
+			await page.locator(".memory-session-dialog").evaluate((element) => element.scrollWidth <= element.clientWidth),
+		).toBe(true);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-sessions-narrow.png") });
 		await page.setViewportSize(viewport);
 		await page.getByRole("button", { name: "关闭会话记忆", exact: true }).click();
@@ -4357,7 +4919,9 @@ test("packaged General settings and Personalization persist across restart", asy
 
 		phase = "restarting with persisted settings";
 		expect(await page.evaluate(() => localStorage.getItem("metis.theme.v1"))).toBe("light");
-		await expect.poll(async () => JSON.parse(await readFile(path.join(userDataDir, "theme.json"), "utf8"))).toBe("light");
+		await expect
+			.poll(async () => JSON.parse(await readFile(path.join(userDataDir, "theme.json"), "utf8")))
+			.toBe("light");
 		// Close the renderer normally before stopping the background process.
 		// SIGTERM alone can interrupt Chromium's pending localStorage writes.
 		await page.close();
@@ -4384,9 +4948,11 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("button", { name: "Chat 回复字体", exact: true })).toContainText("系统无衬线");
 		await expect(page.getByRole("button", { name: "Code 回复字体", exact: true })).toContainText("系统衬线");
 		await expect(page.getByRole("button", { name: "内容字号", exact: true })).toContainText("20 px");
-		expect(await page.evaluate(() =>
-			getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
-		)).toBe("20px");
+		expect(
+			await page.evaluate(() =>
+				getComputedStyle(document.documentElement).getPropertyValue("--content-font-size").trim(),
+			),
+		).toBe("20px");
 		await expect(page.getByRole("button", { name: "减少动效", exact: true })).toHaveAttribute("aria-pressed", "true");
 		const restartedSearchSection = page.locator(".web-search-section");
 		await expect(restartedSearchSection.getByRole("switch", { name: "启用网络搜索", exact: true })).toBeChecked();
@@ -4404,7 +4970,18 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 
 		phase = "verifying persisted memory note and changelog after restart";
-		await expect.poll(async () => (await page!.evaluate(async (sessionId) => (globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }), CHAT_ACTIVE_ID)).session?.contributeMemory).toBe(false);
+		await expect
+			.poll(
+				async () =>
+					(
+						await page!.evaluate(
+							async (sessionId) =>
+								(globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }),
+							CHAT_ACTIVE_ID,
+						)
+					).session?.contributeMemory,
+			)
+			.toBe(false);
 		const persistedNote = await page.evaluate(async () =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
 				scope: "global",
@@ -4440,7 +5017,10 @@ test("packaged General settings and Personalization persist across restart", asy
 		});
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -4474,23 +5054,58 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Browser settings session");
 	const now = Date.now();
 	await Promise.all([
-		writeFile(path.join(userDataDir, "browser-profiles.json"), JSON.stringify({
-			schemaVersion: 1,
-			profiles: [{
-				profileId: importedProfileId,
-				name: "Work",
-				sourceId: "chrome",
-				sourceProfileId: "Profile 2",
-			}],
-		})),
-		writeFile(path.join(userDataDir, "browser-history.json"), JSON.stringify([
-			{ entryId: "30000000-0000-4000-8000-000000000001", url: "https://metis.example/docs", title: "Metis browser docs", faviconUrl: null, visitedAt: now - 30_000 },
-			{ entryId: "30000000-0000-4000-8000-000000000002", url: "https://example.com/research", title: "Research notes", faviconUrl: null, visitedAt: now - 3_600_000 },
-			{ entryId: "30000000-0000-4000-8000-000000000003", url: "https://example.com/archive", title: "Yesterday archive", faviconUrl: null, visitedAt: now - 86_400_000 },
-		])),
-		writeFile(path.join(userDataDir, `browser-history-${importedProfileId}.json`), JSON.stringify([
-			{ entryId: "30000000-0000-4000-8000-000000000004", url: "https://work.example/dashboard", title: "Work dashboard", faviconUrl: null, visitedAt: now - 60_000 },
-		])),
+		writeFile(
+			path.join(userDataDir, "browser-profiles.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				profiles: [
+					{
+						profileId: importedProfileId,
+						name: "Work",
+						sourceId: "chrome",
+						sourceProfileId: "Profile 2",
+					},
+				],
+			}),
+		),
+		writeFile(
+			path.join(userDataDir, "browser-history.json"),
+			JSON.stringify([
+				{
+					entryId: "30000000-0000-4000-8000-000000000001",
+					url: "https://metis.example/docs",
+					title: "Metis browser docs",
+					faviconUrl: null,
+					visitedAt: now - 30_000,
+				},
+				{
+					entryId: "30000000-0000-4000-8000-000000000002",
+					url: "https://example.com/research",
+					title: "Research notes",
+					faviconUrl: null,
+					visitedAt: now - 3_600_000,
+				},
+				{
+					entryId: "30000000-0000-4000-8000-000000000003",
+					url: "https://example.com/archive",
+					title: "Yesterday archive",
+					faviconUrl: null,
+					visitedAt: now - 86_400_000,
+				},
+			]),
+		),
+		writeFile(
+			path.join(userDataDir, `browser-history-${importedProfileId}.json`),
+			JSON.stringify([
+				{
+					entryId: "30000000-0000-4000-8000-000000000004",
+					url: "https://work.example/dashboard",
+					title: "Work dashboard",
+					faviconUrl: null,
+					visitedAt: now - 60_000,
+				},
+			]),
+		),
 	]);
 
 	const diagnostics: string[] = [];
@@ -4511,7 +5126,8 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		const history = new DatabaseSync(path.join(chromeRoot, "Profile 1", "History"));
 		try {
 			history.exec("CREATE TABLE urls (url TEXT, title TEXT, last_visit_time INTEGER, hidden INTEGER DEFAULT 0)");
-			history.prepare("INSERT INTO urls VALUES (?, ?, ?, 0)")
+			history
+				.prepare("INSERT INTO urls VALUES (?, ?, ?, 0)")
 				.run("https://fixture.example/imported", "Fixture imported history", 13_380_163_200_000_000n);
 		} finally {
 			history.close();
@@ -4535,7 +5151,9 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 	try {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
-		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		page.on("console", (message) => {
+			if (message.type() === "error") consoleErrors.push(message.text());
+		});
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await waitForServerReady(page);
 
@@ -4552,7 +5170,9 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		expect(path.basename(downloadDirectory)).toBe("Downloads");
 		await expect(page.getByText(downloadDirectory, { exact: true })).toBeVisible();
 		await expect(page.getByText("2 profiles · 3 entries in selected profile", { exact: true })).toBeVisible();
-		expect(await page.locator(".settings-page-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		expect(
+			await page.locator(".settings-page-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth),
+		).toBe(true);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "overview-dark-1440x900.png") });
 
 		phase = "checking browser import";
@@ -4575,13 +5195,15 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 			// Report what the importer actually discovered: runners that ship a
 			// Chromium browser without a default profile show recovery guidance.
 			const importSources = await page.evaluate(async () =>
-				(globalThis as unknown as {
-					metis: {
-						listBrowserImportSources(): Promise<
-							readonly { name: string; status?: string; profiles: readonly unknown[] }[]
-						>;
-					};
-				}).metis.listBrowserImportSources(),
+				(
+					globalThis as unknown as {
+						metis: {
+							listBrowserImportSources(): Promise<
+								readonly { name: string; status?: string; profiles: readonly unknown[] }[]
+							>;
+						};
+					}
+				).metis.listBrowserImportSources(),
 			);
 			await expect(importDialog.getByText("Checking browser data…", { exact: true })).toHaveCount(0);
 			const selectedSource = importSources[0];
@@ -4598,7 +5220,9 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 							),
 						).toBeVisible();
 					} else if (selectedSource.status === undefined) {
-						await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+						await expect(
+							importDialog.getByText("No supported browser profiles found", { exact: true }),
+						).toBeVisible();
 					} else {
 						await expect(importDialog.locator(".browser-import-warning, .browser-import-empty")).toHaveCount(1);
 					}
@@ -4654,8 +5278,13 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "history-dark-zh-1440x900.png") });
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`);
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
+		);
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
@@ -4674,7 +5303,13 @@ test("packaged Code project setup creates and opens a project", async () => {
 	const projectDir = path.join(tempRoot, "launch-cwd");
 	const userDataDir = path.join(tempRoot, "electron");
 	const assetQaDir = path.join(desktopRoot, "test-results", "design-qa", "assets");
-	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir), mkdir(assetQaDir, { recursive: true })]);
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(homeDir),
+		mkdir(projectDir),
+		mkdir(userDataDir),
+		mkdir(assetQaDir, { recursive: true }),
+	]);
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
@@ -4684,9 +5319,19 @@ test("packaged Code project setup creates and opens a project", async () => {
 	// from the OS profile and ignores every environment override, so the default
 	// location there is the OS home, so the test cleans up only its unique child.
 	const appHome = process.platform === "win32" ? homedir() : homeDir;
-	const app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics, [], {
-		CFFIXED_USER_HOME: homeDir,
-	});
+	const app = launchPackagedApp(
+		executable,
+		debuggingPort,
+		userDataDir,
+		projectDir,
+		agentDir,
+		homeDir,
+		diagnostics,
+		[],
+		{
+			CFFIXED_USER_HOME: homeDir,
+		},
+	);
 	let browser: Browser | undefined;
 	let page: Page | undefined;
 	let phase = "connecting";
@@ -4697,9 +5342,8 @@ test("packaged Code project setup creates and opens a project", async () => {
 		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
 		phase = "opening Code project setup";
-		const codeProjectName = process.platform === "win32"
-			? `Packaged Code project ${path.basename(tempRoot)}`
-			: "Packaged Code project";
+		const codeProjectName =
+			process.platform === "win32" ? `Packaged Code project ${path.basename(tempRoot)}` : "Packaged Code project";
 		const defaultLocation = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getDefaultProjectLocation(),
 		);
@@ -4746,7 +5390,10 @@ test("packaged Code project setup creates and opens a project", async () => {
 		const canonicalCodeProjectDir = await realpath(codeProjectDir);
 		const projectPicker = page.locator(".home-project-picker-code");
 		await expect(projectPicker).toHaveAttribute("data-folder-selected", "true");
-		await expect(projectPicker.getByRole("button", { name: "Choose workspace" })).toHaveAttribute("title", canonicalCodeProjectDir);
+		await expect(projectPicker.getByRole("button", { name: "Choose workspace" })).toHaveAttribute(
+			"title",
+			canonicalCodeProjectDir,
+		);
 		await page.getByRole("button", { name: "New task", exact: true }).click();
 		await page.getByRole("button", { name: "Create a new project", exact: true }).click();
 		await expect(page.getByRole("dialog", { name: "Start a new project" })).toBeVisible();
@@ -4755,7 +5402,10 @@ test("packaged Code project setup creates and opens a project", async () => {
 		await page.keyboard.press("Escape");
 		await expect(page.getByRole("dialog")).toHaveCount(0);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -4763,10 +5413,11 @@ test("packaged Code project setup creates and opens a project", async () => {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		if (windowsProjectDir) await rm(windowsProjectDir, TEMP_REMOVE_OPTIONS);
-		if (windowsProjectParent) await rmdir(windowsProjectParent).catch((error: NodeJS.ErrnoException) => {
-			// Another project may have appeared in the shared default parent.
-			if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
-		});
+		if (windowsProjectParent)
+			await rmdir(windowsProjectParent).catch((error: NodeJS.ErrnoException) => {
+				// Another project may have appeared in the shared default parent.
+				if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+			});
 		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
@@ -4806,12 +5457,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		false,
 		"Session action target",
 	);
-	const sessionActionOwnedPaths = await seedOwnedSessionData(
-		fixtures,
-		agentDir,
-		SESSION_ACTION_ID,
-		sessionActionPath,
-	);
+	const sessionActionOwnedPaths = await seedOwnedSessionData(fixtures, agentDir, SESSION_ACTION_ID, sessionActionPath);
 	const sessionActionRecoveryPath = path.join(
 		path.dirname(sessionActionPath),
 		`.${path.basename(sessionActionPath)}.00000000-0000-4000-8000-000000000001.replace.bak`,
@@ -4823,10 +5469,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 	];
 	await Promise.all([
 		writeFixtureFile(sourcePath, "source must survive"),
-		writeFixtureFile(
-			skillPath,
-			"---\nname: shared-project-skill\ndescription: Shared by Chat and Code\n---\n",
-		),
+		writeFixtureFile(skillPath, "---\nname: shared-project-skill\ndescription: Shared by Chat and Code\n---\n"),
 	]);
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 	await fixtures.ScheduleManager.create({ agentDir }).create({
@@ -4856,9 +5499,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		let group = projectGroup(page, projectName);
 		await expect(group).toBeVisible();
 		phase = "renaming and deleting one idle session";
-		let sessionActionRow = group.locator(
-			'.session-row:has(.session-button[aria-label="Session action target"])',
-		);
+		let sessionActionRow = group.locator('.session-row:has(.session-button[aria-label="Session action target"])');
 		const sessionActionButton = sessionActionRow.locator(".session-actions > button");
 		const sessionButton = sessionActionRow.locator(".session-button");
 		// Earlier sidebar clicks can leave the pointer resting on this row; park it
@@ -4892,14 +5533,17 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await renameSessionDialog.locator("#session-rename-input").fill("Renamed session target");
 		await renameSessionDialog.getByRole("button", { name: "Rename", exact: true }).click();
 		await expect.poll(async () => readFile(sessionActionPath, "utf8")).toContain("Renamed session target");
-		sessionActionRow = group.locator(
-			'.session-row:has(.session-button[aria-label="Renamed session target"])',
-		);
+		sessionActionRow = group.locator('.session-row:has(.session-button[aria-label="Renamed session target"])');
 		await sessionActionRow.hover();
 		await sessionActionRow.getByRole("button", { name: "Actions for Renamed session target" }).click();
-		await page.getByRole("menu", { name: "Renamed session target session actions" }).getByRole("menuitem", { name: "Delete" }).click();
+		await page
+			.getByRole("menu", { name: "Renamed session target session actions" })
+			.getByRole("menuitem", { name: "Delete" })
+			.click();
 		const deleteSessionDialog = page.getByRole("dialog", { name: "Delete session?" });
-		await expect(deleteSessionDialog).toContainText("Project memory, Skills, schedules, other sessions, and source files are unchanged");
+		await expect(deleteSessionDialog).toContainText(
+			"Project memory, Skills, schedules, other sessions, and source files are unchanged",
+		);
 		await deleteSessionDialog.getByRole("button", { name: "Move to Trash" }).click();
 		await expect(page.locator(".new-task-home-heading h1")).toBeVisible();
 		for (const removedPath of [sessionActionPath, sessionActionRecoveryPath, ...sessionActionOwnedPaths]) {
@@ -4915,9 +5559,9 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(page.getByRole("dialog")).toHaveCount(0);
 		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionPreset":"full"');
 		await page.getByRole("button", { name: "Select permissions, current Full" }).click();
-		await page.locator(".permission-selector-popover").evaluate(
-			(element) => Promise.all(element.getAnimations().map((animation) => animation.finished)),
-		);
+		await page
+			.locator(".permission-selector-popover")
+			.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
 		await page.screenshot({ path: path.join(qaDir, "permission-menu-normal.png") });
 		await page.getByRole("menuitemradio", { name: /Ask/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Ask" })).toBeVisible();
@@ -4964,7 +5608,9 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
 		await expect(
-			page.getByRole("menu", { name: "Session grouping", exact: true }).getByRole("menuitemradio", { name: "Date", exact: true }),
+			page
+				.getByRole("menu", { name: "Session grouping", exact: true })
+				.getByRole("menuitemradio", { name: "Date", exact: true }),
 		).toBeVisible();
 		await page.keyboard.press("Escape");
 		await groupSessionsBy(page, "Project");
@@ -4982,10 +5628,12 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "New task in Pinned Chat Project" }).click();
 		const workspaceHeader = page.locator(".workspace-titlebar");
-		await expect.poll(async () => {
-			const id = await workspaceHeader.getAttribute("data-active-session-id");
-			return id !== null && ![CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID].includes(id);
-		}).toBe(true);
+		await expect
+			.poll(async () => {
+				const id = await workspaceHeader.getAttribute("data-active-session-id");
+				return id !== null && ![CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID].includes(id);
+			})
+			.toBe(true);
 		const createdSessionId = await workspaceHeader.getAttribute("data-active-session-id");
 		expect(createdSessionId).not.toBeNull();
 		expect([CHAT_ACTIVE_ID, CHAT_ARCHIVED_ID, CODE_ID]).not.toContain(createdSessionId);
@@ -5014,7 +5662,9 @@ test("packaged mode project actions preserve the other mode and shared project d
 		}
 		const deleteDialog = page.getByRole("dialog", { name: "Delete Chat project?" });
 		await expect(deleteDialog.getByText("3 Chat sessions", { exact: false })).toBeVisible();
-		await expect(deleteDialog.getByText("1 fixed-workspace schedules block deletion", { exact: false })).toBeVisible();
+		await expect(
+			deleteDialog.getByText("1 fixed-workspace schedules block deletion", { exact: false }),
+		).toBeVisible();
 		await expect(deleteDialog.getByRole("button", { name: "Move to Trash" })).toBeDisabled();
 		await page.screenshot({ path: path.join(qaDir, "delete-blocker-normal.png") });
 
@@ -5069,14 +5719,20 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.getByRole("option", { name: "Project", exact: true }).click();
 		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		if (browser) await quitPackagedApp({ app, browser });
 		else await stopProcess(app);
-		if (!scheduleRemoved) await fixtures.ScheduleManager.create({ agentDir }).delete(SCHEDULE_ID, { deleteSessions: false }).catch(() => undefined);
+		if (!scheduleRemoved)
+			await fixtures.ScheduleManager.create({ agentDir })
+				.delete(SCHEDULE_ID, { deleteSessions: false })
+				.catch(() => undefined);
 		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
@@ -5162,10 +5818,15 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 		}
 		expect(await readFile(projectMemoryTopicPath, "utf8")).toBe("shared project memory\n");
 		expect(await readFile(globalMemoryTopicPath, "utf8")).toBe("shared global memory\n");
-		expect(await readFile(sharedMemoryIndexPath, "utf8")).toContain("[project-sentinel.md](notes/project-sentinel.md)");
+		expect(await readFile(sharedMemoryIndexPath, "utf8")).toContain(
+			"[project-sentinel.md](notes/project-sentinel.md)",
+		);
 		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](notes/global-sentinel.md)");
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
@@ -5188,7 +5849,13 @@ test("packaged project delete fails closed for a held session lease and retries"
 	const projectDir = path.join(tempRoot, "lease-project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const qaDir = path.join(desktopRoot, "test-results", "design-qa", "project-actions");
-	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir), mkdir(qaDir, { recursive: true })]);
+	await Promise.all([
+		mkdir(agentDir),
+		mkdir(homeDir),
+		mkdir(projectDir),
+		mkdir(userDataDir),
+		mkdir(qaDir, { recursive: true }),
+	]);
 	const held = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: CHAT_ACTIVE_ID,
 		mode: "chat",
@@ -5221,7 +5888,8 @@ test("packaged project delete fails closed for a held session lease and retries"
 		await dialog.getByRole("button", { name: "Move to Trash" }).click();
 		await expect(dialog.getByText("still in use", { exact: false })).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "delete-error-held-lease.png") });
-		for (const preservedPath of [sessionPath, ...ownedPaths]) expect(existsSync(preservedPath), preservedPath).toBe(true);
+		for (const preservedPath of [sessionPath, ...ownedPaths])
+			expect(existsSync(preservedPath), preservedPath).toBe(true);
 
 		phase = "releasing the lease and retrying";
 		held.close();
@@ -5232,7 +5900,10 @@ test("packaged project delete fails closed for a held session lease and retries"
 		await expect(projectGroup(page, path.basename(projectDir))).toHaveCount(0);
 		for (const removedPath of [sessionPath, ...ownedPaths]) expect(existsSync(removedPath), removedPath).toBe(false);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
+		const bodyText = await page
+			?.locator("body")
+			.innerText()
+			.catch(() => "renderer unavailable");
 		throw new Error(
 			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);

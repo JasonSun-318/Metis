@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	createPluginFixtureServer,
@@ -17,6 +17,7 @@ import {
 	createAndRestoreChatSession,
 	launchPackagedDesktop,
 	listen,
+	type OpenAiChatRequest,
 	packagedExecutable,
 	quitPackagedApp,
 	readOpenAiChatRequest,
@@ -26,7 +27,6 @@ import {
 	stopProcess,
 	waitForServerReady,
 	writeOfflineProviderConfig,
-	type OpenAiChatRequest,
 } from "./packaged-app-harness.ts";
 
 test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
@@ -42,6 +42,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 		await fixtureServer?.close();
 	});
 
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test("Scenario A, B & E: Full marketplace discovery, inspection, installation, runtime execution, UI update A->B, toggle, restart and uninstall", async ({}, testInfo) => {
 		const executable = packagedExecutable();
 		expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -151,9 +152,13 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			const marketSearchBounds = await page.locator(".plugins-search").boundingBox();
 			expect(marketSearchBounds!.x).toBeCloseTo(skillsSearchBounds!.x, 0);
 			expect(marketSearchBounds!.y).toBeCloseTo(skillsSearchBounds!.y, 0);
-			await expect(page.locator(".plugins-page-header").getByRole("button", { name: "Add Market", exact: true })).toBeVisible();
+			await expect(
+				page.locator(".plugins-page-header").getByRole("button", { name: "Add Market", exact: true }),
+			).toBeVisible();
 			await expect(page.locator(".plugins-sub-tab")).toHaveCount(0);
-			const defaultMarket = page.locator(".plugins-source-row").filter({ hasText: "anthropics/claude-plugins-official" });
+			const defaultMarket = page
+				.locator(".plugins-source-row")
+				.filter({ hasText: "anthropics/claude-plugins-official" });
 			await expect(defaultMarket).toBeVisible();
 			await expect(defaultMarket.locator("strong")).toHaveText("anthropics/claude-plugins-official");
 			const marketButtonBounds = await page.locator(".plugins-page-actions .plugins-new-btn").boundingBox();
@@ -167,8 +172,9 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(defaultMarket).toHaveCSS("background-color", rowHover);
 
 			await defaultMarket.locator(".plugins-market-remove-btn").click();
-			await expect(page.getByText("No markets added. Add a GitHub market to discover plugins.", { exact: true })).toBeVisible();
-
+			await expect(
+				page.getByText("No markets added. Add a GitHub market to discover plugins.", { exact: true }),
+			).toBeVisible();
 
 			// 2. Add Fixture GitHub Market
 			await page.getByRole("button", { name: "Add Market", exact: true }).click();
@@ -178,14 +184,24 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			const addButton = addMarketDialog.getByRole("button", { name: "Add", exact: true });
 			const cancelButton = addMarketDialog.getByRole("button", { name: "Cancel", exact: true });
 			for (const theme of ["dark", "light"]) {
-				await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+				await page.evaluate((value) => {
+					document.documentElement.dataset.theme = value;
+				}, theme);
 				await addButton.hover();
-				await expect(addButton).toHaveCSS("background-color", theme === "dark" ? "rgb(255, 255, 255)" : "rgb(107, 107, 107)");
+				await expect(addButton).toHaveCSS(
+					"background-color",
+					theme === "dark" ? "rgb(255, 255, 255)" : "rgb(107, 107, 107)",
+				);
 				await expect(addButton).toHaveCSS("color", theme === "dark" ? "rgb(18, 18, 18)" : "rgb(243, 243, 243)");
 				await cancelButton.hover();
-				await expect(cancelButton).toHaveCSS("background-color", theme === "dark" ? "rgb(34, 34, 34)" : "rgb(236, 235, 230)");
+				await expect(cancelButton).toHaveCSS(
+					"background-color",
+					theme === "dark" ? "rgb(34, 34, 34)" : "rgb(236, 235, 230)",
+				);
 			}
-			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+			await page.evaluate(() => {
+				document.documentElement.dataset.theme = "dark";
+			});
 			fixtureServer!.setRateLimited(true);
 			await addButton.click();
 			await expect(addMarketDialog.getByRole("alert")).toContainText("GitHub request limit reached");
@@ -407,8 +423,14 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Reopen Customize -> Plugins -> Installed
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
-			await expect(page.locator(".plugins-source-row").filter({ hasText: "anthropics/claude-plugins-official" })).toHaveCount(0);
-			await page.locator(".plugins-source-row").filter({ hasText: "fixture/plugins-market" }).locator(".plugins-market-remove-btn").click();
+			await expect(
+				page.locator(".plugins-source-row").filter({ hasText: "anthropics/claude-plugins-official" }),
+			).toHaveCount(0);
+			await page
+				.locator(".plugins-source-row")
+				.filter({ hasText: "fixture/plugins-market" })
+				.locator(".plugins-market-remove-btn")
+				.click();
 			await expect(page.locator(".plugins-source-row")).toHaveCount(0);
 			await page.getByRole("button", { name: /Manage plugins/ }).click();
 
@@ -437,19 +459,21 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Attach to the report instead of a hard-coded /tmp path: the output
 			// path is platform-safe and an attachment failure must not mask the
 			// original error.
-			await testInfo.attach("debug-plugins-e2e", {
-				body: JSON.stringify(
-					{
-						bodyHtml,
-						diagnostics,
-						agentDirExists: existsSync(agentDir),
-						error: String(error),
-					},
-					null,
-					2,
-				),
-				contentType: "application/json",
-			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
+			await testInfo
+				.attach("debug-plugins-e2e", {
+					body: JSON.stringify(
+						{
+							bodyHtml,
+							diagnostics,
+							agentDirExists: existsSync(agentDir),
+							error: String(error),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				})
+				.catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
 			if (browser) await quitPackagedApp({ app, browser });
@@ -459,6 +483,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 		}
 	});
 
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test("Scenario C, D & Visual Verification: Partial compatibility, unsupported, codex, locales, themes and narrow viewport", async ({}, testInfo) => {
 		const executable = packagedExecutable();
 		expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -522,18 +547,30 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await page.getByRole("tab", { name: "插件", exact: true }).click();
 			await expect(page.locator(".plugins-market-panel")).toBeVisible();
 
-			for (const scenario of [{ width: 1200, height: 800, theme: "dark" }, { width: 720, height: 620, theme: "light" }]) {
+			for (const scenario of [
+				{ width: 1200, height: 800, theme: "dark" },
+				{ width: 720, height: 620, theme: "light" },
+			]) {
 				await page.setViewportSize({ width: scenario.width, height: scenario.height });
-				await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, scenario.theme);
-				await expect(page.locator(".plugins-page-header").getByRole("button", { name: "添加市场", exact: true })).toBeVisible();
+				await page.evaluate((theme) => {
+					document.documentElement.dataset.theme = theme;
+				}, scenario.theme);
+				await expect(
+					page.locator(".plugins-page-header").getByRole("button", { name: "添加市场", exact: true }),
+				).toBeVisible();
 				expect(await page.locator(".plugins-panel").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 				const marketRow = page.locator(".plugins-source-row").first();
 				await expect(marketRow.locator("strong")).toHaveText("anthropics/claude-plugins-official");
 				await marketRow.locator(".plugins-source-open").hover();
-				await page.screenshot({ path: testInfo.outputPath(`markets-home-${scenario.theme}.png`), animations: "disabled" });
+				await page.screenshot({
+					path: testInfo.outputPath(`markets-home-${scenario.theme}.png`),
+					animations: "disabled",
+				});
 			}
 			await page.setViewportSize({ width: 1200, height: 800 });
-			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+			await page.evaluate(() => {
+				document.documentElement.dataset.theme = "dark";
+			});
 
 			// Add market in Chinese
 			await page.getByRole("button", { name: "添加市场", exact: true }).click();
@@ -592,7 +629,10 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			});
 			expect(
 				Math.abs(
-					checkboxAlignment.input.y + checkboxAlignment.input.height / 2 - checkboxAlignment.text.y - checkboxAlignment.text.height / 2,
+					checkboxAlignment.input.y +
+						checkboxAlignment.input.height / 2 -
+						checkboxAlignment.text.y -
+						checkboxAlignment.text.height / 2,
 				),
 			).toBeLessThan(4);
 			expect(checkboxAlignment.text.x).toBeGreaterThan(checkboxAlignment.input.x + checkboxAlignment.input.width);
@@ -722,18 +762,20 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Attach to the report instead of a hard-coded /tmp path: the output
 			// path is platform-safe and an attachment failure must not mask the
 			// original error.
-			await testInfo.attach("debug-plugins-e2e-compat", {
-				body: JSON.stringify(
-					{
-						bodyHtml,
-						diagnostics,
-						error: String(error),
-					},
-					null,
-					2,
-				),
-				contentType: "application/json",
-			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
+			await testInfo
+				.attach("debug-plugins-e2e-compat", {
+					body: JSON.stringify(
+						{
+							bodyHtml,
+							diagnostics,
+							error: String(error),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				})
+				.catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
 			if (browser) await quitPackagedApp({ app, browser });
@@ -743,6 +785,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 		}
 	});
 
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test("Scenario F: Credential lifecycle & HTTP MCP token configuration", async ({}, testInfo) => {
 		const executable = packagedExecutable();
 		expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
@@ -942,18 +985,20 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Attach to the report instead of a hard-coded /tmp path: the output
 			// path is platform-safe and an attachment failure must not mask the
 			// original error.
-			await testInfo.attach("debug-plugins-e2e-cred", {
-				body: JSON.stringify(
-					{
-						bodyHtml,
-						diagnostics,
-						error: String(error),
-					},
-					null,
-					2,
-				),
-				contentType: "application/json",
-			}).catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
+			await testInfo
+				.attach("debug-plugins-e2e-cred", {
+					body: JSON.stringify(
+						{
+							bodyHtml,
+							diagnostics,
+							error: String(error),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				})
+				.catch((cause: unknown) => console.error("Could not attach plugin diagnostics", cause));
 			throw error;
 		} finally {
 			if (browser) await quitPackagedApp({ app, browser });

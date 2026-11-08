@@ -9,7 +9,7 @@ const mode: AgentMode = params.get("mode") === "code" ? "code" : "chat";
 document.documentElement.dataset.theme = params.get("theme") === "light" ? "light" : "dark";
 document.documentElement.style.setProperty("--content-font-size", params.get("font") === "20" ? "20px" : "13px");
 setLocale("en");
-document.documentElement.style.setProperty("--fixture-columns", mode === "code" ? "3" : "2");
+document.documentElement.style.setProperty("--fixture-columns", "2");
 
 const longText = [
 	"OpenDesign 修复验收：仅回复",
@@ -22,7 +22,7 @@ const longText = [
 const codeLine = `printf '${"unbroken_code_token_".repeat(24)}'`;
 const shortText = "短消息 hello";
 
-function Conversation({ owner }: { readonly owner: "main" | "agent" | "detail" }) {
+function Conversation({ owner }: { readonly owner: "main" | "agent" }) {
 	const agent = owner !== "main";
 	const [copied, setCopied] = useState("");
 	const sessionId = agent ? "22222222-2222-4222-8222-222222222222" : "11111111-1111-4111-8111-111111111111";
@@ -53,15 +53,14 @@ function Conversation({ owner }: { readonly owner: "main" | "agent" | "detail" }
 	];
 	return (
 		<div
-			className={`fixture-conversation conversation-column${owner === "agent" ? " agent-conversation" : owner === "detail" ? " subagent-detail" : ""}`}
+			className={`fixture-conversation conversation-column${agent ? " agent-conversation" : ""}`}
 			data-owner={owner}
 			data-copied-text={copied}
 			data-source-text={longText}
 			data-code-line={codeLine}
 		>
 			<header className={agent ? "agent-conversation-header" : "fixture-header"}>
-				{owner === "detail" ? "Sidebar agent detail" : agent ? "Child agent conversation" : "Main conversation"} ·{" "}
-				{mode}
+				{agent ? "Child agent conversation" : "Main conversation"} · {mode}
 			</header>
 			<Transcript
 				appearance={mode}
@@ -81,7 +80,6 @@ createRoot(document.getElementById("root")!).render(
 		<main className="fixture-grid">
 			<Conversation owner="main" />
 			<Conversation owner="agent" />
-			{mode === "code" && <Conversation owner="detail" />}
 		</main>
 	</StrictMode>,
 );

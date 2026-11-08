@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page } from "@playwright/test";
 import {
 	closeServer,
 	connectToApp,
@@ -12,6 +12,7 @@ import {
 	launchPackagedDesktop,
 	listen,
 	messageText,
+	type OpenAiChatMessage,
 	packagedExecutable,
 	readOpenAiChatRequest,
 	reservePort,
@@ -19,7 +20,6 @@ import {
 	respondWithToolCall,
 	stopProcess,
 	waitForServerReady,
-	type OpenAiChatMessage,
 } from "./packaged-app-harness.ts";
 
 export interface BrowserScriptContext {
@@ -78,7 +78,11 @@ export interface RunningBrowserAgentApp {
 
 export async function createBrowserAgentEnvironment(
 	providerPort: number,
-	importedProfiles: readonly { readonly profileId: string; readonly name: string; readonly sourceProfileId: string }[] = [],
+	importedProfiles: readonly {
+		readonly profileId: string;
+		readonly name: string;
+		readonly sourceProfileId: string;
+	}[] = [],
 ): Promise<BrowserAgentEnvironment> {
 	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-browser-agent-"));
 	const environment: BrowserAgentEnvironment = {
@@ -96,35 +100,61 @@ export async function createBrowserAgentEnvironment(
 		mkdir(environment.userDataDir),
 	]);
 	await Promise.all([
-		writeFile(path.join(environment.agentDir, "models.json"), JSON.stringify({ providers: {
-			browserFixture: {
-				baseUrl: `http://127.0.0.1:${providerPort}/v1`,
-				apiKey: "browser-fixture-key",
-				api: "openai-completions",
-				models: [{
-					id: "browser-agent-fixture",
-					name: "Browser Agent Fixture",
-					input: ["text", "image"],
-					contextWindow: 1_000_000,
-					maxTokens: 4_096,
-				}],
-			},
-		} }, null, 2)),
-		writeFile(path.join(environment.agentDir, "settings.json"), JSON.stringify({
-			defaultProvider: "browserFixture",
-			defaultModel: "browser-agent-fixture",
-			retry: { enabled: false },
-		}, null, 2)),
-		...(importedProfiles.length > 0 ? [writeFile(
-			path.join(environment.userDataDir, "browser-profiles.json"),
-			JSON.stringify({
-				schemaVersion: 1,
-				profiles: importedProfiles.map((profile) => ({
-					...profile,
-					sourceId: "chrome",
-				})),
-			}, null, 2),
-		)] : []),
+		writeFile(
+			path.join(environment.agentDir, "models.json"),
+			JSON.stringify(
+				{
+					providers: {
+						browserFixture: {
+							baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+							apiKey: "browser-fixture-key",
+							api: "openai-completions",
+							models: [
+								{
+									id: "browser-agent-fixture",
+									name: "Browser Agent Fixture",
+									input: ["text", "image"],
+									contextWindow: 1_000_000,
+									maxTokens: 4_096,
+								},
+							],
+						},
+					},
+				},
+				null,
+				2,
+			),
+		),
+		writeFile(
+			path.join(environment.agentDir, "settings.json"),
+			JSON.stringify(
+				{
+					defaultProvider: "browserFixture",
+					defaultModel: "browser-agent-fixture",
+					retry: { enabled: false },
+				},
+				null,
+				2,
+			),
+		),
+		...(importedProfiles.length > 0
+			? [
+					writeFile(
+						path.join(environment.userDataDir, "browser-profiles.json"),
+						JSON.stringify(
+							{
+								schemaVersion: 1,
+								profiles: importedProfiles.map((profile) => ({
+									...profile,
+									sourceId: "chrome",
+								})),
+							},
+							null,
+							2,
+						),
+					),
+				]
+			: []),
 	]);
 	return environment;
 }
@@ -156,7 +186,8 @@ export async function launchBrowserAgentApp(
 		}
 		const sessionId = await createAndRestoreChatSession(page, environment.projectDir, false);
 		const trust = page.getByRole("heading", { name: "Trust this project?", exact: true });
-		if (await trust.isVisible().catch(() => false)) await page.getByRole("button", { name: "Trust", exact: true }).click();
+		if (await trust.isVisible().catch(() => false))
+			await page.getByRole("button", { name: "Trust", exact: true }).click();
 		await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
 		return { app, browser, page, sessionId };
 	} catch (error) {
@@ -227,7 +258,8 @@ function oauthPage(): string {
 }
 
 function handoffPage(reason: string): string {
-	const input = reason === "login" ? '<label>Password <input id="secret" aria-label="Password" type="password"></label>' : "";
+	const input =
+		reason === "login" ? '<label>Password <input id="secret" aria-label="Password" type="password"></label>' : "";
 	return html(
 		`<main><h1>${reason} challenge</h1>${input}<button id="complete" type="button">Complete ${reason}</button><output id="handoff-status">Challenge: pending</output></main>`,
 		`document.querySelector('#complete').addEventListener('click',()=>{document.querySelector('#handoff-status').textContent='Challenge: complete';document.cookie='handoff-${reason}=complete; Max-Age=3600; Path=/; SameSite=Lax'});`,
@@ -249,7 +281,8 @@ export function parseToolJson(result: string): Record<string, unknown> {
 	const json = result.split("\n").find((line) => line.trimStart().startsWith("{"));
 	if (!json) throw new Error(`Expected a JSON tool result: ${result}`);
 	const parsed = JSON.parse(json) as unknown;
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`Expected a JSON tool result: ${result}`);
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+		throw new Error(`Expected a JSON tool result: ${result}`);
 	return parsed as Record<string, unknown>;
 }
 
@@ -314,23 +347,35 @@ export async function createBrowserAgentFixture(): Promise<BrowserAgentFixture> 
 		}
 		response.setHeader("content-type", "text/html; charset=utf-8");
 		if (url.pathname === "/controls") response.end(controlsPage(frameOrigin));
-		else if (url.pathname === "/navigation") response.end(html(
-			`<main><h1>Navigation fixture</h1><a href="/navigation-done?from=visible">Open destination</a><div style="height:2400px" aria-hidden="true"></div><a href="/navigation-done?from=below-fold">Open lower destination</a></main>`,
-		));
-		else if (url.pathname === "/navigation-done") response.end(html(
-			`<main><h1>Navigation complete</h1><p id="navigation-source">${url.searchParams.get("from")}</p></main>`,
-		));
-		else if (url.pathname === "/popup-fixture") response.end(html(
-			`<main><h1>Popup fixture</h1><a id="oauth" href="/oauth" target="_blank" rel="opener">Open OAuth popup</a><output id="oauth-status">OAuth: pending</output></main>`,
-			`window.addEventListener('message',(event)=>{if(event.data==='oauth-complete')document.querySelector('#oauth-status').textContent='OAuth: complete'});`,
-		));
+		else if (url.pathname === "/navigation")
+			response.end(
+				html(
+					`<main><h1>Navigation fixture</h1><a href="/navigation-done?from=visible">Open destination</a><div style="height:2400px" aria-hidden="true"></div><a href="/navigation-done?from=below-fold">Open lower destination</a></main>`,
+				),
+			);
+		else if (url.pathname === "/navigation-done")
+			response.end(
+				html(
+					`<main><h1>Navigation complete</h1><p id="navigation-source">${url.searchParams.get("from")}</p></main>`,
+				),
+			);
+		else if (url.pathname === "/popup-fixture")
+			response.end(
+				html(
+					`<main><h1>Popup fixture</h1><a id="oauth" href="/oauth" target="_blank" rel="opener">Open OAuth popup</a><output id="oauth-status">OAuth: pending</output></main>`,
+					`window.addEventListener('message',(event)=>{if(event.data==='oauth-complete')document.querySelector('#oauth-status').textContent='OAuth: complete'});`,
+				),
+			);
 		else if (url.pathname === "/frame") response.end(framePage());
 		else if (url.pathname === "/oauth") response.end(oauthPage());
 		else if (url.pathname === "/destructive") response.end(destructivePage());
-		else if (url.pathname === "/stale") response.end(html(
-			`<main><h1>Stale fixture ${url.searchParams.get("v") ?? "1"}</h1><button id="stale" type="button">Stale action</button></main>`,
-			`document.querySelector('#stale').addEventListener('click',()=>fetch('/stale-hit',{method:'POST'}));`,
-		));
+		else if (url.pathname === "/stale")
+			response.end(
+				html(
+					`<main><h1>Stale fixture ${url.searchParams.get("v") ?? "1"}</h1><button id="stale" type="button">Stale action</button></main>`,
+					`document.querySelector('#stale').addEventListener('click',()=>fetch('/stale-hit',{method:'POST'}));`,
+				),
+			);
 		else if (url.pathname.startsWith("/handoff/")) response.end(handoffPage(url.pathname.slice("/handoff/".length)));
 		else if (url.pathname === "/set-cookie") {
 			const value = url.searchParams.get("value") ?? "missing";

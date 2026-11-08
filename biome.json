@@ -45,6 +45,7 @@
 			"packages/*/src/**/*.tsx",
 			"packages/*/test/**/*.ts",
 			"packages/*/test/**/*.tsx",
+			"packages/*/e2e/**/*.ts",
 			"packages/*/e2e/**/*.tsx",
 			"packages/coding-agent/examples/**/*.ts",
 			"!**/node_modules/**/*",

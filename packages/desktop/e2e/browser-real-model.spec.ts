@@ -10,6 +10,7 @@ const task = `请只用 Metis 内置的 browser_* 工具自主完成下面这项
 全程不登录、不发布内容、不修改账户。遇到工具拒绝或页面变化时，根据最新观察恢复；若无法完成，明确报告卡在哪一步。完成后用中文简述实际结果。`;
 
 // This deliberately spends real model quota. It never substitutes scripted responses.
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("configured model autonomously controls Wikipedia in packaged Metis", async ({}, testInfo) => {
 	test.skip(
 		process.env.METIS_BROWSER_REAL_MODEL_TEST !== "1",

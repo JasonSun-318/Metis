@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { expect, test, type TestInfo } from "@playwright/test";
+import { expect, type TestInfo, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
+	type BrowserAgentFixture,
 	closeBrowserAgentApp,
 	createBrowserAgentEnvironment,
 	createBrowserAgentFixture,
@@ -11,10 +12,9 @@ import {
 	launchBrowserAgentApp,
 	observationInput,
 	parseToolJson,
+	type RunningBrowserAgentApp,
 	removeBrowserAgentEnvironment,
 	sendFixturePrompt,
-	type BrowserAgentFixture,
-	type RunningBrowserAgentApp,
 } from "./browser-agent-fixture.ts";
 import { packagedExecutable } from "./packaged-app-harness.ts";
 
@@ -34,7 +34,10 @@ function configureHandoff(
 		if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
 		if (step === 1) {
 			browserId = openedBrowserId(lastResult);
-			return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/handoff/${reason}` } };
+			return {
+				tool: "browser_navigate",
+				arguments: { browserId, action: "goto", url: `${origin}/handoff/${reason}` },
+			};
 		}
 		if (step === 2) return { tool: "browser_handoff", arguments: { browserId, reason } };
 		return { text: `done:${marker}` };
@@ -46,8 +49,18 @@ async function waitForDone(app: RunningBrowserAgentApp, marker: string): Promise
 }
 
 async function fixturePage(app: RunningBrowserAgentApp, url: string) {
-	await expect.poll(() => app.browser.contexts().flatMap((context) => context.pages()).some((page) => page.url() === url)).toBe(true);
-	const page = app.browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === url);
+	await expect
+		.poll(() =>
+			app.browser
+				.contexts()
+				.flatMap((context) => context.pages())
+				.some((page) => page.url() === url),
+		)
+		.toBe(true);
+	const page = app.browser
+		.contexts()
+		.flatMap((context) => context.pages())
+		.find((candidate) => candidate.url() === url);
 	if (!page) throw new Error(`Embedded fixture page was not exposed: ${url}`);
 	return page;
 }
@@ -71,7 +84,10 @@ async function captureHandoffQa(app: RunningBrowserAgentApp, testInfo: TestInfo)
 	await app.page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 	const settings = app.page.getByRole("dialog", { name: "Settings", exact: true });
 	await settings.getByRole("button", { name: "General", exact: true }).click();
-	await settings.getByRole("group", { name: "Appearance", exact: true }).getByRole("button", { name: "Light", exact: true }).click();
+	await settings
+		.getByRole("group", { name: "Appearance", exact: true })
+		.getByRole("button", { name: "Light", exact: true })
+		.click();
 	await expect(app.page.locator("html")).toHaveAttribute("data-theme", "light");
 	await settings.getByRole("button", { name: "Back to app", exact: true }).click();
 	await expect(app.page.getByRole("alert", { name: "Your action is needed", exact: true })).toBeVisible();
@@ -83,6 +99,7 @@ async function captureHandoffQa(app: RunningBrowserAgentApp, testInfo: TestInfo)
 	for (let index = 0; index < 10; index += 1) await resizer.press("ArrowLeft");
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged login and human verification stay in explicit, secret-free handoff", async ({}, testInfo) => {
 	test.setTimeout(150_000);
 	expect(existsSync(packagedExecutable()), `Package the desktop app first: ${packagedExecutable()}`).toBe(true);
@@ -102,7 +119,11 @@ test("packaged login and human verification stay in explicit, secret-free handof
 		const handoff = app.page.getByRole("alert", { name: "Your action is needed", exact: true });
 		await expect(handoff).toContainText("Sign in on this page, then continue when you are done.");
 		await expect(app.page.getByRole("textbox", { name: "Browser address", exact: true })).toBeDisabled();
-		await expect.poll(() => app!.page.evaluate(() => document.activeElement?.textContent?.includes("Your action is needed") ?? false)).toBe(true);
+		await expect
+			.poll(() =>
+				app!.page.evaluate(() => document.activeElement?.textContent?.includes("Your action is needed") ?? false),
+			)
+			.toBe(true);
 		await app.page.keyboard.press("Escape");
 		await expect(handoff).toBeVisible();
 		await captureHandoffQa(app, testInfo);
@@ -112,7 +133,8 @@ test("packaged login and human verification stay in explicit, secret-free handof
 		await expect(loginPage.locator("#handoff-status")).toHaveText("Challenge: complete");
 		await app.page.getByRole("button", { name: "Done, continue", exact: true }).click();
 		await waitForDone(app, "handoff-login");
-		const loginResult = fixture.calls.find((call) => call.marker === "handoff-login" && call.name === "browser_handoff")?.result ?? "";
+		const loginResult =
+			fixture.calls.find((call) => call.marker === "handoff-login" && call.name === "browser_handoff")?.result ?? "";
 		expect(loginResult).toContain("Challenge: complete");
 		expect(loginResult).not.toContain(secret);
 
@@ -135,7 +157,9 @@ test("packaged login and human verification stay in explicit, secret-free handof
 		expect(await textFilesUnder(environment.agentDir)).not.toContain(secret);
 		expect(await textFilesUnder(path.join(environment.userDataDir, "logs")).catch(() => "")).not.toContain(secret);
 	} catch (error) {
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\ntrace=${JSON.stringify(fixture.calls, null, 2).slice(-16_000)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\ntrace=${JSON.stringify(fixture.calls, null, 2).slice(-16_000)}\n${environment.diagnostics.join("").slice(-12_000)}`,
+		);
 	} finally {
 		if (app) await closeBrowserAgentApp(app);
 		await fixture.close();
@@ -143,6 +167,7 @@ test("packaged login and human verification stay in explicit, secret-free handof
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged confirmation rejects safely, approves once, and Take control enters the same handoff", async ({}, testInfo) => {
 	test.setTimeout(120_000);
 	const fixture = await createBrowserAgentFixture();
@@ -158,13 +183,19 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 			}
 			if (step === 2) {
 				const input = observationInput(lastResult);
-				return { tool: "browser_act", arguments: {
-					...input,
-					observation: undefined,
-					intent: "Delete the local fixture record",
-					risk: "destructive",
-					action: { type: "click", target: { elementId: elementId(input.observation.state, "Delete fixture record") } },
-				} };
+				return {
+					tool: "browser_act",
+					arguments: {
+						...input,
+						observation: undefined,
+						intent: "Delete the local fixture record",
+						risk: "destructive",
+						action: {
+							type: "click",
+							target: { elementId: elementId(input.observation.state, "Delete fixture record") },
+						},
+					},
+				};
 			}
 			return { text: `done:${marker}` };
 		});
@@ -177,7 +208,10 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
 			if (step === 1) {
 				takeoverBrowserId = openedBrowserId(lastResult);
-				return { tool: "browser_navigate", arguments: { browserId: takeoverBrowserId, action: "goto", url: `${origin}/slow` } };
+				return {
+					tool: "browser_navigate",
+					arguments: { browserId: takeoverBrowserId, action: "goto", url: `${origin}/slow` },
+				};
 			}
 			return { text: "done:take-control-race" };
 		});
@@ -215,17 +249,30 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 		await app.page.getByRole("tab", { name: "New tab", exact: true }).click();
 		const activity = app.page.getByRole("status", { name: "Browser automation active", exact: true });
 		await expect(activity).toContainText("Metis is controlling this page");
-		await app.page.screenshot({ animations: "disabled", path: testInfo.outputPath("agent-activity-dark-1280x840.png") });
+		await app.page.screenshot({
+			animations: "disabled",
+			path: testInfo.outputPath("agent-activity-dark-1280x840.png"),
+		});
 		const takeControl = activity.getByRole("button", { name: "Take control", exact: true });
 		await takeControl.click();
 		await expect(app.page.getByRole("alert")).toBeVisible();
-		await expect.poll(() => app!.page.evaluate(() => (window as typeof window & { __browserHandoffRequests?: number }).__browserHandoffRequests)).toBe(1);
+		await expect
+			.poll(() =>
+				app!.page.evaluate(
+					() => (window as typeof window & { __browserHandoffRequests?: number }).__browserHandoffRequests,
+				),
+			)
+			.toBe(1);
 		await app.page.getByRole("button", { name: "Cancel", exact: true }).click();
 		await waitForDone(app, "take-control-race");
-		const takeoverResult = fixture.calls.find((call) => call.marker === "take-control-race" && call.name === "browser_navigate")?.result ?? "";
+		const takeoverResult =
+			fixture.calls.find((call) => call.marker === "take-control-race" && call.name === "browser_navigate")
+				?.result ?? "";
 		expect(takeoverResult).toContain("user_cancelled");
 	} catch (error) {
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\ntrace=${JSON.stringify(fixture.calls, null, 2).slice(-16_000)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+		throw new Error(
+			`${error instanceof Error ? error.message : String(error)}\ntrace=${JSON.stringify(fixture.calls, null, 2).slice(-16_000)}\n${environment.diagnostics.join("").slice(-12_000)}`,
+		);
 	} finally {
 		if (app) await closeBrowserAgentApp(app);
 		await fixture.close();

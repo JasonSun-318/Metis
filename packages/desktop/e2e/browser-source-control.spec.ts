@@ -1,14 +1,17 @@
-import { expect, test, type ElectronApplication } from "@playwright/test";
+import { type ElectronApplication, expect, test } from "@playwright/test";
 import { createBrowserAgentFixture, elementId } from "./browser-agent-fixture.ts";
 import { callSourceBrowser as call, launchSourceBrowser } from "./browser-source-harness.ts";
 
 async function successfulCall(app: ElectronApplication, name: string, args: Record<string, unknown>) {
 	const result = await call(app, name, args);
-	const diagnostics = result.ok ? [] : await app.evaluate(async () => (await globalThis.metisBrowserSourceReady).diagnostics);
+	const diagnostics = result.ok
+		? []
+		: await app.evaluate(async () => (await globalThis.metisBrowserSourceReady).diagnostics);
 	expect(result.ok, [result.text, ...diagnostics].join("\n")).toBe(true);
 	return JSON.parse(result.text);
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("current source controls real Chromium with encoded actions and expired-tab recovery before packaging", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const fixture = await createBrowserAgentFixture();
@@ -23,8 +26,13 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		let observation = await successfulCall(app, "browser_observe", { browserId, mode: "state" });
 		const act = async (action: Record<string, unknown>) => {
 			const result = await successfulCall(app!, "browser_act", {
-				browserId, documentId: observation.documentId, snapshotRevision: observation.revision,
-				origin: fixture.origin, intent: "Exercise local fixture control", risk: "ordinary", action: JSON.stringify(action),
+				browserId,
+				documentId: observation.documentId,
+				snapshotRevision: observation.revision,
+				origin: fixture.origin,
+				intent: "Exercise local fixture control",
+				risk: "ordinary",
+				action: JSON.stringify(action),
 			});
 			expect(result.browserId).toBe(browserId);
 			observation = result;
@@ -33,12 +41,18 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		const messageId = elementId(observation.state, "Message");
 		const themeId = elementId(observation.state, "Theme");
 		await act({ type: "click", target: { elementId: incrementId } });
-		const controlled = app.context().pages().find((page) => page.url() === `${fixture.origin}/controls`);
+		const controlled = app
+			.context()
+			.pages()
+			.find((page) => page.url() === `${fixture.origin}/controls`);
 		if (!controlled) throw new Error("Source browser fixture page missing");
 		await expect(controlled.locator("#count")).toHaveText("Count: 1");
 		const increment = await controlled.locator("#increment").boundingBox();
 		if (!increment) throw new Error("Source fixture increment control missing");
-		await act({ type: "click", target: { x: increment.x + increment.width / 2, y: increment.y + increment.height / 2 } });
+		await act({
+			type: "click",
+			target: { x: increment.x + increment.width / 2, y: increment.y + increment.height / 2 },
+		});
 		await expect(controlled.locator("#count")).toHaveText("Count: 2");
 		await act({ type: "type", elementId: messageId, text: '{"keep":"as text"}', replace: true });
 		await act({ type: "press", key: "Enter" });
@@ -57,8 +71,12 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		expect(screenshot.state).toContain("Count: 2");
 		expect(screenshot.screenshot).toBeUndefined();
 		const stale = await call(app, "browser_act", {
-			browserId, documentId: screenshot.documentId, snapshotRevision: 0,
-			origin: fixture.origin, intent: "Reject stale click", risk: "ordinary",
+			browserId,
+			documentId: screenshot.documentId,
+			snapshotRevision: 0,
+			origin: fixture.origin,
+			intent: "Reject stale click",
+			risk: "ordinary",
 			action: JSON.stringify({ type: "click", target: { elementId: incrementId } }),
 		});
 		expect(stale.ok).toBe(false);
@@ -66,8 +84,13 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		expect(stale.text).toContain("not executed");
 		await expect(controlled.locator("#count")).toHaveText("Count: 2");
 		const invalid = await call(app, "browser_act", {
-			browserId, documentId: screenshot.documentId, snapshotRevision: screenshot.revision,
-			origin: fixture.origin, intent: "Reject malformed action", risk: "ordinary", action: "invalid JSON",
+			browserId,
+			documentId: screenshot.documentId,
+			snapshotRevision: screenshot.revision,
+			origin: fixture.origin,
+			intent: "Reject malformed action",
+			risk: "ordinary",
+			action: "invalid JSON",
 		});
 		expect(invalid.ok).toBe(false);
 		expect(invalid.text.match(/action: must be object/g)).toHaveLength(1);
@@ -80,9 +103,14 @@ test("current source controls real Chromium with encoded actions and expired-tab
 			{ snapshotRevision: -1 },
 		]) {
 			const rejected = await call(app, "browser_act", {
-				browserId, documentId: screenshot.documentId, snapshotRevision: screenshot.revision,
-				origin: fixture.origin, intent: "Check fixture input validation", risk: "ordinary",
-				action: JSON.stringify({ type: "click", target: { elementId: incrementId } }), ...invalidFields,
+				browserId,
+				documentId: screenshot.documentId,
+				snapshotRevision: screenshot.revision,
+				origin: fixture.origin,
+				intent: "Check fixture input validation",
+				risk: "ordinary",
+				action: JSON.stringify({ type: "click", target: { elementId: incrementId } }),
+				...invalidFields,
 			});
 			expect(rejected.ok, JSON.stringify(invalidFields)).toBe(false);
 			expect(rejected.text).toContain("Validation failed");
@@ -97,24 +125,49 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		expect((await successfulCall(app, "browser_tabs", { action: "list" })).tabs).toEqual([]);
 		const replacement = (await successfulCall(app, "browser_tabs", { action: "open" })).tabs[0].browserId;
 		expect(replacement).not.toBe(browserId);
-		await successfulCall(app, "browser_navigate", { browserId: replacement, action: "goto", url: `${fixture.origin}/controls` });
+		await successfulCall(app, "browser_navigate", {
+			browserId: replacement,
+			action: "goto",
+			url: `${fixture.origin}/controls`,
+		});
 		const recoveredObservation = await successfulCall(app, "browser_observe", { browserId: replacement });
 		expect(recoveredObservation.state).toContain("Count: 0");
 		await successfulCall(app, "browser_act", {
-			browserId: replacement, documentId: recoveredObservation.documentId, snapshotRevision: recoveredObservation.revision,
-			origin: fixture.origin, intent: "Resume recovered browser control", risk: "ordinary",
-			action: JSON.stringify({ type: "click", target: { elementId: elementId(recoveredObservation.state, "Increment") } }),
+			browserId: replacement,
+			documentId: recoveredObservation.documentId,
+			snapshotRevision: recoveredObservation.revision,
+			origin: fixture.origin,
+			intent: "Resume recovered browser control",
+			risk: "ordinary",
+			action: JSON.stringify({
+				type: "click",
+				target: { elementId: elementId(recoveredObservation.state, "Increment") },
+			}),
 		});
-		const recoveredPage = app.context().pages().find((page) => page.url() === `${fixture.origin}/controls`);
+		const recoveredPage = app
+			.context()
+			.pages()
+			.find((page) => page.url() === `${fixture.origin}/controls`);
 		if (!recoveredPage) throw new Error("Recovered source browser page missing");
 		await expect(recoveredPage.locator("#count")).toHaveText("Count: 1");
 		await recoveredPage.screenshot({ path: testInfo.outputPath("source-recovered-controls.png") });
-		for (const [name, source] of [["Open destination", "visible"], ["Open lower destination", "below-fold"]]) {
-			await successfulCall(app, "browser_navigate", { browserId: replacement, action: "goto", url: `${fixture.origin}/navigation` });
+		for (const [name, source] of [
+			["Open destination", "visible"],
+			["Open lower destination", "below-fold"],
+		]) {
+			await successfulCall(app, "browser_navigate", {
+				browserId: replacement,
+				action: "goto",
+				url: `${fixture.origin}/navigation`,
+			});
 			const navigation = await successfulCall(app, "browser_observe", { browserId: replacement });
 			await successfulCall(app, "browser_act", {
-				browserId: replacement, documentId: navigation.documentId, snapshotRevision: navigation.revision,
-				origin: fixture.origin, intent: "Verify actual link navigation", risk: "ordinary",
+				browserId: replacement,
+				documentId: navigation.documentId,
+				snapshotRevision: navigation.revision,
+				origin: fixture.origin,
+				intent: "Verify actual link navigation",
+				risk: "ordinary",
 				action: JSON.stringify({ type: "click", target: { elementId: elementId(navigation.state, name!) } }),
 			});
 			await expect(recoveredPage).toHaveURL(`${fixture.origin}/navigation-done?from=${source}`);

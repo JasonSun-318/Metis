@@ -128,7 +128,7 @@ for (const mode of ["chat", "code"] as const)
 			test.setTimeout(60_000);
 			const errors: string[] = [];
 			page.on("pageerror", (error) => errors.push(error.message));
-			const owners = mode === "code" ? ["main", "agent", "detail"] : ["main", "agent"];
+			const owners = ["main", "agent"];
 			const viewportWidth = (width: number) => width * owners.length + 12 * (owners.length + 1);
 			for (const font of [13, 20]) {
 				await page.setViewportSize({ width: viewportWidth(900), height: 900 });

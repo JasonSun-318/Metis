@@ -378,8 +378,8 @@ for (const theme of ["dark", "light"]) {
 			await expect(reader).toContainText("新增统一权限设置");
 			await dialog.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
 			const box = (await dialog.boundingBox())!;
-			expect(box.width).toBeGreaterThan(width * .7);
-			expect(box.height).toBeGreaterThan(height * .7);
+			expect(box.width).toBeGreaterThan(width * 0.7);
+			expect(box.height).toBeGreaterThan(height * 0.7);
 			expect(Math.abs(box.x - (width - box.width) / 2)).toBeLessThan(1);
 			expect(Math.abs(box.y - (height - box.height) / 2)).toBeLessThan(1);
 			expect(box.x).toBeGreaterThanOrEqual(12);
@@ -391,7 +391,9 @@ for (const theme of ["dark", "light"]) {
 			await expect(page.getByRole("button", { name: "Close release notes" })).toBeFocused();
 			await page.screenshot({ path: info.outputPath(`release-notes-${theme}-${width}.png`) });
 			const navBefore = await versions.boundingBox();
-			await reader.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+			await reader.evaluate((el) => {
+				el.scrollTop = el.scrollHeight;
+			});
 			await expect(reader.locator("li").last()).toBeInViewport();
 			expect((await versions.boundingBox())!.y).toBe(navBefore!.y);
 			expect(await reader.evaluate((el) => el.scrollTop)).toBeGreaterThan(100);

@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	connectToApp,
@@ -50,10 +50,21 @@ async function launchWorkspace(options: {
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
-	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
+	const importEsm = Function("specifier", "return import(specifier)") as (
+		specifier: string,
+	) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full"; cwdOrigin?: "managed" | "user-selected" }): {
+			create(
+				cwd: string,
+				sessionDir: string,
+				options: {
+					id: string;
+					mode: "chat" | "code";
+					permissionPreset: "full";
+					cwdOrigin?: "managed" | "user-selected";
+				},
+			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -78,11 +89,12 @@ async function launchWorkspace(options: {
 	for (const seed of options.sessions) {
 		const cwd = seed.project === undefined ? projectDir : path.join(tempRoot, seed.project);
 		await mkdir(cwd, { recursive: true });
-		const manager = sessions.SessionManager.create(
-			cwd,
-			sessions.getDefaultSessionDir(cwd, agentDir),
-			{ id: seed.id, mode: seed.mode, permissionPreset: "full", ...(seed.cwdOrigin ? { cwdOrigin: seed.cwdOrigin } : {}) },
-		);
+		const manager = sessions.SessionManager.create(cwd, sessions.getDefaultSessionDir(cwd, agentDir), {
+			id: seed.id,
+			mode: seed.mode,
+			permissionPreset: "full",
+			...(seed.cwdOrigin ? { cwdOrigin: seed.cwdOrigin } : {}),
+		});
 		manager.appendSessionInfo(seed.name);
 		manager.close();
 		trustStore.set(cwd, true);
@@ -92,7 +104,9 @@ async function launchWorkspace(options: {
 	const modelRequests: Awaited<ReturnType<typeof readOpenAiChatRequest>>[] = [];
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method === "GET" && request.url === "/browser-page") {
-			response.writeHead(200, { "content-type": "text/html" }).end("<!doctype html><title>Sidebar page</title><h1>Browser sidebar page</h1>");
+			response
+				.writeHead(200, { "content-type": "text/html" })
+				.end("<!doctype html><title>Sidebar page</title><h1>Browser sidebar page</h1>");
 			return;
 		}
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
@@ -139,11 +153,11 @@ async function stopWorkspace(workspace: LaunchedWorkspace): Promise<void> {
 
 /** Opens a tool from the focused session's browser start page. */
 async function addTool(page: Page, name: string): Promise<void> {
-	if (!await page.locator(".tool-sidebar").isVisible()) {
+	if (!(await page.locator(".tool-sidebar").isVisible())) {
 		await page.locator(".details-sidebar-toggle").click();
 	}
 	const cards = page.locator(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu");
-	if (!await cards.count()) {
+	if (!(await cards.count())) {
 		const startTab = page.locator('.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]').first();
 		if (await startTab.count()) await startTab.click();
 		else await page.getByRole("button", { name: "New browser tab", exact: true }).click();
@@ -154,7 +168,10 @@ async function addTool(page: Page, name: string): Promise<void> {
 }
 
 async function rendererFailure(error: unknown, page: Page, diagnostics: readonly string[]): Promise<Error> {
-	const bodyText = await page.locator("body").innerText().catch(() => "renderer unavailable");
+	const bodyText = await page
+		.locator("body")
+		.innerText()
+		.catch(() => "renderer unavailable");
 	return new Error(
 		`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
 	);
@@ -172,28 +189,41 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 		return titlebar.getAnimations({ subtree: true }).every(
 			// Infinite loop animations (running tool-tab status) never settle; they
 			// must not hold static geometry measurements hostage.
-			(animation) =>
-				animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity,
+			(animation) => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity,
 		);
 	});
-	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+	await page.evaluate(
+		() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+	);
 	const platform = await page.locator("html").getAttribute("data-platform");
 	const expectedCenter = platform === "win32" ? 51.5 : platform === "darwin" && !fullscreen ? 23 : 19.5;
 	const controls = await page.locator(".workspace-titlebar").evaluate((titlebar) => {
 		const selectors = [
-			".sessions-sidebar-toggle-fixed", ".details-sidebar-toggle", ".tool-tab", ".tool-tab-group-label",
-			".session-add-trigger", ".tool-add-trigger", ".tool-tab-select > svg", ".tool-tab-close",
+			".sessions-sidebar-toggle-fixed",
+			".details-sidebar-toggle",
+			".tool-tab",
+			".tool-tab-group-label",
+			".session-add-trigger",
+			".tool-add-trigger",
+			".tool-tab-select > svg",
+			".tool-tab-close",
 		];
 		return Array.from(titlebar.querySelectorAll<HTMLElement>(selectors.join(",")))
 			.filter((element) => element.getClientRects().length > 0)
 			.map((element) => {
 				const rect = element.getBoundingClientRect();
-				return { control: element.getAttribute("aria-label") ?? element.getAttribute("class"), center: rect.y + rect.height / 2 };
+				return {
+					control: element.getAttribute("aria-label") ?? element.getAttribute("class"),
+					center: rect.y + rect.height / 2,
+				};
 			});
 	});
 	expect(controls.length).toBeGreaterThanOrEqual(5);
 	for (const { control, center } of controls) {
-		expect(Math.abs(center - expectedCenter), `${control}: center ${center}, expected ${expectedCenter}`).toBeLessThanOrEqual(0.5);
+		expect(
+			Math.abs(center - expectedCenter),
+			`${control}: center ${center}, expected ${expectedCenter}`,
+		).toBeLessThanOrEqual(0.5);
 	}
 	if (platform === "win32") {
 		const navigation = page.locator(".windows-titlebar-navigation");
@@ -202,10 +232,12 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 		await expect(buttons.nth(0)).toHaveAttribute("aria-label", "Go back");
 		await expect(buttons.nth(1)).toHaveAttribute("aria-label", "Go forward");
 		await expect(buttons.nth(2)).toHaveClass("sessions-sidebar-toggle-fixed");
-		const rects = await buttons.evaluateAll((elements) => elements.map((element) => {
-			const rect = element.getBoundingClientRect();
-			return { left: rect.left, right: rect.right, center: rect.y + rect.height / 2 };
-		}));
+		const rects = await buttons.evaluateAll((elements) =>
+			elements.map((element) => {
+				const rect = element.getBoundingClientRect();
+				return { left: rect.left, right: rect.right, center: rect.y + rect.height / 2 };
+			}),
+		);
 		for (const rect of rects) expect(Math.abs(rect.center - 16)).toBeLessThanOrEqual(0.5);
 		expect(rects[0]!.right).toBeLessThanOrEqual(rects[1]!.left);
 		expect(rects[1]!.right).toBeLessThanOrEqual(rects[2]!.left);
@@ -228,17 +260,25 @@ async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Pr
 }
 
 async function expectPaneHeadersAligned(page: Page): Promise<void> {
-	await expect.poll(() => page.evaluate(() => {
-		const cells = Array.from(document.querySelectorAll<HTMLElement>(".workspace-titlebar-cell"));
-		const panes = Array.from(document.querySelectorAll<HTMLElement>(".workspace-row"))[0]
-			?.querySelectorAll<HTMLElement>(".workspace-pane");
-		if (!panes || panes.length !== cells.length) return Infinity;
-		return Math.max(0, ...cells.map((cell, index) => {
-			const header = cell.getBoundingClientRect();
-			const body = panes[index]!.getBoundingClientRect();
-			return Math.max(Math.abs(header.x - body.x), Math.abs(header.width - body.width));
-		}));
-	})).toBeLessThanOrEqual(1);
+	await expect
+		.poll(() =>
+			page.evaluate(() => {
+				const cells = Array.from(document.querySelectorAll<HTMLElement>(".workspace-titlebar-cell"));
+				const panes = Array.from(
+					document.querySelectorAll<HTMLElement>(".workspace-row"),
+				)[0]?.querySelectorAll<HTMLElement>(".workspace-pane");
+				if (!panes || panes.length !== cells.length) return Infinity;
+				return Math.max(
+					0,
+					...cells.map((cell, index) => {
+						const header = cell.getBoundingClientRect();
+						const body = panes[index]!.getBoundingClientRect();
+						return Math.max(Math.abs(header.x - body.x), Math.abs(header.width - body.width));
+					}),
+				);
+			}),
+		)
+		.toBeLessThanOrEqual(1);
 }
 
 async function dragPaneDivider(page: Page, axis: "column" | "row", delta: number): Promise<void> {
@@ -254,6 +294,7 @@ async function dragPaneDivider(page: Page, axis: "column" | "row", delta: number
 	await page.mouse.up();
 }
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("tab menus follow pointer and keyboard anchors without hiding the conversation draft", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const sessionId = "81000000-0000-4000-8000-000000000071";
@@ -285,7 +326,10 @@ test("tab menus follow pointer and keyboard anchors without hiding the conversat
 		await expect(editor).toBeVisible();
 		await expect(editor).toHaveText("Unsent text survives the tab menu");
 		expect(await editorHandle?.evaluate((element) => element.isConnected)).toBe(true);
-		await page.screenshot({ path: testInfo.outputPath("tab-menu-pointer-draft-preserved.png"), animations: "disabled" });
+		await page.screenshot({
+			path: testInfo.outputPath("tab-menu-pointer-draft-preserved.png"),
+			animations: "disabled",
+		});
 		await page.keyboard.press("Escape");
 		await expect(menu).toHaveCount(0);
 		await expect(tab).toBeFocused();
@@ -299,14 +343,18 @@ test("tab menus follow pointer and keyboard anchors without hiding the conversat
 		expect(Math.abs(keyboardMenuBox.x - keyboardTabBox.x)).toBeLessThanOrEqual(1);
 		expect(Math.abs(keyboardMenuBox.y - keyboardTabBox.y - keyboardTabBox.height - 4)).toBeLessThanOrEqual(1);
 		await page.keyboard.press("End");
-		await expect(menu.locator('button:not(:disabled)').last()).toBeFocused();
+		await expect(menu.locator("button:not(:disabled)").last()).toBeFocused();
 		await page.keyboard.press("Home");
-		await expect(menu.locator('button:not(:disabled)').first()).toBeFocused();
+		await expect(menu.locator("button:not(:disabled)").first()).toBeFocused();
 		await page.setViewportSize({ width: 900, height: 90 });
-		await expect.poll(async () => {
-			const bounds = await menu.boundingBox();
-			return bounds ? Math.min(bounds.x, bounds.y, 900 - bounds.x - bounds.width, 90 - bounds.y - bounds.height) : -1;
-		}).toBeGreaterThanOrEqual(8);
+		await expect
+			.poll(async () => {
+				const bounds = await menu.boundingBox();
+				return bounds
+					? Math.min(bounds.x, bounds.y, 900 - bounds.x - bounds.width, 90 - bounds.y - bounds.height)
+					: -1;
+			})
+			.toBeGreaterThanOrEqual(8);
 		expect(await menu.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
 		await page.screenshot({ path: testInfo.outputPath("tab-menu-constrained-viewport.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
@@ -329,25 +377,41 @@ test("tab menus follow pointer and keyboard anchors without hiding the conversat
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("split placeholders, pane dividers and preferred ratios survive a renderer restart", async ({}, testInfo) => {
 	test.setTimeout(120_000);
 	const alpha = "81000000-0000-4000-8000-000000000081";
 	const beta = "81000000-0000-4000-8000-000000000082";
 	const gamma = "81000000-0000-4000-8000-000000000083";
-	const workspace = await launchWorkspace({ sessions: [
-		{ id: alpha, mode: "chat", name: "Resize Alpha" },
-		{ id: beta, mode: "chat", name: "Resize Beta" },
-		{ id: gamma, mode: "chat", name: "Resize Gamma" },
-	] });
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: alpha, mode: "chat", name: "Resize Alpha" },
+			{ id: beta, mode: "chat", name: "Resize Beta" },
+			{ id: gamma, mode: "chat", name: "Resize Gamma" },
+		],
+	});
 	const { page } = workspace;
-	const sessionIds = () => page.evaluate(async () => (await (globalThis as unknown as {
-		metis: MetisDesktopApi;
-	}).metis.listSessions({ includeArchived: true, limit: 200 })).sessions.map((session) => session.sessionId).sort());
+	const sessionIds = () =>
+		page.evaluate(async () =>
+			(
+				await (
+					globalThis as unknown as {
+						metis: MetisDesktopApi;
+					}
+				).metis.listSessions({ includeArchived: true, limit: 200 })
+			).sessions
+				.map((session) => session.sessionId)
+				.sort(),
+		);
 	const split = async (name: string, direction: "right" | "down") => {
 		await page.getByRole("tab", { name, exact: true }).click({ button: "right" });
-		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: `Split ${direction}`, exact: true }).click();
+		await page
+			.locator(".workspace-tab-menu")
+			.getByRole("menuitem", { name: `Split ${direction}`, exact: true })
+			.click();
 	};
-	const firstColumnWidth = async () => (await page.locator(".workspace-row").first().locator(".workspace-pane").first().boundingBox())!.width;
+	const firstColumnWidth = async () =>
+		(await page.locator(".workspace-row").first().locator(".workspace-pane").first().boundingBox())!.width;
 	const firstRowHeight = async () => (await page.locator(".workspace-row").first().boundingBox())!.height;
 	const savedLayout = () => page.evaluate(() => localStorage.getItem("metis.workspace-layout.v1"));
 	try {
@@ -375,11 +439,13 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 		const equalWidth = await firstColumnWidth();
 		await dragPaneDivider(page, "column", 80);
 		await expect.poll(firstColumnWidth).toBeGreaterThan(equalWidth + 75);
-		const columnDivider = page.locator('.session-workspace-panes .workspace-pane-resizer--column[role="separator"]').first();
+		const columnDivider = page
+			.locator('.session-workspace-panes .workspace-pane-resizer--column[role="separator"]')
+			.first();
 		await columnDivider.press("ArrowLeft");
 		await expect.poll(firstColumnWidth).toBeLessThan(equalWidth + 70);
 		await columnDivider.dblclick();
-		await expect.poll(async () => Math.abs(await firstColumnWidth() - equalWidth)).toBeLessThanOrEqual(1);
+		await expect.poll(async () => Math.abs((await firstColumnWidth()) - equalWidth)).toBeLessThanOrEqual(1);
 		for (let index = 0; index < 3; index++) await columnDivider.press("ArrowRight");
 		await expect.poll(firstColumnWidth).toBeGreaterThan(equalWidth + 45);
 		await expectPaneHeadersAligned(page);
@@ -390,13 +456,15 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 		await expect(page.locator(".workspace-row")).toHaveCount(2);
 		await expect(page.locator(".workspace-pane")).toHaveCount(3);
 		const equalHeight = await firstRowHeight();
-		const rowDivider = page.locator('.session-workspace-panes .workspace-pane-resizer--row[role="separator"]').first();
+		const rowDivider = page
+			.locator('.session-workspace-panes .workspace-pane-resizer--row[role="separator"]')
+			.first();
 		await rowDivider.press("ArrowDown");
 		await expect.poll(firstRowHeight).toBeGreaterThan(equalHeight + 13);
 		await dragPaneDivider(page, "row", 30);
 		await expect.poll(firstRowHeight).toBeGreaterThan(equalHeight + 43);
 		await rowDivider.dblclick();
-		await expect.poll(async () => Math.abs(await firstRowHeight() - equalHeight)).toBeLessThanOrEqual(1);
+		await expect.poll(async () => Math.abs((await firstRowHeight()) - equalHeight)).toBeLessThanOrEqual(1);
 		await rowDivider.press("ArrowDown");
 		await expectPaneHeadersAligned(page);
 		const preferredWidth = await firstColumnWidth();
@@ -416,8 +484,8 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 		}
 		await expectPaneHeadersAligned(page);
 		await page.setViewportSize({ width: 1800, height: 1100 });
-		await expect.poll(async () => Math.abs(await firstColumnWidth() - preferredWidth)).toBeLessThanOrEqual(1);
-		await expect.poll(async () => Math.abs(await firstRowHeight() - preferredHeight)).toBeLessThanOrEqual(1);
+		await expect.poll(async () => Math.abs((await firstColumnWidth()) - preferredWidth)).toBeLessThanOrEqual(1);
+		await expect.poll(async () => Math.abs((await firstRowHeight()) - preferredHeight)).toBeLessThanOrEqual(1);
 		await expectPaneHeadersAligned(page);
 		expect(await sessionIds()).toEqual(originalIds);
 		expect(workspace.modelRequests).toHaveLength(0);
@@ -430,6 +498,7 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("compact tabs and release notes stay usable when the sidebar is clipped and a new task opens", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const sessionId = "81000000-0000-4000-8000-0000000000f1";
@@ -445,18 +514,32 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await expect(page.locator(".session-sidebar")).toHaveCount(0);
 		await expectTitlebarControlsAligned(page);
-		expect(await page.locator('.workspace-tabbar--titlebar').evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-app-region'))).toBe("no-drag");
-		expect(await page.locator('.workspace-tabbar--titlebar .workspace-tabbar-fill').evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-app-region'))).toBe("drag");
+		expect(
+			await page
+				.locator(".workspace-tabbar--titlebar")
+				.evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region")),
+		).toBe("no-drag");
+		expect(
+			await page
+				.locator(".workspace-tabbar--titlebar .workspace-tabbar-fill")
+				.evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region")),
+		).toBe("drag");
 		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
 		await expect(page.locator(".session-sidebar")).toBeVisible();
-		await expect(page.getByRole("tab", { name: "Polish Alpha", exact: true })).toHaveAttribute("aria-selected", "true");
+		await expect(page.getByRole("tab", { name: "Polish Alpha", exact: true })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 		await addTool(page, "Terminal");
 		const terminalId = await page.locator('.terminal-panel[aria-hidden="false"]').getAttribute("id");
 		await expectTitlebarControlsAligned(page);
 		const sizes = await page.evaluate(() => {
-			const chat = document.querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] .tool-tab.is-active')!;
-			const tool = document.querySelector<HTMLElement>('.tool-sidebar-tabbar .tool-tab.is-active')!;
-			return [chat, tool].map((tab) => ({ height: tab.getBoundingClientRect().height, font: getComputedStyle(tab.querySelector(".tool-tab-select")!).fontSize }));
+			const chat = document.querySelector<HTMLElement>(".workspace-tabbar[data-pane-id] .tool-tab.is-active")!;
+			const tool = document.querySelector<HTMLElement>(".tool-sidebar-tabbar .tool-tab.is-active")!;
+			return [chat, tool].map((tab) => ({
+				height: tab.getBoundingClientRect().height,
+				font: getComputedStyle(tab.querySelector(".tool-tab-select")!).fontSize,
+			}));
 		});
 		expect(sizes[0]).toEqual(sizes[1]);
 		await expectTitlebarControlsAligned(page);
@@ -464,13 +547,24 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		await page.screenshot({ path: testInfo.outputPath("titlebar-aligned-windowed.png"), animations: "disabled" });
 		if (process.platform === "darwin") {
 			// Exercise the renderer's fullscreen layout; native fullscreen is also checked manually.
-			await page.evaluate(() => { document.documentElement.dataset.fullscreen = "true"; });
+			await page.evaluate(() => {
+				document.documentElement.dataset.fullscreen = "true";
+			});
 			await expectTitlebarControlsAligned(page, true);
-			await expect.poll(async () => (await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y).toBe(panelTop - 6);
-			await page.screenshot({ path: testInfo.outputPath("titlebar-aligned-fullscreen-layout.png"), animations: "disabled" });
-			await page.evaluate(() => { delete document.documentElement.dataset.fullscreen; });
+			await expect
+				.poll(async () => (await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y)
+				.toBe(panelTop - 6);
+			await page.screenshot({
+				path: testInfo.outputPath("titlebar-aligned-fullscreen-layout.png"),
+				animations: "disabled",
+			});
+			await page.evaluate(() => {
+				delete document.documentElement.dataset.fullscreen;
+			});
 			await expectTitlebarControlsAligned(page);
-			await expect.poll(async () => (await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y).toBe(panelTop);
+			await expect
+				.poll(async () => (await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y)
+				.toBe(panelTop);
 		}
 		await page.locator(".details-sidebar-toggle").click();
 		await expect(page.locator(".tool-sidebar")).toBeHidden();
@@ -495,7 +589,11 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 			await expectPaneHeadersAligned(page);
 			const setWindowState = (state: 3 | 9) => {
 				const script = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class LayoutWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c); }'; $p=Get-Process -Id ${workspace.app.pid}; $null=[LayoutWindow]::ShowWindow($p.MainWindowHandle,${state})`;
-				execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { windowsHide: true });
+				execFileSync(
+					"powershell.exe",
+					["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+					{ windowsHide: true },
+				);
 			};
 			setWindowState(3);
 			await expectTitlebarControlsAligned(page);
@@ -527,19 +625,29 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		expect(box.y).toBeGreaterThanOrEqual(8);
 		expect(box.y + box.height).toBeLessThanOrEqual(692);
 		expect(box.x + box.width).toBeGreaterThan(sidebar.x + sidebar.width);
-		expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".release-notes-dialog")), { x: box.x + box.width - 16, y: box.y + 20 })).toBe(true);
+		expect(
+			await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".release-notes-dialog")), {
+				x: box.x + box.width - 16,
+				y: box.y + 20,
+			}),
+		).toBe(true);
 		await page.screenshot({ path: testInfo.outputPath("release-notes-unclipped.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
 		await expect(notes).toHaveCount(0);
 		await expect(account).toBeFocused();
 		await page.getByRole("button", { name: "New task", exact: true }).click();
-		await expect(page.getByRole("tab", { name: "New task", exact: true }).locator('svg[data-mode="code"]')).toBeVisible();
+		await expect(
+			page.getByRole("tab", { name: "New task", exact: true }).locator('svg[data-mode="code"]'),
+		).toBeVisible();
 		await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(20, 20, 20)");
 		expect(await page.locator(".new-task-home").evaluate((home) => getComputedStyle(home).backgroundColor)).toBe(
 			await page.locator("main.workspace").evaluate((main) => getComputedStyle(main).backgroundColor),
 		);
 		await expect(page.locator(".tool-sidebar")).toBeHidden();
-		const [homeBox, workspaceBox] = await Promise.all([page.locator(".new-task-home").boundingBox(), page.locator("main.workspace").boundingBox()]);
+		const [homeBox, workspaceBox] = await Promise.all([
+			page.locator(".new-task-home").boundingBox(),
+			page.locator("main.workspace").boundingBox(),
+		]);
 		if (!homeBox || !workspaceBox) throw new Error("Missing new task layout");
 		expect(homeBox.width).toBeGreaterThanOrEqual(workspaceBox.width - 3);
 		await page.screenshot({ path: testInfo.outputPath("new-task-full-width.png"), animations: "disabled" });
@@ -554,27 +662,37 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		expect(workspace.consoleErrors).toEqual([]);
 	} catch (cause) {
 		throw await rendererFailure(cause, page, workspace.diagnostics);
-	} finally { await stopWorkspace(workspace); }
+	} finally {
+		await stopWorkspace(workspace);
+	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("deleting a Chat project preserves a managed task sharing its workspace", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const managedId = "81000000-0000-4000-8000-0000000000f2";
 	const selectedId = "81000000-0000-4000-8000-0000000000f3";
 	const sharedProject = path.join("agent", "workspaces", managedId);
-	const workspace = await launchWorkspace({ sessions: [
-		{ id: managedId, mode: "chat", name: "Original temporary task", project: sharedProject, cwdOrigin: "managed" },
-		{ id: selectedId, mode: "chat", name: "Selected Alpha", project: sharedProject },
-		{ id: "81000000-0000-4000-8000-0000000000f4", mode: "chat", name: "Selected Beta", project: sharedProject },
-	] });
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: managedId, mode: "chat", name: "Original temporary task", project: sharedProject, cwdOrigin: "managed" },
+			{ id: selectedId, mode: "chat", name: "Selected Alpha", project: sharedProject },
+			{ id: "81000000-0000-4000-8000-0000000000f4", mode: "chat", name: "Selected Beta", project: sharedProject },
+		],
+	});
 	const { page } = workspace;
 	const marker = path.join(workspace.tempRoot, sharedProject, "keep-task-data.txt");
 	try {
 		await writeFile(marker, "Original task data must survive project deletion");
 		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
-		await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitemradio", { name: "Project", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "Session grouping" })
+			.getByRole("menuitemradio", { name: "Project", exact: true })
+			.click();
 		await page.getByRole("button", { name: "Selected Alpha", exact: true }).click();
-		const project = page.locator(".project-group").filter({ has: page.getByRole("button", { name: "Selected Alpha", exact: true }) });
+		const project = page
+			.locator(".project-group")
+			.filter({ has: page.getByRole("button", { name: "Selected Alpha", exact: true }) });
 		await project.getByRole("button", { name: "Project actions", exact: true }).focus();
 		await expect(project.locator(".project-action-buttons")).toHaveCSS("opacity", "1");
 		await project.getByRole("button", { name: "Project actions", exact: true }).click();
@@ -589,17 +707,27 @@ test("deleting a Chat project preserves a managed task sharing its workspace", a
 		await expect(page.getByRole("button", { name: "Selected Beta", exact: true })).toHaveCount(0);
 		await expect(page.getByRole("button", { name: "Original temporary task", exact: true })).toBeVisible();
 		expect(await readFile(marker, "utf8")).toBe("Original task data must survive project deletion");
-		const journals = await page.evaluate(async () => (globalThis as unknown as {
-			metis: MetisDesktopApi;
-		}).metis.listSessions({ includeArchived: true, limit: 200 }));
+		const journals = await page.evaluate(async () =>
+			(
+				globalThis as unknown as {
+					metis: MetisDesktopApi;
+				}
+			).metis.listSessions({ includeArchived: true, limit: 200 }),
+		);
 		expect(journals.sessions.map((session) => session.sessionId)).toEqual([managedId]);
-		await page.screenshot({ path: testInfo.outputPath("chat-project-deleted-managed-task-kept.png"), animations: "disabled" });
+		await page.screenshot({
+			path: testInfo.outputPath("chat-project-deleted-managed-task-kept.png"),
+			animations: "disabled",
+		});
 		expect(workspace.consoleErrors).toEqual([]);
 	} catch (cause) {
 		throw await rendererFailure(cause, page, workspace.diagnostics);
-	} finally { await stopWorkspace(workspace); }
+	} finally {
+		await stopWorkspace(workspace);
+	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("the latest tools sidebar width survives session switches and a narrow-window renderer restart", async ({}, testInfo) => {
 	test.setTimeout(120_000);
 	const first = "81000000-0000-4000-8000-0000000000e1";
@@ -666,14 +794,17 @@ test("the latest tools sidebar width survives session switches and a narrow-wind
 	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("browser-style sidebar opens pages, preserves tools, and keeps sessions independent", async ({}, testInfo) => {
 	test.setTimeout(120_000);
 	const first = "81000000-0000-4000-8000-0000000000d1";
 	const second = "81000000-0000-4000-8000-0000000000d2";
-	const workspace = await launchWorkspace({ sessions: [
-		{ id: first, mode: "code", name: "Browser Alpha" },
-		{ id: second, mode: "code", name: "Browser Beta" },
-	] });
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: first, mode: "code", name: "Browser Alpha" },
+			{ id: second, mode: "code", name: "Browser Beta" },
+		],
+	});
 	const { page } = workspace;
 	try {
 		await page.getByRole("button", { name: "Code", exact: true }).click();
@@ -690,16 +821,29 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 			const header = await page.locator(".workspace-titlebar-tools").boundingBox();
 			const sidebar = await page.locator(".tool-sidebar").boundingBox();
 			if (!header || !sidebar) throw new Error("Missing sidebar screenshot bounds");
-			await page.screenshot({ path: testInfo.outputPath(name), animations: "disabled", clip: {
-				x: sidebar.x, y: header.y, width: sidebar.width, height: sidebar.y + sidebar.height - header.y,
-			} });
+			await page.screenshot({
+				path: testInfo.outputPath(name),
+				animations: "disabled",
+				clip: {
+					x: sidebar.x,
+					y: header.y,
+					width: sidebar.width,
+					height: sidebar.y + sidebar.height - header.y,
+				},
+			});
 		};
-		await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.theme = "dark";
+		});
 		await capture("browser-start-dark.png");
 		await page.screenshot({ path: testInfo.outputPath("browser-workspace-dark.png"), animations: "disabled" });
-		await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.theme = "light";
+		});
 		await capture("browser-start-light.png");
-		await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.theme = "dark";
+		});
 		await page.getByRole("button", { name: "New browser tab", exact: true }).click();
 		await expect(strip.getByRole("tab")).toHaveCount(2);
 		const address = workspace.fakeProvider.address();
@@ -711,8 +855,18 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 		await expect(urlInput).toHaveValue(url);
 		await urlInput.press("Enter");
 		await expect(strip.getByRole("tab", { name: "Sidebar page", exact: true })).toBeVisible();
-		await expect.poll(() => workspace.browser.contexts().flatMap((context) => context.pages()).some((candidate) => candidate.url() === url)).toBe(true);
-		const embeddedPage = workspace.browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === url)!;
+		await expect
+			.poll(() =>
+				workspace.browser
+					.contexts()
+					.flatMap((context) => context.pages())
+					.some((candidate) => candidate.url() === url),
+			)
+			.toBe(true);
+		const embeddedPage = workspace.browser
+			.contexts()
+			.flatMap((context) => context.pages())
+			.find((candidate) => candidate.url() === url)!;
 		await expect(embeddedPage.locator("h1")).toHaveText("Browser sidebar page");
 		await strip.getByRole("tab", { name: "Sidebar page", exact: true }).click({ button: "right" });
 		await expect(page.locator(".workspace-tab-menu")).toBeVisible();
@@ -726,13 +880,19 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
 		await expect(page.locator(".tool-sidebar")).toBeHidden();
 		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute("id", terminalId!);
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute(
+			"id",
+			terminalId!,
+		);
 		await page.getByRole("button", { name: "Browser Beta", exact: true }).click();
 		await expect(strip.getByRole("tab")).toHaveCount(1);
 		await expect(strip.getByRole("tab", { name: "New tab", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Browser Alpha", exact: true }).click();
 		await expect(strip.getByRole("tab")).toHaveCount(3);
-		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute("id", terminalId!);
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute(
+			"id",
+			terminalId!,
+		);
 		await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
 		await page.getByRole("button", { name: "Close Sidebar page", exact: true }).click();
 		const initialBrowser = await page.locator(".browser-panel.is-visible").getAttribute("id");
@@ -744,8 +904,15 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 		for (let index = 0; index < 34; index++) await divider.press("ArrowRight");
 		await capture("browser-start-narrow.png");
 		await expect(page.locator(".browser-panel.is-visible .browser-start-recent-page")).toContainText("Sidebar page");
-		await page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true }).focus();
-		await expect(page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true })).toBeFocused();
+		await page
+			.locator(".browser-panel.is-visible .tool-sidebar-menu")
+			.getByRole("button", { name: "Terminal", exact: true })
+			.focus();
+		await expect(
+			page
+				.locator(".browser-panel.is-visible .tool-sidebar-menu")
+				.getByRole("button", { name: "Terminal", exact: true }),
+		).toBeFocused();
 		await capture("browser-start-keyboard-focus.png");
 		await expect(page.getByRole("button", { name: "New browser tab", exact: true })).toBeInViewport();
 		expect(workspace.consoleErrors).toEqual([]);
@@ -779,25 +946,36 @@ test("terminal keeps its content in the sidebar while chat tabs split", async ()
 		await expect(panel).toBeVisible();
 		const terminalId = (await panel.getAttribute("id"))!.slice("terminal-panel-".length);
 		const panelHandle = await panel.elementHandle();
-		await expect.poll(async () => page.evaluate(async (id) => {
-			try {
-				await (globalThis as unknown as { metis: { writeTerminal(input: { terminalId: string; data: string }): Promise<void> } }).metis
-					.writeTerminal({ terminalId: id, data: "" });
-				return true;
-			} catch {
-				return false;
-			}
-		}, terminalId)).toBe(true);
+		await expect
+			.poll(async () =>
+				page.evaluate(async (id) => {
+					try {
+						await (
+							globalThis as unknown as {
+								metis: { writeTerminal(input: { terminalId: string; data: string }): Promise<void> };
+							}
+						).metis.writeTerminal({ terminalId: id, data: "" });
+						return true;
+					} catch {
+						return false;
+					}
+				}, terminalId),
+			)
+			.toBe(true);
 		await page.evaluate(async (id) => {
-			await (globalThis as unknown as { metis: { writeTerminal(input: { terminalId: string; data: string }): Promise<void> } }).metis
-				.writeTerminal({ terminalId: id, data: "echo p0a-marker\r" });
+			await (
+				globalThis as unknown as {
+					metis: { writeTerminal(input: { terminalId: string; data: string }): Promise<void> };
+				}
+			).metis.writeTerminal({ terminalId: id, data: "echo p0a-marker\r" });
 		}, terminalId);
 		await expect(panel.locator(".xterm-rows")).toContainText("p0a-marker");
 
 		// Only chat tabs split; the sidebar's terminal must survive pane changes.
 		await page.locator('.session-button[aria-label="Layout Beta"]').click();
 		await page.locator(`[data-active-session-id="${sessionTwo}"]`).waitFor({ state: "visible" });
-		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Layout Beta", exact: true }) })
+		await page
+			.locator(".tool-tab", { has: page.getByRole("tab", { name: "Layout Beta", exact: true }) })
 			.click({ button: "right" });
 		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: "Split right", exact: true }).click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
@@ -833,7 +1011,10 @@ test("project tab groups collapse from their label and move as one", async () =>
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
-	const tabNames = () => page.locator('.workspace-tabbar[data-pane-id] [role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label")));
+	const tabNames = () =>
+		page
+			.locator('.workspace-tabbar[data-pane-id] [role="tab"]')
+			.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label")));
 	const label = (name: string) => page.getByRole("button", { name: `${name} tab group`, exact: true });
 	try {
 		const open = async (name: string, id: string) => {
@@ -933,7 +1114,8 @@ test("two visible chat panes each run their own live session", async () => {
 		// Split Alpha's chat tab into a second pane; the gesture focuses that
 		// pane, so Alpha becomes the projected session and Beta stays live in
 		// the background pane.
-		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Live Alpha", exact: true }) })
+		await page
+			.locator(".tool-tab", { has: page.getByRole("tab", { name: "Live Alpha", exact: true }) })
 			.click({ button: "right" });
 		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: "Split right", exact: true }).click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
@@ -1051,7 +1233,10 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await open("Grid Alpha", ids.a!);
 
 		const openTabMenu = async (name: string) => {
-			await page.locator(".tool-tab", { has: page.getByRole("tab", { name, exact: true }) }).first().click({ button: "right" });
+			await page
+				.locator(".tool-tab", { has: page.getByRole("tab", { name, exact: true }) })
+				.first()
+				.click({ button: "right" });
 		};
 		const menuItem = (name: string) =>
 			page.locator(".workspace-tab-menu").getByRole("menuitem", { name, exact: true });
@@ -1082,7 +1267,11 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await menuItem("Split right").click();
 		await expect(page.locator(".workspace-row").first().locator(".workspace-pane")).toHaveCount(3);
 
-		for (const [name, id] of [["Grid Delta", ids.d], ["Grid Echo", ids.e], ["Grid Foxtrot", ids.f]] as const) {
+		for (const [name, id] of [
+			["Grid Delta", ids.d],
+			["Grid Echo", ids.e],
+			["Grid Foxtrot", ids.f],
+		] as const) {
 			await page.getByRole("tab", { name: "Grid Charlie", exact: true }).click();
 			await open(name, id!);
 			await openTabMenu(name);
@@ -1115,38 +1304,53 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 	}
 });
 
-
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("packaged conversation quotes reach the model and restore as source-linked annotations", async ({}, testInfo) => {
 	test.setTimeout(90_000);
-	const workspace = await launchWorkspace({ sessions: [
-		{ id: "92000000-0000-4000-8000-000000000001", mode: "chat", name: "Quote Chat" },
-		{ id: "92000000-0000-4000-8000-000000000002", mode: "code", name: "Quote Code" },
-	] });
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: "92000000-0000-4000-8000-000000000001", mode: "chat", name: "Quote Chat" },
+			{ id: "92000000-0000-4000-8000-000000000002", mode: "code", name: "Quote Code" },
+		],
+	});
 	const { page } = workspace;
 	try {
 		for (const mode of ["chat", "code"] as const) {
 			const label = mode === "chat" ? "Chat" : "Code";
 			await page.getByRole("button", { name: label, exact: true }).click();
 			await page.getByRole("button", { name: `Quote ${label}`, exact: true }).click();
-			await expect(page.locator("[data-active-session-id]")).toHaveAttribute("data-active-session-id", mode === "chat" ? "92000000-0000-4000-8000-000000000001" : "92000000-0000-4000-8000-000000000002");
+			await expect(page.locator("[data-active-session-id]")).toHaveAttribute(
+				"data-active-session-id",
+				mode === "chat" ? "92000000-0000-4000-8000-000000000001" : "92000000-0000-4000-8000-000000000002",
+			);
 			const editor = page.locator('.composer-editable-input[contenteditable="true"]:visible');
 			await editor.fill(`Start quote fixture in ${mode}`);
 			await editor.press("Enter");
-			await expect(page.locator(".transcript:visible").getByText("layout-reply", { exact: true }).last()).toBeVisible();
+			await expect(
+				page.locator(".transcript:visible").getByText("layout-reply", { exact: true }).last(),
+			).toBeVisible();
 			await expect(page.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
-			const activeTitle = await page.locator('.workspace-tabbar[data-pane-id] [role="tab"][aria-selected="true"]').first().getAttribute("aria-label");
+			const activeTitle = await page
+				.locator('.workspace-tabbar[data-pane-id] [role="tab"][aria-selected="true"]')
+				.first()
+				.getAttribute("aria-label");
 			if (!activeTitle) throw new Error("The packaged conversation did not activate a session tab");
 			const reply = page.locator(".transcript:visible").getByText("layout-reply", { exact: true }).last();
-			const renderedSourceId = await reply.evaluate((element) => element.closest<HTMLElement>("[data-quote-item]")?.dataset.quoteItem);
+			const renderedSourceId = await reply.evaluate(
+				(element) => element.closest<HTMLElement>("[data-quote-item]")?.dataset.quoteItem,
+			);
 			if (!renderedSourceId) throw new Error("Packaged reply has no quote source marker");
 			await reply.scrollIntoViewIfNeeded();
 			const rect = await reply.evaluate((element) => {
-				const range = document.createRange(); range.selectNodeContents(element);
+				const range = document.createRange();
+				range.selectNodeContents(element);
 				const bounds = range.getBoundingClientRect();
 				return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width };
 			});
-			await page.mouse.move(rect.x + .2, rect.y); await page.mouse.down();
-			await page.mouse.move(rect.x + rect.width - .2, rect.y, { steps: 10 }); await page.mouse.up();
+			await page.mouse.move(rect.x + 0.2, rect.y);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width - 0.2, rect.y, { steps: 10 });
+			await page.mouse.up();
 			await expect(page.getByRole("button", { name: "Add to conversation", exact: true })).toBeEnabled();
 			const selectedText = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 			expect(selectedText.trim().length).toBeGreaterThan(0);
@@ -1155,32 +1359,53 @@ test("packaged conversation quotes reach the model and restore as source-linked 
 			await expect(page.locator(".composer-conversation-quotes:visible")).toHaveCount(1);
 			await expect(editor).toBeFocused();
 			const question = `Explain quoted reply in ${mode}`;
-			await editor.fill(question); await editor.press("Enter");
+			await editor.fill(question);
+			await editor.press("Enter");
 			const annotation = page.locator(".message-annotations-trigger:visible");
 			await expect(annotation).toHaveText("1 annotations");
-			await expect.poll(() => workspace.modelRequests.some((request) => JSON.stringify(request.messages ?? []).includes(question))).toBe(true);
-			const request = [...workspace.modelRequests].reverse().find((request) => JSON.stringify(request.messages ?? []).includes(question))!;
+			await expect
+				.poll(() =>
+					workspace.modelRequests.some((request) => JSON.stringify(request.messages ?? []).includes(question)),
+				)
+				.toBe(true);
+			const request = [...workspace.modelRequests]
+				.reverse()
+				.find((request) => JSON.stringify(request.messages ?? []).includes(question))!;
 			const user = [...(request.messages ?? [])].reverse().find((message) => message.role === "user");
 			if (!user) throw new Error("Packaged model request has no user message");
-			const content = typeof user.content === "string" ? user.content : Array.isArray(user.content) ? user.content.map((block: { text?: string }) => block.text ?? "").join("\n") : "";
+			const content =
+				typeof user.content === "string"
+					? user.content
+					: Array.isArray(user.content)
+						? user.content.map((block: { text?: string }) => block.text ?? "").join("\n")
+						: "";
 			const block = /<conversation_quotes>\n([^<]*)\n<\/conversation_quotes>/u.exec(content);
 			if (!block) throw new Error("Packaged model request lost the conversation quote");
 			const quote = JSON.parse(block[1]!).quotes[0];
-			expect(quote.sourceRole).toBe("assistant"); expect(quote.selectedText).toBe(selectedText);
+			expect(quote.sourceRole).toBe("assistant");
+			expect(quote.selectedText).toBe(selectedText);
 			await expect(page.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
 			await page.screenshot({ path: testInfo.outputPath(`packaged-annotation-${mode}.png`) });
-			await page.reload(); await waitForServerReady(page);
+			await page.reload();
+			await waitForServerReady(page);
 			await page.getByRole("button", { name: label, exact: true }).click();
 			await page.locator(".session-button").filter({ hasText: activeTitle }).click();
 			await expect(annotation).toHaveText("1 annotations");
 			await annotation.click();
-			await expect(page.getByRole("dialog", { name: "Conversation annotations", exact: true })).toContainText(selectedText);
+			await expect(page.getByRole("dialog", { name: "Conversation annotations", exact: true })).toContainText(
+				selectedText,
+			);
 			await page.screenshot({ path: testInfo.outputPath(`packaged-annotation-preview-${mode}.png`) });
 			await page.getByRole("button", { name: "Go to original message", exact: true }).click();
-			await expect(page.locator(`[data-quote-item="${quote.sourceItemId}"], [data-quote-item="${renderedSourceId}"]`).first()).toBeInViewport();
+			await expect(
+				page.locator(`[data-quote-item="${quote.sourceItemId}"], [data-quote-item="${renderedSourceId}"]`).first(),
+			).toBeInViewport();
 			await expect(page.locator(".transcript-quote-notice")).toHaveCount(0);
 		}
 		expect(workspace.consoleErrors).toEqual([]);
-	} catch (error) { throw await rendererFailure(error, page, workspace.diagnostics); }
-	finally { await stopWorkspace(workspace); }
+	} catch (error) {
+		throw await rendererFailure(error, page, workspace.diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
+	}
 });

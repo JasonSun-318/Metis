@@ -1,11 +1,15 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
-import { closeServer, listen } from "./packaged-app-harness.ts";
-import { launchPermissionApp, type LaunchPermissionAppOptions, type PermissionAppDirs } from "./fixtures/permission-app.ts";
+import { expect, type Page, test } from "@playwright/test";
+import {
+	type LaunchPermissionAppOptions,
+	launchPermissionApp,
+	type PermissionAppDirs,
+} from "./fixtures/permission-app.ts";
 import type { PermissionToolCall } from "./fixtures/permission-provider.ts";
+import { closeServer, listen } from "./packaged-app-harness.ts";
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -45,15 +49,36 @@ function toolFor(marker: string, dirs: PermissionAppDirs): PermissionToolCall | 
 		["case-outside-read", bash(`cat ${JSON.stringify(path.join(dirs.outsideDir, "outside.txt"))}`)],
 		["case-dedicated-review-read", bash(`cat ${JSON.stringify(path.join(dirs.outsideDir, "outside.txt"))}`)],
 		["case-incomplete-var", bash("touch $OUTPUT")],
-		["case-tail-danger", bash(`printf 'safe prefix' > ${JSON.stringify(path.join(dirs.projectDir, "prefix.txt"))} && rm -rf ${JSON.stringify(generatedDir)}`)],
+		[
+			"case-tail-danger",
+			bash(
+				`printf 'safe prefix' > ${JSON.stringify(path.join(dirs.projectDir, "prefix.txt"))} && rm -rf ${JSON.stringify(generatedDir)}`,
+			),
+		],
 		["case-pipeline-danger", bash(`printf ok | (rm -rf ${JSON.stringify(generatedDir)})`)],
 		["case-substitution-danger", bash(`printf '%s' "$(rm -rf ${JSON.stringify(generatedDir)})"`)],
 		["case-loop-danger", bash(`for item in a; do rm -rf ${JSON.stringify(generatedDir)}; done`)],
-		["case-secret-multiline", bash(`API_TOKEN=${SECRET_VALUE} printf '%s\\n' 'safe output' > ${JSON.stringify(path.join(dirs.projectDir, "secret-output.txt"))}\nprintf 'tail-visible'`)],
-		["case-ask-append", bash(`printf x >> ${JSON.stringify(path.join(dirs.projectDir, "once.txt").replace(/^\/private\/var\//u, "/var/"))}`)],
-		["case-curl-authorized", bash("curl -q --silent --show-error --fail http://127.0.0.1:${METIS_TEST_PORT}/data")],
-		["case-curl-denied", bash("curl -q --silent --show-error --fail http://127.0.0.1:${METIS_TEST_DENIED_PORT}/denied")],
-		["case-curl-redirect", bash("curl -q --silent --show-error --location --fail http://127.0.0.1:${METIS_TEST_REDIRECT_PORT}/redirect")],
+		[
+			"case-secret-multiline",
+			bash(
+				`API_TOKEN=${SECRET_VALUE} printf '%s\\n' 'safe output' > ${JSON.stringify(path.join(dirs.projectDir, "secret-output.txt"))}\nprintf 'tail-visible'`,
+			),
+		],
+		[
+			"case-ask-append",
+			bash(
+				`printf x >> ${JSON.stringify(path.join(dirs.projectDir, "once.txt").replace(/^\/private\/var\//u, "/var/"))}`,
+			),
+		],
+		["case-curl-authorized", bash(`curl -q --silent --show-error --fail http://127.0.0.1:\${METIS_TEST_PORT}/data`)],
+		[
+			"case-curl-denied",
+			bash(`curl -q --silent --show-error --fail http://127.0.0.1:\${METIS_TEST_DENIED_PORT}/denied`),
+		],
+		[
+			"case-curl-redirect",
+			bash(`curl -q --silent --show-error --location --fail http://127.0.0.1:\${METIS_TEST_REDIRECT_PORT}/redirect`),
+		],
 	];
 	return cases.find(([token]) => marker.includes(token))?.[1];
 }
@@ -90,19 +115,29 @@ test.describe("Auto command rules and long commands", () => {
 			// One short rule prefix; the executed source uses the independent
 			// long-command budget instead of the 256-byte rule edit limit.
 			await app.page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					updatePermissionAutoSettings(input: Record<string, unknown>): Promise<unknown>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							updatePermissionAutoSettings(input: Record<string, unknown>): Promise<unknown>;
+						};
+					}
+				).metis;
 				await api.updatePermissionAutoSettings({
 					requestId: crypto.randomUUID(),
 					rules: [{ command: "printf", allowNetwork: false }],
 				});
 			});
 
-			for (const [marker, bytes, file] of [["case-long-257", 257, "long-257.txt"], ["case-long-8k", 8192, "long-8k.txt"], ["case-long-32k", 32768, "long-32k.txt"]] as const) {
+			for (const [marker, bytes, file] of [
+				["case-long-257", 257, "long-257.txt"],
+				["case-long-8k", 8192, "long-8k.txt"],
+				["case-long-32k", 32768, "long-32k.txt"],
+			] as const) {
 				await app.submit(marker);
 				await app.waitDone(marker);
-				const payload = JSON.parse(app.provider.calls.filter((call) => call.kind === "primary").at(-1)!.payload) as { messages: Array<{ role: string; content: unknown }> };
+				const payload = JSON.parse(
+					app.provider.calls.filter((call) => call.kind === "primary").at(-1)!.payload,
+				) as { messages: Array<{ role: string; content: unknown }> };
 				const result = payload.messages.filter((message) => message.role === "tool").at(-1);
 				expect(JSON.stringify(result?.content)).toContain("a".repeat(bytes - Buffer.byteLength("printf '%s' ''")));
 				expect(existsSync(path.join(app.projectDir, file))).toBe(false);
@@ -137,7 +172,7 @@ test.describe("manual boundaries stay unrememberable", () => {
 		try {
 			// Dynamic/incomplete target: no reusable scope, no remember entries.
 			await app.submit("case-incomplete-var");
-			let panel = app.approval;
+			const panel = app.approval;
 			await expect(panel).toBeVisible();
 			await expect(app.page.getByRole("button", { name: "More approval options", exact: true })).toHaveCount(0);
 			await app.reject();
@@ -150,9 +185,13 @@ test.describe("manual boundaries stay unrememberable", () => {
 			expect(existsSync(path.join(app.projectDir, "prefix.txt"))).toBe(false);
 			for (const marker of ["case-pipeline-danger", "case-substitution-danger", "case-loop-danger"]) {
 				await app.submit(marker);
-				await expect.poll(async () =>
-					(await app.approval.count()) > 0 || (await app.page.getByText(`done:${marker}`, { exact: true }).count()) > 0,
-				).toBe(true);
+				await expect
+					.poll(
+						async () =>
+							(await app.approval.count()) > 0 ||
+							(await app.page.getByText(`done:${marker}`, { exact: true }).count()) > 0,
+					)
+					.toBe(true);
 				if (await app.approval.isVisible()) await app.reject();
 				await app.waitDone(marker);
 			}
@@ -195,9 +234,13 @@ test.describe("exact session and project rules", () => {
 			const clearRules = (scope: "project" | "session") =>
 				app.page.evaluate(
 					async ({ session, ruleScope }) => {
-						const api = (globalThis as unknown as { metis: {
-							clearPermissionRules(input: Record<string, unknown>): Promise<unknown>;
-						} }).metis;
+						const api = (
+							globalThis as unknown as {
+								metis: {
+									clearPermissionRules(input: Record<string, unknown>): Promise<unknown>;
+								};
+							}
+						).metis;
 						await api.clearPermissionRules({
 							requestId: crypto.randomUUID(),
 							scope: ruleScope,
@@ -278,7 +321,10 @@ test.describe("exact session and project rules", () => {
 			await page.getByRole("button", { name: "Manage remembered permissions" }).click();
 			const sessionGroup = page.getByRole("dialog", { name: "Remembered permissions", exact: true });
 			await expect(sessionGroup).toContainText("target.txt");
-			await sessionGroup.getByRole("button", { name: /Revoke/u }).first().click();
+			await sessionGroup
+				.getByRole("button", { name: /Revoke/u })
+				.first()
+				.click();
 			await expect(sessionGroup.getByRole("button", { name: /Revoke/u })).toHaveCount(0);
 			await page.keyboard.press("Escape");
 			await app.closeSettings();
@@ -309,9 +355,9 @@ test.describe("approval card ergonomics", () => {
 			await expect(panel).toBeFocused();
 			await pressEnter(app.page);
 			await app.waitDone("case-ask-append enter");
-			const toolResult = JSON.parse(app.provider.calls.filter((call) => call.kind === "primary").at(-1)?.payload ?? "{}").messages?.findLast(
-				(message: { role: string }) => message.role === "tool",
-			);
+			const toolResult = JSON.parse(
+				app.provider.calls.filter((call) => call.kind === "primary").at(-1)?.payload ?? "{}",
+			).messages?.findLast((message: { role: string }) => message.role === "tool");
 			expect(existsSync(path.join(app.projectDir, "once.txt")), JSON.stringify(toolResult)).toBe(true);
 			expect(await readFile(path.join(app.projectDir, "once.txt"), "utf8")).toBe("x");
 
@@ -445,9 +491,9 @@ test.describe("network scope", () => {
 				const base = toolFor(marker, dirs);
 				if (!base) return undefined;
 				const command = String((base.arguments as { command?: string }).command ?? "")
-					.replaceAll("${METIS_TEST_PORT}", String(authorizedPort))
-					.replaceAll("${METIS_TEST_DENIED_PORT}", String(deniedPort))
-					.replaceAll("${METIS_TEST_REDIRECT_PORT}", String(redirectPortHolder.port));
+					.replaceAll(`\${METIS_TEST_PORT}`, String(authorizedPort))
+					.replaceAll(`\${METIS_TEST_DENIED_PORT}`, String(deniedPort))
+					.replaceAll(`\${METIS_TEST_REDIRECT_PORT}`, String(redirectPortHolder.port));
 				return { name: "bash", arguments: { command } };
 			},
 		});
@@ -491,20 +537,22 @@ test.describe("network scope", () => {
 test.describe("settings and model surfaces", () => {
 	test("the model page tests the saved reviewer profile with the real contract samples", async () => {
 		const app = await launchPermissionApp({
-			preset: "auto", tools, reviewer: reviewerSeed(false),
+			preset: "auto",
+			tools,
+			reviewer: reviewerSeed(false),
 			decide: (payload) => ({ decision: JSON.parse(payload).action.command === "pwd" ? "allow" : "deny" }),
 		});
 		try {
 			await app.openSettings("Model");
 			const page = app.page;
-			await expect(page.getByRole("heading", { name: "Approval model", exact: true })).toBeVisible();
-			await expect(page.getByText(/Approval model configured/u)).toBeVisible();
-			const reviewerSection = page.locator(".reviewer-model-section");
+			await expect(page.getByRole("region", { name: "Specialized models", exact: true })).toBeVisible();
+			await expect(page.locator(".reviewer-model-card .model-provider-badge")).toHaveText("Configured");
+			const reviewerSection = page.locator(".reviewer-model-card");
 			await reviewerSection.scrollIntoViewIfNeeded();
 			await reviewerSection.screenshot({ path: test.info().outputPath("reviewer-model-settings.png") });
 
 			// The compact card keeps the form in a native dialog.
-			await reviewerSection.getByRole("button", { name: "Edit", exact: true }).click();
+			await reviewerSection.click();
 			const reviewerDialog = page.getByRole("dialog", { name: "Approval model", exact: true });
 			await expect(reviewerDialog).toBeVisible();
 			await expect(reviewerDialog.getByRole("button", { name: "Connection type", exact: true })).toBeVisible();
@@ -512,12 +560,16 @@ test.describe("settings and model surfaces", () => {
 
 			// The saved profile is exactly the five strict fields; the chat model is untouched.
 			const settings = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getModelSettings(): Promise<{
-						defaultModel: { provider: string; modelId: string } | null;
-						permissionReviewer: { config: Record<string, unknown> | null; status: string };
-					}>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getModelSettings(): Promise<{
+								defaultModel: { provider: string; modelId: string } | null;
+								permissionReviewer: { config: Record<string, unknown> | null; status: string };
+							}>;
+						};
+					}
+				).metis;
 				return api.getModelSettings();
 			});
 			expect(settings.permissionReviewer.status).toBe("configured");
@@ -538,9 +590,14 @@ test.describe("settings and model surfaces", () => {
 			expect(app.provider.reviewCalls.length).toBe(2);
 			const [readSample, denySample] = app.provider.reviewCalls;
 			const reviewedCommand = (payload: string | undefined) => {
-				const messages = JSON.parse(payload ?? "{}").messages as Array<{ role: string; content: string | Array<{ text: string }> }>;
+				const messages = JSON.parse(payload ?? "{}").messages as Array<{
+					role: string;
+					content: string | Array<{ text: string }>;
+				}>;
 				const user = [...messages].reverse().find((message) => message.role === "user")!;
-				return JSON.parse(typeof user.content === "string" ? user.content : user.content.map((part) => part.text).join("\n")).action.command;
+				return JSON.parse(
+					typeof user.content === "string" ? user.content : user.content.map((part) => part.text).join("\n"),
+				).action.command;
 			};
 			expect(reviewedCommand(readSample?.payload)).toBe("pwd");
 			expect(reviewedCommand(denySample?.payload)).toBe("rm -rf /");
@@ -560,9 +617,13 @@ test.describe("settings and model surfaces", () => {
 
 			// Testing is user-initiated and must not flip the Auto switch.
 			const auto = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
+						};
+					}
+				).metis;
 				return api.getPermissionAutoSettings();
 			});
 			expect(auto.reviewerEnabled).toBe(false);
@@ -585,14 +646,18 @@ test.describe("settings and model surfaces", () => {
 			await app.openSettings("Model");
 			const page = app.page;
 			const providersBefore = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getModelSettings(): Promise<{ providers: readonly { provider: string }[] }>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getModelSettings(): Promise<{ providers: readonly { provider: string }[] }>;
+						};
+					}
+				).metis;
 				return (await api.getModelSettings()).providers.map((provider) => provider.provider);
 			});
-			const reviewerSection = page.locator(".reviewer-model-section");
+			const reviewerSection = page.locator(".reviewer-model-card");
 			await reviewerSection.scrollIntoViewIfNeeded();
-			await reviewerSection.getByRole("button", { name: "Configure", exact: true }).click();
+			await reviewerSection.click();
 			const dialog = page.getByRole("dialog", { name: "Approval model", exact: true });
 			await expect(dialog).toBeVisible();
 
@@ -608,23 +673,27 @@ test.describe("settings and model surfaces", () => {
 			await dialog.screenshot({ path: test.info().outputPath("reviewer-model-dialog-dedicated.png") });
 			await dialog.getByRole("button", { name: "Save approval model", exact: true }).click();
 			await expect(dialog).toHaveCount(0);
-			await expect(reviewerSection.getByText("Independent reviewer", { exact: true })).toBeVisible();
+			await expect(reviewerSection).toContainText("Independent reviewer");
 			await reviewerSection.screenshot({
 				path: test.info().outputPath("reviewer-model-card-dedicated.png"),
 			});
 
 			const settings = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getModelSettings(): Promise<{
-						defaultModel: { provider: string; modelId: string } | null;
-						providers: readonly { provider: string }[];
-						permissionReviewer: {
-							config: Record<string, unknown> | null;
-							status: string;
-							authConfigured?: boolean;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getModelSettings(): Promise<{
+								defaultModel: { provider: string; modelId: string } | null;
+								providers: readonly { provider: string }[];
+								permissionReviewer: {
+									config: Record<string, unknown> | null;
+									status: string;
+									authConfigured?: boolean;
+								};
+							}>;
 						};
-					}>;
-				} }).metis;
+					}
+				).metis;
 				return api.getModelSettings();
 			});
 			expect(settings.permissionReviewer.status).toBe("configured");
@@ -648,7 +717,7 @@ test.describe("settings and model surfaces", () => {
 			expect(settings.providers.map((provider) => provider.provider)).toEqual(providersBefore);
 
 			// Testing is limited to the saved connection and the fixed samples.
-			await reviewerSection.getByRole("button", { name: "Edit", exact: true }).click();
+			await reviewerSection.click();
 			await expect(dialog).toBeVisible();
 			await dialog.getByRole("button", { name: "Test approval model", exact: true }).click();
 			await expect(page.getByText(/Approval model test succeeded/u)).toBeVisible({ timeout: 30_000 });
@@ -658,9 +727,13 @@ test.describe("settings and model surfaces", () => {
 				expect(call.payload).not.toContain("dedicated-review-key");
 			}
 			const autoAfterTest = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
+						};
+					}
+				).metis;
 				return api.getPermissionAutoSettings();
 			});
 			expect(autoAfterTest.reviewerEnabled).toBe(false);
@@ -712,7 +785,9 @@ test.describe("settings and model surfaces", () => {
 			const page = app.page;
 			const toggle = page.getByRole("checkbox", { name: "Use the approval model in Auto mode", exact: true });
 			await expect(toggle).not.toBeChecked();
-			const toggleTrack = await page.locator(".permission-approval-toggle .auto-command-allowlist-toggle-track").boundingBox();
+			const toggleTrack = await page
+				.locator(".permission-approval-toggle .auto-command-allowlist-toggle-track")
+				.boundingBox();
 			expect(toggleTrack!.width).toBeGreaterThanOrEqual(28);
 			expect(toggleTrack!.height).toBeGreaterThanOrEqual(16);
 			await expect(page.getByText(/Approval model configured/u)).toBeVisible();
@@ -722,9 +797,13 @@ test.describe("settings and model surfaces", () => {
 			await expect(toggle).toBeChecked();
 			// Toggling writes the single persisted switch, not a second copy.
 			const auto = await page.evaluate(async () => {
-				const api = (globalThis as unknown as { metis: {
-					getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
-				} }).metis;
+				const api = (
+					globalThis as unknown as {
+						metis: {
+							getPermissionAutoSettings(): Promise<{ reviewerEnabled: boolean }>;
+						};
+					}
+				).metis;
 				return api.getPermissionAutoSettings();
 			});
 			expect(auto.reviewerEnabled).toBe(true);
@@ -738,7 +817,9 @@ test.describe("settings and model surfaces", () => {
 
 			// Explicit self-test uses temporary fixtures and preserves the permission settings.
 			await page.getByRole("button", { name: "Run sandbox self-test", exact: true }).click();
-			await expect(page.locator(".sandbox-environment-status").filter({ hasText: /^Available$/ })).toBeVisible({ timeout: 30_000 });
+			await expect(page.locator(".sandbox-environment-status").filter({ hasText: /^Available$/ })).toBeVisible({
+				timeout: 30_000,
+			});
 			await expect(page.getByRole("button", { name: "Repair Windows sandbox", exact: true })).toHaveCount(0);
 		} finally {
 			await app.close();

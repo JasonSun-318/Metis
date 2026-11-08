@@ -43,6 +43,7 @@ type SafetyBrowser = {
 	): ReturnType<typeof callSourceBrowser>;
 };
 const test = base.extend<{ safetyBrowser: SafetyBrowser }>({
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	safetyBrowser: async ({}, use) => {
 		const server = createServer((request, response) => {
 			response.setHeader("content-type", "text/html; charset=utf-8");
@@ -330,7 +331,9 @@ test("rejects covered and obsolete same-origin frame targets", async ({ safetyBr
 	await browser.page
 		.frameLocator("iframe")
 		.locator("iframe")
-		.evaluate((element) => ((element as HTMLIFrameElement).src = "/nested?replaced"));
+		.evaluate((element) => {
+			(element as HTMLIFrameElement).src = "/nested?replaced";
+		});
 	await expect(frame.locator("#nested")).toHaveCount(0);
 	result = await browser.act(before, { type: "click", target: { elementId: old } });
 	expect(result.ok, result.text).toBe(false);

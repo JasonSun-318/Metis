@@ -1,9 +1,9 @@
-import { build } from "esbuild";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { build } from "esbuild";
 
 test.use({ channel: "chrome" });
 let directory: string;
@@ -11,13 +11,31 @@ let server: Server;
 let url: string;
 test.beforeAll(async () => {
 	directory = await mkdtemp(path.join(tmpdir(), "metis-chain-"));
-	await build({ bundle: true, entryPoints: [path.join(__dirname, "chat-execution-chain.fixture.tsx")], outfile: path.join(directory, "fixture.js"), format: "esm", jsx: "automatic", platform: "browser", target: "es2022" });
-	await build({ bundle: true, entryPoints: [path.join(__dirname, "../src/renderer/workers/diff-worker.ts")], outfile: path.join(directory, "diff-worker.js"), format: "esm", platform: "browser", target: "es2022", ignoreAnnotations: true });
+	await build({
+		bundle: true,
+		entryPoints: [path.join(__dirname, "chat-execution-chain.fixture.tsx")],
+		outfile: path.join(directory, "fixture.js"),
+		format: "esm",
+		jsx: "automatic",
+		platform: "browser",
+		target: "es2022",
+	});
+	await build({
+		bundle: true,
+		entryPoints: [path.join(__dirname, "../src/renderer/workers/diff-worker.ts")],
+		outfile: path.join(directory, "diff-worker.js"),
+		format: "esm",
+		platform: "browser",
+		target: "es2022",
+		ignoreAnnotations: true,
+	});
 	server = createServer(async (request, response) => {
 		const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
 		if (pathname === "/") {
 			response.setHeader("content-type", "text/html");
-			response.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>');
+			response.end(
+				'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>',
+			);
 		} else if (pathname === "/workers/diff-worker.ts") {
 			response.setHeader("content-type", "text/javascript");
 			response.end(await readFile(path.join(directory, "diff-worker.js")));
@@ -63,12 +81,18 @@ test("limits a long live preview to half the conversation width", async ({ page 
 	expect(inner.width).toBeCloseTo(outer.width / 2, 0);
 });
 
-test("thought disclosure slides the same content open and closed with a quiet inline control", async ({ page }, testInfo) => {
+test("thought disclosure slides the same content open and closed with a quiet inline control", async ({
+	page,
+}, testInfo) => {
 	await page.goto(url);
 	await page.getByRole("button", { name: "完成任务" }).click();
 	await page.locator(".execution-chain > summary").click();
 	const drawer = page.locator(".execution-chain > .transcript-drawer");
-	await expect.poll(() => drawer.evaluate((el) => Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.scrollHeight))).toBeLessThan(1);
+	await expect
+		.poll(() =>
+			drawer.evaluate((el) => Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.scrollHeight)),
+		)
+		.toBeLessThan(1);
 	const preview = page.locator(".thinking-preview").first();
 	const button = page.locator(".thinking-show-more").first();
 	await expect(button).toBeInViewport();
@@ -83,25 +107,35 @@ test("thought disclosure slides the same content open and closed with a quiet in
 			element.parentElement!.querySelector<HTMLButtonElement>(".thinking-show-more")!.click();
 			await new Promise(requestAnimationFrame);
 			await new Promise(requestAnimationFrame);
-			const animation = element.getAnimations().find((candidate) =>
-				candidate instanceof CSSTransition && candidate.transitionProperty === "max-height");
+			const animation = element
+				.getAnimations()
+				.find((candidate) => candidate instanceof CSSTransition && candidate.transitionProperty === "max-height");
 			if (!animation) throw new Error("Thought height changed without a drawer transition");
 			animation.pause();
 			animation.currentTime = Number(animation.effect!.getTiming().duration) / 2;
 			const middle = element.getBoundingClientRect().height;
 			animation.finish();
-			return { before, middle, full: content.getBoundingClientRect().height, sameContent: content === element.firstElementChild };
+			return {
+				before,
+				middle,
+				full: content.getBoundingClientRect().height,
+				sameContent: content === element.firstElementChild,
+			};
 		});
 		await expect(button).toHaveAttribute("aria-expanded", String(expanding));
 		expect(heights.sameContent).toBe(true);
 		if (expanding) {
 			expect(heights.middle).toBeGreaterThan(heights.before + 1);
 			expect(heights.middle).toBeLessThan(heights.full - 1);
-			await expect.poll(() => preview.evaluate((el) => el.getBoundingClientRect().height)).toBeCloseTo(heights.full, 0);
+			await expect
+				.poll(() => preview.evaluate((el) => el.getBoundingClientRect().height))
+				.toBeCloseTo(heights.full, 0);
 			await page.screenshot({ path: testInfo.outputPath("thought-disclosure-expanded.png") });
 		} else {
 			expect(heights.middle).toBeLessThan(heights.before - 1);
-			await expect.poll(() => preview.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(heights.middle - 1);
+			await expect
+				.poll(() => preview.evaluate((el) => el.getBoundingClientRect().height))
+				.toBeLessThan(heights.middle - 1);
 		}
 	}
 	await button.hover();
@@ -120,7 +154,9 @@ test("file controls use compact corners and keep selection actions available", a
 	expect(await radius(".selection-send")).toBe("8px");
 });
 
-test("Code uses compact expanded tools, highlighted inline diffs and a separate review panel", async ({ page }, testInfo) => {
+test("Code uses compact expanded tools, highlighted inline diffs and a separate review panel", async ({
+	page,
+}, testInfo) => {
 	await page.setViewportSize({ width: 1160, height: 1000 });
 	await page.goto(`${url}?code`);
 	const execution = page.locator(".code-execution");
@@ -131,7 +167,11 @@ test("Code uses compact expanded tools, highlighted inline diffs and a separate 
 	await rows.nth(1).click();
 	const diff = execution.locator(".code-file-diff");
 	await expect(diff).toBeVisible();
-	await expect.poll(() => diff.locator("diffs-container").evaluate((el) => el.shadowRoot?.textContent?.includes("triple") ?? false)).toBe(true);
+	await expect
+		.poll(() =>
+			diff.locator("diffs-container").evaluate((el) => el.shadowRoot?.textContent?.includes("triple") ?? false),
+		)
+		.toBe(true);
 	await expect(execution.locator(".code-command-input").first()).toContainText("$ ls -la");
 	const input = execution.locator(".code-command-input").first();
 	expect(await input.evaluate((el) => getComputedStyle(el).borderRadius)).toBe("6px");
@@ -162,12 +202,32 @@ test("Code keeps headers fixed while revealing added and removed lines", async (
 	const before = await row.boundingBox();
 	await row.click();
 	const diff = page.locator(".code-file-diff diffs-container");
-	await expect.poll(() => diff.evaluate((el) => el.shadowRoot?.querySelectorAll('[data-line-type="change-deletion"][data-line]').length ?? 0)).toBe(1);
-	await expect.poll(() => diff.evaluate((el) => el.shadowRoot?.querySelectorAll('[data-line-type="change-addition"][data-line]').length ?? 0)).toBe(1);
+	await expect
+		.poll(() =>
+			diff.evaluate(
+				(el) => el.shadowRoot?.querySelectorAll('[data-line-type="change-deletion"][data-line]').length ?? 0,
+			),
+		)
+		.toBe(1);
+	await expect
+		.poll(() =>
+			diff.evaluate(
+				(el) => el.shadowRoot?.querySelectorAll('[data-line-type="change-addition"][data-line]').length ?? 0,
+			),
+		)
+		.toBe(1);
 	await expect.poll(() => row.boundingBox()).toEqual(before);
 	await page.screenshot({ path: testInfo.outputPath("metis-code-modified.png") });
 	await row.click();
-	await expect.poll(() => page.locator(".code-command").nth(1).locator(".transcript-drawer").evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+	await expect
+		.poll(() =>
+			page
+				.locator(".code-command")
+				.nth(1)
+				.locator(".transcript-drawer")
+				.evaluate((el) => el.getBoundingClientRect().height),
+		)
+		.toBe(0);
 	expect(await row.boundingBox()).toEqual(before);
 });
 
@@ -195,7 +255,13 @@ test("ten files disclose seven remaining rows inside the card without opening re
 	await page.screenshot({ path: testInfo.outputPath("code-files-collapsed.png") });
 	await button.click();
 	await expect(button).toHaveAttribute("aria-expanded", "true");
-	await expect.poll(() => drawer.evaluate((el) => Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.getBoundingClientRect().height))).toBeLessThan(0.5);
+	await expect
+		.poll(() =>
+			drawer.evaluate((el) =>
+				Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.getBoundingClientRect().height),
+			),
+		)
+		.toBeLessThan(0.5);
 	await expect(drawer.locator(".code-turn-file").last()).toBeInViewport({ ratio: 1 });
 	await expect(panel.locator(".code-turn-file:visible")).toHaveCount(10);
 	await expect(page.locator(".review-panel")).toHaveCount(0);
@@ -205,7 +271,9 @@ test("ten files disclose seven remaining rows inside the card without opening re
 	await expect(drawer).toHaveJSProperty("inert", true);
 });
 
-test("review tree keeps the folder icon fixed, swaps states and places labels next to icons", async ({ page }, testInfo) => {
+test("review tree keeps the folder icon fixed, swaps states and places labels next to icons", async ({
+	page,
+}, testInfo) => {
 	await page.goto(`${url}?code`);
 	await page.locator(".code-turn-review").click();
 	await page.getByRole("button", { name: "显示审阅详情" }).click();
@@ -213,8 +281,8 @@ test("review tree keeps the folder icon fixed, swaps states and places labels ne
 	const icon = folder.locator(".sidebar-folder-icon");
 	await expect(icon).toHaveAttribute("data-expanded", "true");
 	const geometry = await folder.evaluate((el) => {
-		const icon = el.querySelector('.review-tree-icon')!.getBoundingClientRect();
-		const label = el.querySelector('.review-tree-label')!.getBoundingClientRect();
+		const icon = el.querySelector(".review-tree-icon")!.getBoundingClientRect();
+		const label = el.querySelector(".review-tree-label")!.getBoundingClientRect();
 		return { width: icon.width, gap: label.left - icon.right };
 	});
 	expect(geometry.width).toBe(14);
@@ -239,39 +307,49 @@ test("runtime shows a rotating ring and inline subdued usage after the status", 
 	const usage = await status.locator(".turn-runtime-usage").boundingBox();
 	expect(usage!.x).toBeGreaterThan(label!.x + label!.width);
 	await page.screenshot({ path: testInfo.outputPath("runtime-inline-usage.png") });
-	await page.evaluate(() => document.documentElement.dataset.motion = "reduced");
+	await page.evaluate(() => {
+		document.documentElement.dataset.motion = "reduced";
+	});
 	await expect(status.locator(".turn-runtime-spinner")).toHaveCSS("animation-name", "none");
 });
 
-for (const width of [1000, 390]) test(`independent thoughts and stable command geometry at ${width}px`, async ({ page }) => {
-	await page.setViewportSize({ width, height: 1000 });
-	await page.goto(url);
-	if (width === 390) await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
-	await page.getByRole("button", { name: "完成任务" }).click();
-	await page.locator(".execution-chain > summary").click();
-	const buttons = page.locator(".thinking-show-more");
-	await expect(buttons).toHaveCount(2);
-	const second = page.locator(".thinking-preview").nth(1);
-	const secondHeight = await second.evaluate((el) => el.getBoundingClientRect().height);
-	await buttons.first().click();
-	await expect(buttons.first()).toHaveAttribute("aria-expanded", "true");
-	await expect(buttons.nth(1)).toHaveAttribute("aria-expanded", "false");
-	const first = page.locator(".thinking-preview").first();
-	await expect.poll(() => first.evaluate((el) => Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.getBoundingClientRect().height))).toBeLessThan(0.5);
-	expect(await second.evaluate((el) => el.getBoundingClientRect().height)).toBe(secondHeight);
-	await buttons.first().click();
-	await expect.poll(() => first.evaluate((el) => el.getBoundingClientRect().height)).toBe(secondHeight);
-	const command = page.locator(".tool-step-command > summary");
-	const commandDrawer = page.locator(".tool-step-command > .transcript-drawer");
-	await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
-	const before = await command.boundingBox();
-	const iconBefore = await command.locator("svg").boundingBox();
-	await command.click();
-	await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(200);
-	expect(await command.boundingBox()).toEqual(before);
-	expect(await command.locator("svg").boundingBox()).toEqual(iconBefore);
-	await command.click();
-	await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
-	await expect(page.locator(".tool-step-details")).not.toBeInViewport();
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-});
+for (const width of [1000, 390])
+	test(`independent thoughts and stable command geometry at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 1000 });
+		await page.goto(url);
+		if (width === 390)
+			await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
+		await page.getByRole("button", { name: "完成任务" }).click();
+		await page.locator(".execution-chain > summary").click();
+		const buttons = page.locator(".thinking-show-more");
+		await expect(buttons).toHaveCount(2);
+		const second = page.locator(".thinking-preview").nth(1);
+		const secondHeight = await second.evaluate((el) => el.getBoundingClientRect().height);
+		await buttons.first().click();
+		await expect(buttons.first()).toHaveAttribute("aria-expanded", "true");
+		await expect(buttons.nth(1)).toHaveAttribute("aria-expanded", "false");
+		const first = page.locator(".thinking-preview").first();
+		await expect
+			.poll(() =>
+				first.evaluate((el) =>
+					Math.abs(el.getBoundingClientRect().height - el.firstElementChild!.getBoundingClientRect().height),
+				),
+			)
+			.toBeLessThan(0.5);
+		expect(await second.evaluate((el) => el.getBoundingClientRect().height)).toBe(secondHeight);
+		await buttons.first().click();
+		await expect.poll(() => first.evaluate((el) => el.getBoundingClientRect().height)).toBe(secondHeight);
+		const command = page.locator(".tool-step-command > summary");
+		const commandDrawer = page.locator(".tool-step-command > .transcript-drawer");
+		await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+		const before = await command.boundingBox();
+		const iconBefore = await command.locator("svg").boundingBox();
+		await command.click();
+		await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(200);
+		expect(await command.boundingBox()).toEqual(before);
+		expect(await command.locator("svg").boundingBox()).toEqual(iconBefore);
+		await command.click();
+		await expect.poll(() => commandDrawer.evaluate((el) => el.getBoundingClientRect().height)).toBe(0);
+		await expect(page.locator(".tool-step-details")).not.toBeInViewport();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	});

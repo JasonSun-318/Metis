@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, type Browser } from "@playwright/test";
+import { type Browser, expect, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	closeServer,
@@ -20,6 +20,7 @@ import {
 } from "./packaged-app-harness.ts";
 
 for (const mode of ["chat", "code"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: manual compaction disables sending and returns to idle`, async ({}, info) => {
 		test.setTimeout(90_000);
 		const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-compaction-ui-"));
@@ -51,7 +52,13 @@ for (const mode of ["chat", "code"] as const) {
 		const debuggingPort = await reservePort();
 		const diagnostics: string[] = [];
 		const app = launchPackagedDesktop({
-			executable: packagedExecutable(), debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics,
+			executable: packagedExecutable(),
+			debuggingPort,
+			userDataDir,
+			projectDir,
+			agentDir,
+			homeDir,
+			diagnostics,
 		});
 		let browser: Browser | undefined;
 		try {
@@ -60,12 +67,15 @@ for (const mode of ["chat", "code"] as const) {
 			const page = connected.page;
 			await waitForServerReady(page);
 			await page.locator(".account-menu-trigger").waitFor();
-			const sessionId = await page.evaluate(async ({ cwd, mode }) => {
-				const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-				const result = await api.createSession({ requestId: crypto.randomUUID(), mode, cwd });
-				localStorage.setItem(`metis.activeSessionId.${mode}`, result.session.sessionId);
-				return result.session.sessionId;
-			}, { cwd: projectDir, mode });
+			const sessionId = await page.evaluate(
+				async ({ cwd, mode }) => {
+					const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
+					const result = await api.createSession({ requestId: crypto.randomUUID(), mode, cwd });
+					localStorage.setItem(`metis.activeSessionId.${mode}`, result.session.sessionId);
+					return result.session.sessionId;
+				},
+				{ cwd: projectDir, mode },
+			);
 			await page.reload({ waitUntil: "domcontentloaded" });
 			await page.getByRole("button", { name: mode === "code" ? "Code" : "Chat", exact: true }).click();
 			await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
