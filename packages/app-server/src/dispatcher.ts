@@ -13,6 +13,7 @@ import {
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
 import { AgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
 import { ArchivedConversationCatalog, deleteArchivedAgent } from "./archived-conversations.ts";
+import { dispatchKnowledgeRequest, isKnowledgeRequest } from "./dispatch/knowledge.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
@@ -527,6 +528,12 @@ export class Dispatcher {
 	}
 
 	async dispatch(request: ClientRpcRequest, connection: ConnectionState): Promise<unknown> {
+		if (isKnowledgeRequest(request)) {
+			return await dispatchKnowledgeRequest(request, {
+				knowledge: this.knowledge,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -547,23 +554,6 @@ export class Dispatcher {
 			}
 			case "session/archived/list":
 				return await this.archivedConversations.list(this.allSessionRefs(), request.params);
-			case "knowledge/list":
-				return this.knowledge.list();
-			case "knowledge/register":
-				return await this.replayMutation(request, () => this.knowledge.register(request.params.path));
-			case "knowledge/remove":
-				return await this.replayMutation(request, async () => this.knowledge.remove(request.params.libraryId));
-			case "knowledge/scan":
-				return await this.knowledge.scan(request.params.libraryId);
-			case "knowledge/read":
-				return await this.knowledge.read(request.params.libraryId, request.params.path);
-			case "knowledge/resource/resolve":
-				return await this.knowledge.resolve(
-					request.params.libraryId,
-					request.params.sourcePath,
-					request.params.reference,
-					request.params.kind,
-				);
 			case "session/knowledge/get": {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.getKnowledgeLinks?.() ?? { libraries: [] });
