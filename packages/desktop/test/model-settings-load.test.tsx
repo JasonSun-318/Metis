@@ -16,7 +16,6 @@ function view(loadError: string | null = null): ModelSettingsView {
 		defaultModel: { provider: "openai", modelId: "gpt-5" },
 		defaultThinkingSelection: "high",
 		autoSessionTitle: true,
-		vision: null,
 		permissionReviewer: { config: null, status: "unconfigured" },
 		loadError,
 		providers: [
@@ -130,7 +129,7 @@ describe("model settings initial load", () => {
 		expect(container.textContent).not.toContain("Add custom provider");
 		expect(container.textContent).not.toContain("Configure");
 		expect(container.querySelector(".model-provider-catalog-dialog")).toBeNull();
-		expect(container.querySelector(".model-service-panel")).toBeNull();
+		expect(container.querySelector(".model-specialized-section")).toBeNull();
 	});
 
 	it("reloads the same view on Retry and then shows built-in providers and controls", async () => {
@@ -173,7 +172,7 @@ describe("model settings initial load", () => {
 		expect(container.textContent).toContain("Add provider");
 		await act(async () => button(container, "Add provider").click());
 		expect(container.querySelector(".model-provider-catalog-dialog")?.hasAttribute("open")).toBe(true);
-		expect(button(container, "Configure")).toBeTruthy();
+		expect(button(container, "Configure approval model")).toBeTruthy();
 	});
 
 	it("renders the saved approval model independently from the chat default", async () => {
@@ -197,12 +196,12 @@ describe("model settings initial load", () => {
 			discoverModels: vi.fn(),
 		} as unknown as PanelApi);
 
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Approval model configured");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("GPT-5");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Low");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("Configured");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("GPT-5");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("Low");
 		expect(container.textContent).toContain("New task defaults");
 		expect(container.textContent).toContain("High");
-		expect(container.querySelector(".reviewer-model-section input[role='switch']")).toBeNull();
+		expect(container.querySelector(".reviewer-model-card input[role='switch']")).toBeNull();
 		expect(container.textContent).not.toMatch(/enable auto/i);
 	});
 });

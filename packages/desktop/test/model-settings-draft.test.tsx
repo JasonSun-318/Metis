@@ -15,7 +15,6 @@ function settings(): ModelSettingsView {
 		defaultModel: { provider: "openai", modelId: "gpt-5" },
 		defaultThinkingSelection: "high",
 		autoSessionTitle: true,
-		vision: null,
 		permissionReviewer: { config: null, status: "unconfigured" },
 		loadError: null,
 		providers: [
@@ -226,7 +225,7 @@ describe("model editor unsaved changes", () => {
 		expect(container.querySelector(".settings-unsaved-dialog")).not.toBeNull();
 	});
 
-	it("protects built-in credentials and the optional vision form", async () => {
+	it("protects built-in credentials until the draft is explicitly discarded", async () => {
 		const { container } = await mount();
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
 		await fill(container, "API key", "fake-test-key");
@@ -235,12 +234,8 @@ describe("model editor unsaved changes", () => {
 		expect(field(container, "API key").value).toBe("fake-test-key");
 		await pressEscape();
 		await click(container, "Discard changes");
-		await click(container, "Configure");
-		await fill(container, "Name", "Vision draft");
-		await click(container.querySelector(".model-service-dialog")!, "Cancel");
-		expect(container.querySelector(".settings-unsaved-dialog")).not.toBeNull();
-		await click(container, "Keep editing");
-		expect(field(container, "Name").value).toBe("Vision draft");
+		expect(container.querySelector(".model-provider-dialog")).toBeNull();
+		expect(container.querySelector(".settings-unsaved-dialog")).toBeNull();
 	});
 
 	it("retains all input on save failure and continues to protect the draft", async () => {
@@ -348,13 +343,7 @@ describe("model editor unsaved changes", () => {
 
 	it("protects the independent approval model dialog draft with the existing discard flow", async () => {
 		const { container } = await mount(true);
-		const reviewer = container.querySelector(".reviewer-model-section")!;
-		await act(async () => {
-			const configure = Array.from(reviewer.querySelectorAll("button")).find(
-				(candidate) => candidate.textContent?.trim() === "Configure",
-			);
-			configure!.click();
-		});
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 		await click(container, "Approval reasoning");
 		await act(async () => {
 			Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'))
@@ -372,13 +361,7 @@ describe("model editor unsaved changes", () => {
 		await click(container, "Discard changes");
 		expect(container.querySelector(".settings-dialog")).not.toBeNull();
 		await click(container, "Model");
-		const reopenedReviewer = container.querySelector(".reviewer-model-section")!;
-		await act(async () => {
-			const configure = Array.from(reopenedReviewer.querySelectorAll("button")).find(
-				(candidate) => candidate.textContent?.trim() === "Configure",
-			);
-			configure!.click();
-		});
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 		expect(button(container, "Approval reasoning").textContent).toContain("Off");
 	});
 });

@@ -92,6 +92,7 @@ async function expectCompactActions(root: Locator) {
 }
 
 for (const theme of ["dark", "light"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`provider panels preserve edits and test the lowest reasoning level in ${theme}`, async ({}, info) => {
 		const app = await launchPermissionApp({ preset: "auto", tools: () => undefined, locale: "zh-CN" });
 		const page = app.page;
@@ -154,7 +155,7 @@ for (const theme of ["dark", "light"] as const) {
 			await expectCompactActions(page.locator(".model-settings-page"));
 			const search = page.locator(".model-provider-toolbar input");
 			await expect(search).toHaveCSS("border-top-width", "0px");
-			await expect(page.locator(".model-service-section")).toHaveCSS("border-top-width", "1px");
+			await expect(page.locator(".model-specialized-section")).toHaveCSS("border-top-width", "1px");
 			await page.screenshot({ path: info.outputPath(`model-page-${theme}.png`), animations: "disabled" });
 			await page.locator(".model-provider-card").filter({ hasText: "推理模型测试" }).click();
 			const dialog = page.locator(".model-custom-provider-dialog");
@@ -206,29 +207,27 @@ for (const theme of ["dark", "light"] as const) {
 			await expect(page.locator("html")).toHaveAttribute("data-motion", "full");
 			await sampleDisclosure(modelRow);
 			await dialog.getByLabel("显示名称", { exact: true }).first().fill("已编辑的模型");
-			const switching = await dialog
-				.getByRole("tab", { name: "连接", exact: true })
-				.evaluate(
-					async (button, options) => {
-						const element = button.closest<HTMLDialogElement>("dialog")!;
-						const previous = element.style.getPropertyValue("--motion-duration-switch");
-						element.style.setProperty("--motion-duration-switch", `${options.duration}ms`);
-						try {
-							const samples = [element.getBoundingClientRect().height];
-							(button as HTMLButtonElement).click();
-							const start = performance.now();
-							do {
-								await new Promise(requestAnimationFrame);
-								samples.push(element.getBoundingClientRect().height);
-							} while (performance.now() - start < options.window);
-							return samples;
-						} finally {
-							if (previous) element.style.setProperty("--motion-duration-switch", previous);
-							else element.style.removeProperty("--motion-duration-switch");
-						}
-					},
-					{ duration: SLOW_MOTION_MS, window: SLOW_MOTION_WINDOW_MS },
-				);
+			const switching = await dialog.getByRole("tab", { name: "连接", exact: true }).evaluate(
+				async (button, options) => {
+					const element = button.closest<HTMLDialogElement>("dialog")!;
+					const previous = element.style.getPropertyValue("--motion-duration-switch");
+					element.style.setProperty("--motion-duration-switch", `${options.duration}ms`);
+					try {
+						const samples = [element.getBoundingClientRect().height];
+						(button as HTMLButtonElement).click();
+						const start = performance.now();
+						do {
+							await new Promise(requestAnimationFrame);
+							samples.push(element.getBoundingClientRect().height);
+						} while (performance.now() - start < options.window);
+						return samples;
+					} finally {
+						if (previous) element.style.setProperty("--motion-duration-switch", previous);
+						else element.style.removeProperty("--motion-duration-switch");
+					}
+				},
+				{ duration: SLOW_MOTION_MS, window: SLOW_MOTION_WINDOW_MS },
+			);
 			expectIntermediateFrames(switching);
 			await dialog.getByRole("tab", { name: "模型", exact: true }).click();
 			await expect(dialog.getByLabel("显示名称", { exact: true }).first()).toHaveValue("已编辑的模型");

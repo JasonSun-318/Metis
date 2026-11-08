@@ -143,7 +143,6 @@ function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 		setSessionMemoryFlags: vi.fn().mockResolvedValue({ useMemory: true, contributeMemory: false }),
 		getModelSettings: vi.fn().mockResolvedValue({
 			defaultModel: null,
-			vision: null,
 			defaultThinkingSelection: "off",
 			autoSessionTitle: true,
 			providers: [],
@@ -603,7 +602,6 @@ describe("MemorySettingsPanel", () => {
 			getMemorySettings: vi.fn().mockResolvedValue(withOverride),
 			getModelSettings: vi.fn().mockResolvedValue({
 				defaultModel: null,
-				vision: null,
 				defaultThinkingSelection: "off",
 				autoSessionTitle: true,
 				loadError: null,

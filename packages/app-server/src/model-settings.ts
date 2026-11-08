@@ -9,9 +9,11 @@ import {
 	FileAuthStorageBackend,
 	getSupportedThinkingLevels,
 	hasConfiguredManualThinkingLevel,
+	IMAGE_GENERATION_AUTH_KEY,
 	isDedicatedReviewerConfig,
 	ModelPermissionReviewer,
 	type ModelRegistry,
+	normalizeImageGenerationConfig,
 	normalizeManualThinkingLevelMap,
 	normalizePermissionAction,
 	normalizePermissionReviewerConfig,
@@ -40,6 +42,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type RegisteredModel = NonNullable<ReturnType<ModelRegistry["find"]>>;
 type ModelSettingsMutation = ClientParams<"model/settings/update">["mutation"];
 type ReviewerCredentialMutation = Extract<ModelSettingsMutation, { type: "set_permission_reviewer" }>["credential"];
+type ImageGenerationCredentialMutation = Extract<ModelSettingsMutation, { type: "set_image_generation" }>["credential"];
 
 function clampThinkingSelection(
 	model: Parameters<typeof getSupportedThinkingLevels>[0],
@@ -200,6 +203,7 @@ export class ModelSettingsService {
 					: null;
 			return {
 				provider,
+				storedApiKey: credential?.type === "api_key" && !!credential.key?.trim(),
 				name: typeof raw.name === "string" ? raw.name : this.modelRegistry.getProviderDisplayName(provider),
 				builtin: models.some((model) => !configuredIds.has(model.id)),
 				baseUrl: typeof raw.baseUrl === "string" ? raw.baseUrl : null,
@@ -241,7 +245,6 @@ export class ModelSettingsService {
 		const defaultModel =
 			defaultProvider && defaultModelId ? this.modelRegistry.find(defaultProvider, defaultModelId) : undefined;
 		const savedThinkingSelection = this.settingsManager.getDefaultThinkingLevel() ?? "medium";
-		const vision = this.settingsManager.getVisionSettings();
 		const reviewer = this.settingsManager.getPermissionReviewerView();
 		const reviewerConfig = reviewer.config;
 		const reviewerResolution = reviewerConfig
@@ -250,11 +253,20 @@ export class ModelSettingsService {
 				})
 			: undefined;
 		const reviewerStatus = reviewerConfig && !reviewerResolution?.ok ? "invalid" : reviewer.status;
+		const imageGeneration = this.settingsManager.getImageGenerationView();
+		const imageCredential = imageGeneration.config
+			? this.authStorage.get(imageGeneration.config.credentialProvider ?? IMAGE_GENERATION_AUTH_KEY)
+			: undefined;
+		const imageAuthConfigured = imageCredential?.type === "api_key" && !!imageCredential.key?.trim();
 
 		return {
+			imageGeneration: {
+				...imageGeneration,
+				status: imageGeneration.config && !imageAuthConfigured ? "invalid" : imageGeneration.status,
+				authConfigured: imageAuthConfigured,
+			},
 			defaultModel:
 				defaultProvider && defaultModelId ? { provider: defaultProvider, modelId: defaultModelId } : null,
-			vision: vision ? { ...vision, authConfigured: this.authStorage.has("vision") } : null,
 			permissionReviewer: {
 				config: reviewerConfig ?? null,
 				status: reviewerStatus,
@@ -303,38 +315,11 @@ export class ModelSettingsService {
 			await this.settingsManager.flushOrThrow();
 			return this.view();
 		}
-		if (mutation.type === "set_vision") {
-			if (mutation.settings === null) {
-				this.settingsManager.clearVisionSettings();
-				await this.settingsManager.flushOrThrow();
-				this.authStorage.remove("vision");
-				return this.view();
-			}
-			const parsedUrl = new URL(mutation.settings.baseUrl);
-			if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-				throw new Error("Base URL must use HTTP or HTTPS");
-			}
-			const hasStoredKey = this.authStorage.has("vision");
-			if (!hasStoredKey && mutation.credential.action !== "set") {
-				throw new Error("Enter an API key to save the vision service");
-			}
-			const previous = this.authStorage.get("vision");
-			try {
-				if (mutation.credential.action === "set") {
-					this.authStorage.set("vision", { type: "api_key", key: mutation.credential.value });
-				} else if (mutation.credential.action === "remove") {
-					this.authStorage.remove("vision");
-				}
-				this.settingsManager.setVisionSettings(mutation.settings);
-				await this.settingsManager.flushOrThrow();
-			} catch (error) {
-				this.restoreCredential("vision", previous, error);
-				throw error;
-			}
-			return this.view();
-		}
 		if (mutation.type === "set_permission_reviewer") {
 			return await this.setPermissionReviewer(mutation.config, mutation.credential);
+		}
+		if (mutation.type === "set_image_generation") {
+			return await this.setImageGeneration(mutation.config, mutation.credential);
 		}
 		let previous = '{\n  "providers": {}\n}\n';
 		const previousCredential = this.authStorage.get(mutation.provider);
@@ -682,6 +667,65 @@ export class ModelSettingsService {
 			}
 		} catch (error) {
 			if (credentialTouched) this.restoreCredential(DEDICATED_REVIEWER_AUTH_KEY, previousCredential, error);
+			throw error;
+		}
+		return this.view();
+	}
+
+	private async setImageGeneration(
+		config: unknown,
+		credential: ImageGenerationCredentialMutation,
+	): Promise<ClientResult<"model/settings/get">> {
+		const normalized = normalizeImageGenerationConfig(config);
+		if (config !== null && !normalized) throw new Error("An image generation config or null is required");
+		const dedicated = normalized !== undefined && normalized.credentialProvider === undefined;
+		const action = credential?.action ?? "keep";
+		if (action === "set" && !dedicated) {
+			throw new Error("Image generation credentials are only supported for dedicated connections");
+		}
+		const previousCredential = this.authStorage.get(IMAGE_GENERATION_AUTH_KEY);
+		if (dedicated) {
+			if (
+				action === "remove" ||
+				(action === "keep" && (previousCredential?.type !== "api_key" || !previousCredential.key?.trim())) ||
+				(credential?.action === "set" && !credential.value.trim())
+			) {
+				throw new Error("Enter an API key to save the image generation model");
+			}
+		} else if (normalized?.credentialProvider) {
+			const shared = this.authStorage.get(normalized.credentialProvider);
+			if (
+				normalized.credentialProvider === IMAGE_GENERATION_AUTH_KEY ||
+				shared?.type !== "api_key" ||
+				!shared.key?.trim()
+			) {
+				throw new Error("Select a provider with a saved API key for image generation");
+			}
+		}
+		let credentialTouched = false;
+		try {
+			if (credential?.action === "set") {
+				credentialTouched = true;
+				this.authStorage.set(IMAGE_GENERATION_AUTH_KEY, { type: "api_key", key: credential.value.trim() });
+			} else if (!dedicated && previousCredential) {
+				// Removing the profile or selecting a shared key also removes the now-unused dedicated key.
+				credentialTouched = true;
+				this.authStorage.remove(IMAGE_GENERATION_AUTH_KEY);
+			}
+			const rollback = this.settingsManager.beginImageGenerationConfigUpdate(normalized);
+			try {
+				await this.settingsManager.flushOrThrow();
+			} catch {
+				try {
+					rollback();
+					await this.settingsManager.flushOrThrow();
+				} catch {
+					// Preserve the original persistence failure, matching other model-settings updates.
+				}
+				throw new AppServerError("OPERATION_FAILED");
+			}
+		} catch (error) {
+			if (credentialTouched) this.restoreCredential(IMAGE_GENERATION_AUTH_KEY, previousCredential, error);
 			throw error;
 		}
 		return this.view();

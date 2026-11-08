@@ -22,6 +22,7 @@ import {
 	reasoningError,
 	reasoningRows,
 } from "./ModelReasoningEditor.tsx";
+import { ModelSettingsCard } from "./ModelSettingsCard.tsx";
 
 import { FloatingSystemNotice, type SystemNoticeProps } from "./SystemNotice.tsx";
 
@@ -196,7 +197,7 @@ function validBaseUrl(value: string): boolean {
 	}
 }
 
-/** 审批模型卡片：摘要与 Configure 按钮，表单在原生 dialog 内。 */
+/** 审批模型卡片与配置对话框；权限页可直接复用对话框。 */
 export function ReviewerModelSettingsPanel({
 	api,
 	busy,
@@ -276,6 +277,7 @@ export function ReviewerModelSettingsPanel({
 		const dialog = dialogRef.current;
 		if (!dialog) return;
 		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const triggerContainer = previous?.matches(".reviewer-model-card") ? previous.parentElement : null;
 		if (typeof dialog.showModal === "function") dialog.showModal();
 		else dialog.setAttribute("open", "");
 		dialog.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
@@ -283,6 +285,8 @@ export function ReviewerModelSettingsPanel({
 			if (dialog.open && typeof dialog.close === "function") dialog.close();
 			else dialog.removeAttribute("open");
 			if (previous?.isConnected) previous.focus();
+			// Discarding a draft remounts this panel; return to its replacement card.
+			else triggerContainer?.querySelector<HTMLButtonElement>(".reviewer-model-card")?.focus();
 		};
 	}, [open]);
 
@@ -576,11 +580,9 @@ export function ReviewerModelSettingsPanel({
 		}
 		if (!savedConfig) return t("No approval model configured");
 		if (isDedicatedConfig(savedConfig)) {
-			return `${t("Approval model configured")}: ${savedConfig.name} · ${savedConfig.modelId} · ${t(
-				thinkingLabel(savedConfig.thinkingLevel),
-			)}`;
+			return `${savedConfig.name} · ${savedConfig.modelId} · ${t(thinkingLabel(savedConfig.thinkingLevel))}`;
 		}
-		return `${t("Approval model configured")}: ${savedProvider?.name ?? savedConfig.provider} · ${
+		return `${savedProvider?.name ?? savedConfig.provider} · ${
 			savedModel?.name ?? savedConfig.modelId
 		} · ${t(thinkingLabel(savedConfig.thinkingLevel))}`;
 	})();
@@ -588,71 +590,29 @@ export function ReviewerModelSettingsPanel({
 	return (
 		<>
 			{renderCard ? (
-				<div className="settings-section reviewer-model-section">
-					<header className="settings-section-heading">
-						<h3>{t("Approval model")}</h3>
-					</header>
-					<p className="model-provider-intro">
-						{t(
-							"Optionally review Auto-mode actions with a separate model. Your chat model and default reasoning stay unchanged.",
-						)}
-					</p>
-					<article className="settings-card model-service-panel reviewer-model-panel">
-						<div className="model-service-panel-top">
-							<div className="model-service-copy">
-								<span>{t("Reviewer connection")}</span>
-								<p>
-									{t(
-										"Use an independent connection or a configured provider. The approval model never changes your chat defaults.",
-									)}
-								</p>
-							</div>
-							<button
-								className="settings-secondary-button"
-								disabled={!serverReady || busy}
-								onClick={openEditor}
-								type="button"
-							>
-								{hasSavedConfiguration ? t("Edit") : t("Configure")}
-							</button>
-						</div>
-						{savedStatus !== "configured" || !savedConfig ? (
-							<p className={`reviewer-model-status ${savedStatus === "invalid" ? "invalid" : "unset"}`}>
-								{savedLabel}
-							</p>
-						) : (
-							<div className="model-service-status reviewer-model-status">
-								<span>{t("Approval model configured")}</span>
-								{isDedicatedConfig(savedConfig) ? (
-									<>
-										<strong>{savedConfig.name}</strong>
-										<code>{savedConfig.modelId}</code>
-										<span className="model-service-badge">{savedConfig.api}</span>
-										<span className="model-service-badge">{t(thinkingLabel(savedConfig.thinkingLevel))}</span>
-									</>
-								) : (
-									<>
-										<strong>{savedProvider?.name ?? savedConfig.provider}</strong>
-										<code>{savedModel?.name ?? savedConfig.modelId}</code>
-										<span className="model-service-badge">{t(thinkingLabel(savedConfig.thinkingLevel))}</span>
-									</>
-								)}
-							</div>
-						)}
-						{error && !open ? (
-							<p className="settings-action-message error" role="alert">
-								<XCircle aria-hidden="true" size={15} />
-								{error}
-							</p>
-						) : null}
-						{notice && !open ? (
-							<output className="status-paragraph settings-action-message">
-								<CheckCircle aria-hidden="true" size={15} />
-								{notice}
-							</output>
-						) : null}
-					</article>
-				</div>
+				<>
+					<ModelSettingsCard
+						ariaLabel={t(hasSavedConfiguration ? "Edit approval model" : "Configure approval model")}
+						className="model-specialized-card reviewer-model-card"
+						title={t("Approval model")}
+						description={savedLabel}
+						status={savedStatus}
+						disabled={!serverReady || busy || working}
+						onClick={openEditor}
+					/>
+					{error && !open ? (
+						<p className="settings-action-message error" role="alert">
+							<XCircle aria-hidden="true" size={15} />
+							{error}
+						</p>
+					) : null}
+					{notice && !open ? (
+						<output className="status-paragraph settings-action-message">
+							<CheckCircle aria-hidden="true" size={15} />
+							{notice}
+						</output>
+					) : null}
+				</>
 			) : null}
 			{open ? (
 				<dialog

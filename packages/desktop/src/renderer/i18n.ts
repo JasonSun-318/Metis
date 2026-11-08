@@ -886,8 +886,6 @@ const zhCN = {
 	"Supported reasoning levels: {{levels}}": "支持的推理强度：{{levels}}",
 	"Image input": "支持图片输入",
 	"Approval model": "审批模型",
-	"Optionally review Auto-mode actions with a separate model. Your chat model and default reasoning stay unchanged.":
-		"可选：使用独立模型评审 Auto 模式下的操作。聊天模型与默认推理强度保持不变。",
 	"Approval model configured": "已配置审批模型",
 	"No approval model configured": "未配置审批模型",
 	"The saved approval model configuration is invalid. Choose a supported provider, model, and reasoning level.":
@@ -911,9 +909,6 @@ const zhCN = {
 	"Approval model test failed.": "审批模型测试失败。",
 	"Approval model settings could not be saved.": "无法保存审批模型设置。",
 	"Approval model could not be cleared.": "无法清除审批模型。",
-	"Reviewer connection": "审批连接",
-	"Use an independent connection or a configured provider. The approval model never changes your chat defaults.":
-		"使用独立连接或已配置的提供商。审批模型不会改变聊天默认设置。",
 	"Choose how Auto-mode reviews reach a model. Testing and saving never execute the review samples.":
 		"选择 Auto 模式审批调用的模型连接。测试和保存都不会执行审批样例中的命令。",
 	"Connection type": "连接方式",

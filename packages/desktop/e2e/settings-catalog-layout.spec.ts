@@ -8,6 +8,7 @@ import { createPluginFixtureServer, FIXTURE_MARKET_URL } from "./fixtures/plugin
 test.describe.configure({ timeout: 240_000 });
 
 // These are packaged-app layout and persistence checks; all data stays in the fixture HOME.
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("many providers stay in a bounded collection and the catalog supports search and keyboard close", async ({}, testInfo) => {
 	const app = await launchPermissionApp({ preset: "auto", tools: () => undefined });
 	try {
@@ -17,9 +18,22 @@ test("many providers stay in a bounded collection and the catalog supports searc
 				await api.updateModelSettings({
 					requestId: crypto.randomUUID(),
 					mutation: {
-						type: "save_provider", provider: `layout-${index}`, name: `Layout ${String(index).padStart(2, "0")}`,
-						baseUrl, api: "openai-completions", credential: { action: "set", value: "fixture-key" },
-						models: [{ modelId: "layout-model", name: "Layout", contextWindow: 32000, maxOutputTokens: 1024, reasoningMode: "off", imageInput: false }],
+						type: "save_provider",
+						provider: `layout-${index}`,
+						name: `Layout ${String(index).padStart(2, "0")}`,
+						baseUrl,
+						api: "openai-completions",
+						credential: { action: "set", value: "fixture-key" },
+						models: [
+							{
+								modelId: "layout-model",
+								name: "Layout",
+								contextWindow: 32000,
+								maxOutputTokens: 1024,
+								reasoningMode: "off",
+								imageInput: false,
+							},
+						],
 					},
 				});
 			}
@@ -29,12 +43,17 @@ test("many providers stay in a bounded collection and the catalog supports searc
 		const region = page.locator(".model-provider-list-region");
 		await expect(region.locator(".model-provider-card")).toHaveCount(25);
 		await region.scrollIntoViewIfNeeded();
-		const dimensions = await region.evaluate((element) => ({ height: element.clientHeight, content: element.scrollHeight }));
+		const dimensions = await region.evaluate((element) => ({
+			height: element.clientHeight,
+			content: element.scrollHeight,
+		}));
 		expect(dimensions.height).toBeLessThanOrEqual(360);
 		expect(dimensions.content).toBeGreaterThan(dimensions.height);
 		const toolbar = page.locator(".model-provider-toolbar");
 		const before = await toolbar.boundingBox();
-		await region.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+		await region.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
 		expect((await toolbar.boundingBox())!.y).toBeCloseTo(before!.y, 0);
 		await page.getByRole("searchbox", { name: "Search providers", exact: true }).fill("Layout 23");
 		await expect(region.locator(".model-provider-card")).toHaveCount(1);
@@ -57,14 +76,21 @@ test("many providers stay in a bounded collection and the catalog supports searc
 		await page.keyboard.press("Escape");
 		await expect(catalog).toHaveCount(0);
 		await expect(add).toBeFocused();
-	} finally { await app.close(); }
+	} finally {
+		await app.close();
+	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("large plugin catalogs keep pagination visible and restore detail position", async ({}, testInfo) => {
 	const market = await createPluginFixtureServer(60);
 	let app: Awaited<ReturnType<typeof launchPermissionApp>> | undefined;
 	try {
-		app = await launchPermissionApp({ preset: "auto", tools: () => undefined, env: { HTTPS_PROXY: market.proxyUrl, NODE_TLS_REJECT_UNAUTHORIZED: "0" } });
+		app = await launchPermissionApp({
+			preset: "auto",
+			tools: () => undefined,
+			env: { HTTPS_PROXY: market.proxyUrl, NODE_TLS_REJECT_UNAUTHORIZED: "0" },
+		});
 		const page = app.page;
 		await page.setViewportSize({ width: 1200, height: 800 });
 		await page.getByRole("button", { name: "Customize", exact: true }).click();
@@ -83,19 +109,25 @@ test("large plugin catalogs keep pagination visible and restore detail position"
 			await expect(page.locator(".plugins-list-controls")).toBeInViewport();
 			const bounds = await list.boundingBox();
 			expect(bounds!.height).toBeLessThan(600);
-			expect(await page.locator(".plugins-market-panel").evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+			expect(
+				await page
+					.locator(".plugins-market-panel")
+					.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+			).toBe(true);
 		}
 		const searchBounds = await page.locator(".plugins-search").boundingBox();
-		const filterBounds = await page.getByRole("button", {name: "Filter by install state"}).boundingBox();
+		const filterBounds = await page.getByRole("button", { name: "Filter by install state" }).boundingBox();
 		expect(filterBounds!.y).toBeCloseTo(searchBounds!.y, 0);
 		expect(filterBounds!.height).toBeCloseTo(searchBounds!.height, 0);
-		await footer.getByRole("button", {name: "Go to page"}).click();
-		await expect(page.getByRole("option", {name: "Page 2 of 4"})).toBeVisible();
-		await page.screenshot({path: testInfo.outputPath("plugin-page-menu.png")});
-		await page.getByRole("option", {name: "Page 2 of 4"}).click();
+		await footer.getByRole("button", { name: "Go to page" }).click();
+		await expect(page.getByRole("option", { name: "Page 2 of 4" })).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath("plugin-page-menu.png") });
+		await page.getByRole("option", { name: "Page 2 of 4" }).click();
 		await expect(page.locator(".plugins-market-row")).toHaveCount(20);
 		await expect(footer).toContainText("Page 2");
-		await list.evaluate((element) => { element.scrollTop = 130; });
+		await list.evaluate((element) => {
+			element.scrollTop = 130;
+		});
 		const firstVisible = page.locator(".plugins-market-row").nth(4);
 		await firstVisible.getByRole("button", { name: "Inspect", exact: true }).click();
 		const dialog = page.locator(".plugins-inspect-dialog");
@@ -110,21 +142,26 @@ test("large plugin catalogs keep pagination visible and restore detail position"
 		expect((await list.boundingBox())!.height).toBeLessThan(100);
 		await expect(page.locator(".plugins-market-row")).toContainText("catalog-plugin-059");
 		await page.screenshot({ path: testInfo.outputPath("plugin-catalog-narrow.png") });
-		await page.getByRole("button", {name: "Markets", exact: true}).click();
+		await page.getByRole("button", { name: "Markets", exact: true }).click();
 		await expect(footer).toHaveCount(0);
 		const sources = page.locator(".plugins-market-sources");
 		expect((await sources.boundingBox())!.height).toBeLessThan(200);
-		await page.screenshot({path: testInfo.outputPath("plugin-market-home.png")});
-	} finally { await app?.close(); await market.close(); }
+		await page.screenshot({ path: testInfo.outputPath("plugin-market-home.png") });
+	} finally {
+		await app?.close();
+		await market.close();
+	}
 });
 
+// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 test("remembered permission management defaults to all projects and revokes the selected owner only", async ({}, testInfo) => {
 	let otherProject = "";
 	const app = await launchPermissionApp({
 		preset: "ask",
-		tools: (marker) => marker.startsWith("case-multi-grant")
-			? { name: "bash", arguments: { command: "printf fixture > remembered.txt" } }
-			: undefined,
+		tools: (marker) =>
+			marker.startsWith("case-multi-grant")
+				? { name: "bash", arguments: { command: "printf fixture > remembered.txt" } }
+				: undefined,
 		seed: async ({ tempRoot }) => {
 			otherProject = path.join(tempRoot, "other-project");
 			await mkdir(otherProject);
@@ -150,17 +187,17 @@ test("remembered permission management defaults to all projects and revokes the 
 		await expect(dialog.getByRole("button", { name: "Project", exact: true })).toContainText("All projects");
 		await expect(dialog.getByRole("button", { name: /^Revoke/ })).toHaveCount(2);
 		await dialog.getByRole("button", { name: "Project", exact: true }).click();
-		await expect(dialog.getByRole("option").filter({hasText: "other-project"})).toBeVisible();
-		const projectOption = dialog.getByRole("option").filter({hasText: "other-project"});
+		await expect(dialog.getByRole("option").filter({ hasText: "other-project" })).toBeVisible();
+		const projectOption = dialog.getByRole("option").filter({ hasText: "other-project" });
 		const titleBounds = await projectOption.locator(".menu-select-option-copy > span").boundingBox();
 		const pathBounds = await projectOption.locator("small").boundingBox();
 		expect(pathBounds!.y).toBeGreaterThanOrEqual(titleBounds!.y + titleBounds!.height);
-		await app.page.screenshot({path: testInfo.outputPath("remembered-project-menu.png")});
+		await app.page.screenshot({ path: testInfo.outputPath("remembered-project-menu.png") });
 		await app.page.keyboard.press("Escape");
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByRole("button", {name: "Project", exact: true})).toBeFocused();
+		await expect(dialog.getByRole("button", { name: "Project", exact: true })).toBeFocused();
 		await dialog.getByRole("button", { name: "Project", exact: true }).click();
-		await dialog.getByRole("option").filter({hasText: "other-project"}).click();
+		await dialog.getByRole("option").filter({ hasText: "other-project" }).click();
 		await expect(dialog.getByRole("button", { name: /^Revoke/ })).toHaveCount(1);
 		await dialog.getByRole("button", { name: /^Revoke/ }).click();
 		await expect(dialog.getByRole("button", { name: /^Revoke/ })).toHaveCount(0);
@@ -170,5 +207,7 @@ test("remembered permission management defaults to all projects and revokes the 
 		expect(remaining.groups).toHaveLength(1);
 		expect(remaining.groups[0]!.projectPath).toBe(app.projectDir);
 		expect(remaining.groups[0]!.rules).toHaveLength(1);
-	} finally { await app.close(); }
+	} finally {
+		await app.close();
+	}
 });

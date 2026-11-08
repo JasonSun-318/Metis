@@ -69,7 +69,6 @@ function view(reviewer?: ReviewerSettingsView["permissionReviewer"]): ReviewerSe
 		defaultModel: { provider: "review-provider", modelId: "review-model" },
 		defaultThinkingSelection: "high",
 		autoSessionTitle: true,
-		vision: null,
 		loadError: null,
 		providers: [provider("review-provider", "Review Provider"), provider("other-provider", "Other Provider")],
 		permissionReviewer: reviewer ?? { config: null, status: "unconfigured" },
@@ -222,8 +221,7 @@ async function mount(
 }
 
 async function openEditor(container: ParentNode) {
-	await clickMaybe(container, "Configure");
-	if (!maybeButton(container, "Save approval model")) await click(container, "Edit");
+	await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 }
 
 beforeEach(async () => {
@@ -241,12 +239,12 @@ describe("independent approval model settings", () => {
 	it("shows a compact status card without an Auto enable control or inline fields", async () => {
 		const { container, onDirtyChange } = await mount();
 
-		expect(container.querySelector(".reviewer-model-section")?.textContent).toContain("Approval model");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("No approval model configured");
-		expect(container.querySelector(".reviewer-model-section input")).toBeNull();
-		expect(container.querySelector(".reviewer-model-section input[role='switch']")).toBeNull();
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("Approval model");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("No approval model configured");
+		expect(container.querySelector(".reviewer-model-card input")).toBeNull();
+		expect(container.querySelector(".reviewer-model-card input[role='switch']")).toBeNull();
 		expect(container.textContent).not.toMatch(/enable auto/i);
-		expect(button(container, "Configure")).toBeTruthy();
+		expect(button(container, "Configure approval model")).toBeTruthy();
 		expect(container.querySelector("dialog")?.open).toBeFalsy();
 		expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 	});
@@ -282,8 +280,8 @@ describe("independent approval model settings", () => {
 		expect(updateModelSettings.mock.calls[0]![0].mutation).not.toHaveProperty("thinkingSelection");
 		expect(onSaved).toHaveBeenCalledWith(configured(savedProfile));
 		expect(container.querySelector("dialog")).toBeNull();
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Approval model configured");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("Review Model");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("Configured");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("Review Model");
 		expect(container.textContent).toContain("Approval model saved");
 		expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 	});
@@ -362,8 +360,8 @@ describe("independent approval model settings", () => {
 		expect(JSON.stringify(mutation.config)).not.toContain("dedicated-secret");
 		expect(onSaved).toHaveBeenCalledWith(configured(dedicatedConfig, true));
 		expect(container.querySelector("dialog")).toBeNull();
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("My reviewer");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("reviewer-model");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("My reviewer");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("reviewer-model");
 		expect(container.textContent).not.toContain("dedicated-secret");
 	});
 
@@ -400,7 +398,7 @@ describe("independent approval model settings", () => {
 
 		const missingKey = view({ config: dedicatedConfig, status: "invalid", authConfigured: false });
 		const second = await mount(missingKey, { updateModelSettings });
-		expect(second.container.querySelector(".reviewer-model-status")?.textContent).toContain("missing its API key");
+		expect(second.container.querySelector(".reviewer-model-card")?.textContent).toContain("missing its API key");
 		await openEditor(second.container);
 		expect(button(second.container, "Test approval model").disabled).toBe(true);
 		await click(second.container, "Save approval model");
@@ -653,13 +651,16 @@ describe("independent approval model settings", () => {
 		expect(onSaved).toHaveBeenCalledWith(cleared);
 		expect(container.querySelector("dialog")).toBeNull();
 		expect(container.textContent).toContain("Approval model removed");
-		expect(container.querySelector(".reviewer-model-status")?.textContent).toContain("No approval model configured");
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain("No approval model configured");
 	});
 
 	it("shows an invalid saved configuration without reviving it as configured", async () => {
 		const { container } = await mount(view({ config: null, status: "invalid" }));
 
-		expect(container.querySelector(".reviewer-model-status.invalid")?.textContent).toContain(
+		expect(container.querySelector(".reviewer-model-card .model-provider-badge.invalid")?.textContent).toBe(
+			"Needs attention",
+		);
+		expect(container.querySelector(".reviewer-model-card")?.textContent).toContain(
 			"saved approval model configuration is invalid",
 		);
 		await openEditor(container);

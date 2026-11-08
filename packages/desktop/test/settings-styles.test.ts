@@ -40,7 +40,7 @@ describe("Settings visual states", () => {
 		expect(rule(".usage-detail-card").borderRadius).toBe("0px");
 		expect(rule(".usage-detail-card").background).toBe("transparent");
 		expect(rule(".usage-detail-card").padding).toBe("4px 16px");
-		expect(rule(".model-provider-card small").color).toBe("var(--text-10)");
+		expect(rule(".model-settings-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").fontSize).toBe("11px");

@@ -118,74 +118,20 @@ describe("ModelSettingsService", () => {
 		expect(authStorage.has("local-test")).toBe(false);
 	});
 
-	it("configures, updates, and clears the vision service", async () => {
+	it("omits the retired vision service without deleting stored credentials", () => {
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-		const settingsManager = SettingsManager.create(agentDir, agentDir);
-		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
-
-		expect(service.view().vision).toBeNull();
-
-		await expect(
-			service.update({
-				type: "set_vision",
-				settings: {
-					name: "My vision",
-					baseUrl: "https://api.example.com/v1",
-					api: "openai-responses",
-					modelId: "gpt-4o",
-				},
-				credential: { action: "keep" },
-			}),
-		).rejects.toThrow(/Enter an API key/);
-
-		const saved = await service.update({
-			type: "set_vision",
-			settings: {
-				name: "My vision",
-				baseUrl: "https://api.example.com/v1/",
-				api: "openai-responses",
-				modelId: "gpt-4o",
-			},
-			credential: { action: "set", value: "sk-vision-key" },
-		});
-		expect(saved.vision).toEqual({
-			name: "My vision",
-			baseUrl: "https://api.example.com/v1/",
-			api: "openai-responses",
-			modelId: "gpt-4o",
-			authConfigured: true,
-		});
-		expect(authStorage.has("vision")).toBe(true);
-		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
-			vision: {
-				name: "My vision",
-				baseUrl: "https://api.example.com/v1/",
-				api: "openai-responses",
-				modelId: "gpt-4o",
-			},
+		authStorage.set("vision", { type: "api_key", key: "retired-service-key" });
+		authStorage.set("ordinary-provider", { type: "api_key", key: "ordinary-provider-key" });
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
 		});
 
-		const updated = await service.update({
-			type: "set_vision",
-			settings: {
-				name: "Renamed vision",
-				baseUrl: "https://api.example.com/v1",
-				api: "openai-completions",
-				modelId: "gpt-4o-mini",
-			},
-			credential: { action: "keep" },
-		});
-		expect(updated.vision).toMatchObject({
-			name: "Renamed vision",
-			api: "openai-completions",
-			modelId: "gpt-4o-mini",
-			authConfigured: true,
-		});
-
-		const cleared = await service.update({ type: "set_vision", settings: null, credential: { action: "remove" } });
-		expect(cleared.vision).toBeNull();
-		expect(authStorage.has("vision")).toBe(false);
+		expect(service.view()).not.toHaveProperty("vision");
+		expect(authStorage.get("vision")).toEqual({ type: "api_key", key: "retired-service-key" });
+		expect(authStorage.get("ordinary-provider")).toEqual({ type: "api_key", key: "ordinary-provider-key" });
 	});
 
 	it("accepts an anthropic-messages custom provider with its own base URL", async () => {

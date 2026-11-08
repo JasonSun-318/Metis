@@ -1,15 +1,11 @@
-import type {
-	ModelSettingsProviderView,
-	ModelSettingsView,
-	ThinkingSelectionView,
-	VisionApiView,
-} from "@metis/app-protocol";
+import type { ModelSettingsProviderView, ModelSettingsView, ThinkingSelectionView } from "@metis/app-protocol";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { CaretLeft, CaretRight, CheckCircle, Key, MagnifyingGlass, Plus, Trash, X, XCircle } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView } from "../settings-async.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
+import { ImageGenerationSettingsPanel } from "./ImageGenerationSettingsPanel.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ModelCatalog } from "./ModelCatalog.tsx";
 import { type DiscoveredModel, ModelDiscovery } from "./ModelDiscovery.tsx";
@@ -20,6 +16,7 @@ import {
 	reasoningMutation,
 	reasoningRows,
 } from "./ModelReasoningEditor.tsx";
+import { ModelSettingsCard } from "./ModelSettingsCard.tsx";
 import { ReviewerModelSettingsPanel } from "./ReviewerModelSettingsPanel.tsx";
 import { FloatingSystemNotice, type SystemNoticeProps } from "./SystemNotice.tsx";
 
@@ -33,15 +30,6 @@ interface ProviderDraft {
 }
 
 type CustomProviderApi = "openai-responses" | "openai-completions" | "anthropic-messages";
-type VisionApiFormat = VisionApiView;
-
-interface VisionDraft {
-	name: string;
-	baseUrl: string;
-	api: VisionApiFormat;
-	modelId: string;
-	apiKey: string;
-}
 
 interface CustomModelDraft {
 	readonly key: string;
@@ -73,7 +61,6 @@ interface CustomProviderDraft {
 interface EditorBaseline {
 	readonly provider: ProviderDraft | null;
 	readonly custom: CustomProviderDraft | null;
-	readonly vision: VisionDraft | null;
 	readonly thinking: ThinkingSelectionView;
 }
 
@@ -181,6 +168,7 @@ function thinkingLevelLabel(level: ThinkingSelectionView): string {
 export function ModelSettingsPanel({
 	api,
 	focusReviewerSection = false,
+	focusImageGeneration = false,
 	initialSettings,
 	onSettingsChange,
 	onDirtyChange,
@@ -191,6 +179,7 @@ export function ModelSettingsPanel({
 		"getModelSettings" | "updateModelSettings" | "testModelConnection" | "discoverModels"
 	>;
 	readonly focusReviewerSection?: boolean;
+	readonly focusImageGeneration?: boolean;
 	readonly initialSettings?: ModelSettingsView;
 	readonly onSettingsChange?: (settings: ModelSettingsView) => void;
 	readonly onDirtyChange?: (dirty: boolean) => void;
@@ -211,7 +200,11 @@ export function ModelSettingsPanel({
 	);
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
-	const [visionDraft, setVisionDraft] = useState<VisionDraft | null>(null);
+	const [imageGenerationOpen, setImageGenerationOpen] = useState(false);
+	const [imageGenerationDirty, setImageGenerationDirty] = useState(false);
+	const [imageGenerationBusy, setImageGenerationBusy] = useState(false);
+	const imageGenerationFocusHandled = useRef(false);
+	const imageGenerationSectionRef = useRef<HTMLDivElement>(null);
 	const [reviewerDirty, setReviewerDirty] = useState(false);
 	const [reviewerReset, setReviewerReset] = useState(0);
 	const [defaultThinking, setDefaultThinking] = useState<ThinkingSelectionView>(
@@ -219,14 +212,13 @@ export function ModelSettingsPanel({
 	);
 	const [operation, setOperation] = useState<"save" | "test" | "defaults" | "remove" | null>(null);
 	const busy = operation !== null;
-	const [confirmRemoval, setConfirmRemoval] = useState<"credentials" | "provider" | "vision" | null>(null);
+	const [confirmRemoval, setConfirmRemoval] = useState<"credentials" | "provider" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [loadRequest, setLoadRequest] = useState(0);
 	const providerDialogRef = useRef<HTMLDialogElement>(null);
 	const catalogDialogRef = useRef<HTMLDialogElement>(null);
 	const customDialogRef = useRef<HTMLDialogElement>(null);
-	const visionDialogRef = useRef<HTMLDialogElement>(null);
 	const discardDialogRef = useRef<HTMLDialogElement>(null);
 	const reviewerSectionRef = useRef<HTMLDivElement>(null);
 	const pendingEditorAction = useRef<(() => void) | null>(null);
@@ -234,7 +226,6 @@ export function ModelSettingsPanel({
 	const [editorBaseline, setEditorBaseline] = useState<EditorBaseline>({
 		provider: null,
 		custom: null,
-		vision: null,
 		thinking: "medium",
 	});
 	const editorDirty = draft
@@ -242,12 +233,10 @@ export function ModelSettingsPanel({
 		: customDraft
 			? JSON.stringify(customDraft) !== JSON.stringify(editorBaseline.custom) ||
 				defaultThinking !== editorBaseline.thinking
-			: visionDraft
-				? JSON.stringify(visionDraft) !== JSON.stringify(editorBaseline.vision)
-				: false;
+			: false;
 	const editorState = useRef({ dirty: false, busy: false, confirming: false });
-	const settingsDirty = editorDirty || reviewerDirty;
-	editorState.current = { dirty: settingsDirty, busy, confirming: confirmDiscard };
+	const settingsDirty = editorDirty || reviewerDirty || imageGenerationDirty;
+	editorState.current = { dirty: settingsDirty, busy: busy || imageGenerationBusy, confirming: confirmDiscard };
 	useEffect(() => onDirtyChange?.(settingsDirty), [settingsDirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 	useEffect(() => {
@@ -279,6 +268,17 @@ export function ModelSettingsPanel({
 		if (!focusReviewerSection || !settings) return;
 		reviewerSectionRef.current?.scrollIntoView?.({ block: "start" });
 	}, [focusReviewerSection, settings]);
+
+	useEffect(() => {
+		if (!focusImageGeneration) {
+			imageGenerationFocusHandled.current = false;
+			return;
+		}
+		if (!settings || imageGenerationFocusHandled.current) return;
+		imageGenerationFocusHandled.current = true;
+		imageGenerationSectionRef.current?.scrollIntoView?.({ block: "start" });
+		setImageGenerationOpen(true);
+	}, [focusImageGeneration, settings]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(loadRequest): Retry explicitly reloads model settings.
 	useEffect(() => {
@@ -325,12 +325,12 @@ export function ModelSettingsPanel({
 	const discardEditor = useCallback(() => {
 		setDraft(null);
 		setCustomDraft(null);
-		setVisionDraft(null);
 		setConfirmDiscard(false);
 		setError(null);
 		setNotice(null);
 		setConfirmRemoval(null);
-		// Remount the independent reviewer form so its unsaved draft is discarded too.
+		// Remount the independent model forms so their unsaved drafts are discarded too.
+		setImageGenerationOpen(false);
 		setReviewerReset((value) => value + 1);
 	}, []);
 
@@ -351,7 +351,6 @@ export function ModelSettingsPanel({
 			setError(null);
 			setNotice(null);
 			setDraft(null);
-			setVisionDraft(null);
 			setConfirmRemoval(null);
 			const next = customProviderDraft(provider, settings?.defaultModel ?? null);
 			setProviderSection("connection");
@@ -360,7 +359,7 @@ export function ModelSettingsPanel({
 			setConnectionNotice(null);
 			const thinking = settings?.defaultThinkingSelection ?? "off";
 			setDefaultThinking(thinking);
-			setEditorBaseline({ provider: null, custom: next, vision: null, thinking });
+			setEditorBaseline({ provider: null, custom: next, thinking });
 			setCustomDraft(next);
 		},
 		[settings?.defaultModel, settings?.defaultThinkingSelection],
@@ -437,35 +436,6 @@ export function ModelSettingsPanel({
 		};
 	}, [requestCloseEditor, provider]);
 
-	const visionOpen = visionDraft !== null;
-	useEffect(() => {
-		if (!visionOpen) return;
-		const dialog = visionDialogRef.current;
-		if (!dialog) return;
-		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		try {
-			if (typeof dialog.showModal === "function") dialog.showModal();
-			else dialog.setAttribute("open", "");
-		} catch {
-			dialog.setAttribute("open", "");
-		}
-		dialog.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (editorState.current.confirming) return;
-			trapDialogTab(event, dialog);
-			if (event.key !== "Escape" || event.defaultPrevented) return;
-			event.preventDefault();
-			requestCloseEditor();
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("keydown", onKeyDown);
-			if (dialog.open && typeof dialog.close === "function") dialog.close();
-			else dialog.removeAttribute("open");
-			if (previous?.isConnected) previous.focus();
-		};
-	}, [requestCloseEditor, visionOpen]);
-
 	useEffect(() => {
 		if (!catalogOpen) return;
 		const dialog = catalogDialogRef.current;
@@ -534,69 +504,6 @@ export function ModelSettingsPanel({
 		}
 	};
 
-	const openVisionEditor = () =>
-		requestEditorAction(() => {
-			discardEditor();
-			const current = settings?.vision;
-			setError(null);
-			setNotice(null);
-			const next: VisionDraft = {
-				name: current?.name ?? "",
-				baseUrl: current?.baseUrl ?? "",
-				api: current?.api ?? "openai-responses",
-				modelId: current?.modelId ?? "",
-				apiKey: "",
-			};
-			setEditorBaseline({ provider: null, custom: null, vision: next, thinking: defaultThinking });
-			setVisionDraft(next);
-		});
-
-	const saveVision = async () => {
-		if (!visionDraft) return;
-		const name = visionDraft.name.trim();
-		const baseUrl = visionDraft.baseUrl.trim();
-		const modelId = visionDraft.modelId.trim();
-		if (!name || !baseUrl || !modelId) {
-			setError(t("Fill in the name, base URL, and model ID."));
-			return;
-		}
-		if (!/^https?:\/\//iu.test(baseUrl)) {
-			setError(t("Enter a valid https:// or http:// URL"));
-			return;
-		}
-		const apiKey = visionDraft.apiKey.trim();
-		const credential = apiKey
-			? { action: "set" as const, value: apiKey }
-			: settings?.vision?.authConfigured
-				? { action: "keep" as const }
-				: undefined;
-		if (!credential) {
-			setError(t("Enter an API key to save."));
-			return;
-		}
-		const next = await runUpdate(
-			{
-				type: "set_vision",
-				settings: { name, baseUrl, api: visionDraft.api, modelId },
-				credential,
-			},
-			t("Vision model saved"),
-		);
-		if (!next) return;
-		setVisionDraft(null);
-	};
-
-	const clearVision = async () => {
-		if (!settings?.vision) return;
-		const next = await runUpdate(
-			{ type: "set_vision", settings: null, credential: { action: "remove" } },
-			t("Vision model removed"),
-			"remove",
-		);
-		if (!next) return;
-		setVisionDraft(null);
-	};
-
 	const saveProvider = async (credentialAction: "set" | "remove" = "set") => {
 		if (!draft) return;
 		if (credentialAction === "set" && !draft.apiKey.trim()) {
@@ -620,7 +527,7 @@ export function ModelSettingsPanel({
 		if (!next) return;
 		const saved = next.providers.find((item) => item.provider === draft.provider);
 		const nextDraft = saved ? providerDraft(saved, next.defaultModel) : null;
-		setEditorBaseline({ provider: nextDraft, custom: null, vision: null, thinking: next.defaultThinkingSelection });
+		setEditorBaseline({ provider: nextDraft, custom: null, thinking: next.defaultThinkingSelection });
 		setDraft(nextDraft);
 	};
 
@@ -785,7 +692,7 @@ export function ModelSettingsPanel({
 				: (saved.models[0]?.modelId ?? ""),
 		);
 		setExpandedModelKey(null);
-		setEditorBaseline({ provider: null, custom: nextDraft, vision: null, thinking: next.defaultThinkingSelection });
+		setEditorBaseline({ provider: null, custom: nextDraft, thinking: next.defaultThinkingSelection });
 	};
 
 	const removeCustomProvider = async () => {
@@ -852,7 +759,7 @@ export function ModelSettingsPanel({
 				const next = providerDraft(provider, settings?.defaultModel ?? null);
 				const thinking = settings?.defaultThinkingSelection ?? "off";
 				setDefaultThinking(thinking);
-				setEditorBaseline({ provider: next, custom: null, vision: null, thinking });
+				setEditorBaseline({ provider: next, custom: null, thinking });
 				setDraft(next);
 				setConnectionTestModelId(next.testModelId);
 			} else {
@@ -863,28 +770,13 @@ export function ModelSettingsPanel({
 		});
 
 	const renderProvider = (provider: ModelSettingsProviderView, fromCatalog = false) => (
-		<button
-			aria-haspopup="dialog"
-			className="model-provider-card"
+		<ModelSettingsCard
 			key={provider.provider}
 			onClick={() => openProvider(provider, fromCatalog)}
-			type="button"
-		>
-			<span className="model-provider-card-heading">
-				<span className="model-provider-card-title">
-					<span className={`model-provider-dot ${provider.auth.configured ? "configured" : ""}`} />
-					<strong title={provider.name}>{provider.name}</strong>
-				</span>
-				<span className={`model-provider-badge ${provider.auth.configured ? "configured" : ""}`}>
-					{provider.auth.configured ? t("Configured") : t("Set up")}
-				</span>
-			</span>
-			<small>
-				{t("{{count}} models", { count: provider.models.length })} ·{" "}
-				{provider.builtin ? t("Built-in") : t("Custom")}
-				{settings?.defaultModel?.provider === provider.provider ? ` · ${t("Current default")}` : ""}
-			</small>
-		</button>
+			status={provider.auth.configured ? "configured" : "unconfigured"}
+			title={provider.name}
+			description={`${t("{{count}} models", { count: provider.models.length })} · ${provider.builtin ? t("Built-in") : t("Custom")}${settings?.defaultModel?.provider === provider.provider ? ` · ${t("Current default")}` : ""}`}
+		/>
 	);
 	const matchesProvider = (provider: ModelSettingsProviderView) =>
 		`${provider.name} ${provider.provider}`.toLocaleLowerCase().includes(providerQuery.trim().toLocaleLowerCase());
@@ -1074,56 +966,43 @@ export function ModelSettingsPanel({
 					{currentDefaultProvider ? t("Change default model") : t("Choose default model")}
 				</button>
 			</section>
-			<div className="settings-section model-service-section">
+			<section
+				className="settings-section model-specialized-section"
+				aria-labelledby={`${fieldId}-specialized-title`}
+			>
 				<header className="settings-section-heading">
-					<h3>{t("Specialized models")}</h3>
+					<h3 id={`${fieldId}-specialized-title`}>{t("Specialized models")}</h3>
 				</header>
-				<p className="model-provider-intro">
-					{t("Optional services for images. Your chat model works independently.")}
-				</p>
-
-				<article className="settings-card model-service-panel">
-					<div className="model-service-panel-top">
-						<div className="model-service-copy">
-							<span>{t("Vision model")}</span>
-							<p>
-								{t("Configure a dedicated vision API with your own base URL, API format, model ID, and key.")}
-							</p>
-						</div>
-						<button
-							className="settings-secondary-button"
-							disabled={!serverReady || busy}
-							onClick={openVisionEditor}
-							type="button"
-						>
-							{settings?.vision ? t("Edit") : t("Configure")}
-						</button>
+				<div className="model-provider-grid">
+					<div ref={imageGenerationSectionRef}>
+						<ImageGenerationSettingsPanel
+							api={api}
+							busy={busy}
+							key={reviewerReset}
+							onBusyChange={setImageGenerationBusy}
+							onDirtyChange={setImageGenerationDirty}
+							onOpenChange={setImageGenerationOpen}
+							onRequestClose={requestCloseEditor}
+							onSaved={applySettings}
+							open={imageGenerationOpen}
+							serverReady={serverReady}
+							settings={settings}
+						/>
 					</div>
-					{settings?.vision ? (
-						<div className="model-service-status">
-							<strong>{settings.vision.name}</strong>
-							<code>{settings.vision.modelId}</code>
-							<span className="model-service-badge">{settings.vision.api}</span>
-						</div>
-					) : (
-						<div className="model-service-status unset">
-							<span>{t("Not configured")}</span>
-						</div>
-					)}
-				</article>
-			</div>
-			<div className="settings-section model-reviewer-section" ref={reviewerSectionRef}>
-				<ReviewerModelSettingsPanel
-					api={api}
-					busy={busy}
-					key={reviewerReset}
-					onDirtyChange={setReviewerDirty}
-					onRequestClose={requestCloseEditor}
-					onSaved={applySettings}
-					serverReady={serverReady}
-					settings={settings}
-				/>
-			</div>
+					<div ref={reviewerSectionRef}>
+						<ReviewerModelSettingsPanel
+							api={api}
+							busy={busy}
+							key={reviewerReset}
+							onDirtyChange={setReviewerDirty}
+							onRequestClose={requestCloseEditor}
+							onSaved={applySettings}
+							serverReady={serverReady}
+							settings={settings}
+						/>
+					</div>
+				</div>
+			</section>
 			<div className="settings-section">
 				<header className="settings-section-heading">
 					<h3>{t("Providers")}</h3>
@@ -2006,191 +1885,13 @@ export function ModelSettingsPanel({
 					</div>
 				</dialog>
 			) : null}
-			{error && !draft && !customDraft && !visionDraft ? (
+			{error && !draft && !customDraft ? (
 				<p className="settings-action-message error" role="alert">
 					<XCircle aria-hidden="true" size={15} />
 					{error}
 				</p>
 			) : null}
 
-			{visionDraft ? (
-				/* biome-ignore lint/a11y/useKeyWithClickEvents: Only a native dialog backdrop click dismisses here; Escape is handled by onCancel. */
-				<dialog
-					aria-label={t("Vision model")}
-					className="model-provider-dialog model-service-dialog"
-					onCancel={(event) => {
-						event.preventDefault();
-						requestCloseEditor();
-					}}
-					onClick={(event) => {
-						if (event.target === event.currentTarget) requestCloseEditor();
-					}}
-					ref={visionDialogRef}
-				>
-					<div className="model-provider-dialog-content">
-						<form
-							className="model-provider-editor"
-							onSubmit={(event) => {
-								event.preventDefault();
-								void saveVision();
-							}}
-						>
-							<header className="model-provider-editor-header">
-								<div>
-									<h2>{t("Vision model")}</h2>
-									<p>
-										{t(
-											"Configure an optional service for understanding images, independently of your chat model.",
-										)}
-									</p>
-								</div>
-								<button
-									aria-label={t("Close")}
-									className="model-provider-dialog-close"
-									disabled={busy}
-									onClick={requestCloseEditor}
-									type="button"
-								>
-									<X aria-hidden="true" size={18} />
-								</button>
-							</header>
-							<div className="model-provider-editor-body">
-								<div className="model-custom-provider-fields">
-									<label className="model-api-key-field">
-										<span>{t("Name")}</span>
-										<input
-											autoComplete="off"
-											disabled={busy}
-											onChange={(event) => setVisionDraft({ ...visionDraft, name: event.target.value })}
-											placeholder={t("My vision")}
-											type="text"
-											value={visionDraft.name}
-										/>
-									</label>
-									<label htmlFor={`${fieldId}-select-6`} className="model-api-key-field">
-										<span>{t("API format")}</span>
-										<MenuSelect
-											id={`${fieldId}-select-6`}
-											ariaLabel={t("API format")}
-											disabled={busy}
-											onChange={(api) => setVisionDraft({ ...visionDraft, api })}
-											options={API_FORMATS.map((format) => ({
-												value: format.value,
-												label: t(format.label),
-											}))}
-											value={visionDraft.api}
-										/>
-									</label>
-									<label className="model-api-key-field">
-										<span>{t("Base URL")}</span>
-										<input
-											autoComplete="off"
-											disabled={busy}
-											onChange={(event) => setVisionDraft({ ...visionDraft, baseUrl: event.target.value })}
-											placeholder="https://api.openai.com/v1"
-											type="text"
-											value={visionDraft.baseUrl}
-										/>
-									</label>
-									<label className="model-api-key-field">
-										<span>{t("Model ID")}</span>
-										<input
-											autoComplete="off"
-											disabled={busy}
-											onChange={(event) => setVisionDraft({ ...visionDraft, modelId: event.target.value })}
-											placeholder="gpt-4o"
-											type="text"
-											value={visionDraft.modelId}
-										/>
-									</label>
-									<label className="model-api-key-field">
-										<span>{t("API key")}</span>
-										<input
-											autoComplete="off"
-											disabled={busy}
-											onChange={(event) => setVisionDraft({ ...visionDraft, apiKey: event.target.value })}
-											placeholder={
-												settings?.vision?.authConfigured
-													? t("Enter a new key to replace the saved credential")
-													: "sk-…"
-											}
-											type="password"
-											value={visionDraft.apiKey}
-										/>
-									</label>
-								</div>
-								{settings?.vision?.authConfigured ? (
-									<div className="model-saved-credential">
-										<span>{t("Saved API key")}</span>
-										<code>••••••••••••</code>
-									</div>
-								) : null}
-							</div>
-							<footer className="model-provider-editor-footer">
-								<div className="settings-form-actions">
-									{settings?.vision ? (
-										<button
-											className="settings-danger-button"
-											disabled={busy}
-											onClick={() => setConfirmRemoval("vision")}
-											type="button"
-										>
-											{t("Remove")}
-										</button>
-									) : null}
-									<button
-										className="settings-secondary-button"
-										disabled={busy}
-										onClick={requestCloseEditor}
-										type="button"
-									>
-										{t("Cancel")}
-									</button>
-									<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
-										{operation === "save" ? t("Saving…") : t("Save")}
-									</button>
-								</div>
-								{confirmRemoval === "vision" ? (
-									<div className="model-removal-confirm" role="alert">
-										<p>{t("Remove the optional vision configuration?")}</p>
-										<button
-											className="settings-secondary-button"
-											type="button"
-											disabled={busy}
-											onClick={() => setConfirmRemoval(null)}
-										>
-											{t("Cancel")}
-										</button>
-										<button
-											className="settings-danger-button"
-											type="button"
-											disabled={busy}
-											onClick={() => {
-												setConfirmRemoval(null);
-												void clearVision();
-											}}
-										>
-											{t("Confirm remove vision")}
-										</button>
-									</div>
-								) : null}
-								{error ? (
-									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
-										{error}
-									</p>
-								) : null}
-								{notice ? (
-									<output className="status-paragraph settings-action-message">
-										<CheckCircle aria-hidden="true" size={15} />
-										{notice}
-									</output>
-								) : null}
-							</footer>
-						</form>
-					</div>
-				</dialog>
-			) : null}
 			{confirmDiscard ? (
 				<dialog
 					aria-labelledby={`${fieldId}-discard-title`}

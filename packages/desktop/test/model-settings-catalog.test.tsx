@@ -27,7 +27,6 @@ function settings(): ModelSettingsView {
 		defaultModel: { provider: "openai", modelId: "gpt-5" },
 		defaultThinkingSelection: "high",
 		autoSessionTitle: true,
-		vision: null,
 		permissionReviewer: { config: null, status: "unconfigured" },
 		loadError: null,
 		providers: [
@@ -99,11 +98,10 @@ afterEach(async () => {
 });
 
 describe("model settings catalog regions", () => {
-	it("lists the default and specialized cards before the bounded provider section", async () => {
+	it("lists the default and approval cards before the bounded provider section", async () => {
 		const { container } = await mount();
 		const html = container.innerHTML;
-		expect(html.indexOf("New task defaults")).toBeLessThan(html.indexOf("Specialized models"));
-		expect(html.indexOf("Specialized models")).toBeLessThan(html.indexOf("<h3>Providers</h3>"));
+		expect(html.indexOf("New task defaults")).toBeLessThan(html.indexOf("Approval model"));
 		expect(html.indexOf("Approval model")).toBeLessThan(html.indexOf("<h3>Providers</h3>"));
 		expect(container.querySelector(".model-provider-list-region .model-provider-card")?.textContent).toContain(
 			"OpenAI",
