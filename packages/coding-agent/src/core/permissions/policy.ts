@@ -763,6 +763,19 @@ export class PermissionPolicy {
 
 		const grant = grantRequestFor(input.settings, input.action, managedMemoryRoots);
 		const riskLevel = riskLevelFor(input.action, grant, managedMemoryRoots);
+		// An unconfigured image tool only returns setup instructions. Its configured
+		// path declares network/read scope and must still pass the ordinary policy.
+		if (
+			input.action.provenance === "builtin" &&
+			input.action.toolName === "image_generate" &&
+			input.action.command === undefined &&
+			input.action.readPaths.length === 0 &&
+			input.action.writePaths.length === 0 &&
+			input.action.networkEndpoints.length === 0 &&
+			input.action.effects.length === 0
+		) {
+			return Object.freeze({ kind: "allow", riskLevel, reason: "Unconfigured image tool has no effects", grant });
+		}
 		const compiled = effectiveCompiledRules(input);
 		const modes = modeSettings(input.settings);
 		const ruleMatch =

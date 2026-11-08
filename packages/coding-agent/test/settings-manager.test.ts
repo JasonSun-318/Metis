@@ -174,6 +174,51 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("retired dedicated vision settings", () => {
+		it.each(["global", "project"] as const)(
+			"removes only dedicated vision fields from %s settings",
+			async (scope) => {
+				const settingsPath = join(scope === "global" ? agentDir : join(projectDir, ".metis"), "settings.json");
+				const retained = {
+					defaultProvider: "native-images",
+					defaultModel: "image-model",
+					theme: "dark",
+					memory: { activeContext: true },
+					mcpServers: { images: { url: "https://images.example/mcp" } },
+					customSetting: { imageInput: true },
+				};
+				const legacy = {
+					vision: {
+						name: "Old service",
+						baseUrl: "https://vision.example/v1",
+						api: "openai-responses",
+						modelId: "old",
+					},
+					visionProvider: "old-provider",
+					visionModel: "old-model",
+				};
+				writeFileSync(settingsPath, JSON.stringify({ ...retained, ...legacy }));
+
+				const manager = SettingsManager.create(projectDir, agentDir);
+				expect(scope === "global" ? manager.getGlobalSettings() : manager.getProjectSettings()).toEqual(retained);
+				expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual(retained);
+				expect(manager.drainErrors()).toEqual([]);
+
+				// A subsequent ordinary save also retires fields reintroduced by an older client.
+				writeFileSync(settingsPath, JSON.stringify({ ...retained, ...legacy }));
+				if (scope === "global") manager.setTheme("light");
+				else manager.setMcpServer("project", "docs", { command: "docs" });
+				await manager.flushOrThrow();
+				const saved = JSON.parse(readFileSync(settingsPath, "utf8"));
+				expect(saved).toEqual(
+					scope === "global"
+						? { ...retained, theme: "light" }
+						: { ...retained, mcpServers: { ...retained.mcpServers, docs: { command: "docs" } } },
+				);
+			},
+		);
+	});
+
 	describe("packages migration", () => {
 		it("should keep local-only extensions in extensions array", () => {
 			const settingsPath = join(agentDir, "settings.json");

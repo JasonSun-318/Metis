@@ -83,12 +83,12 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 		).toEqual([
 			"bash",
 			"create_goal",
-			"describe_image",
 			"dynamic_tool",
 			"edit",
 			"find",
 			"get_goal",
 			"grep",
+			"image_generate",
 			"ls",
 			"memory_read",
 			"memory_search",

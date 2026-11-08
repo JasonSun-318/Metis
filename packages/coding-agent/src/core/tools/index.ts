@@ -10,13 +10,6 @@ export {
 	createLocalBashOperations,
 } from "./bash.ts";
 export {
-	createDescribeImageTool,
-	createDescribeImageToolDefinition,
-	type DescribeImageToolDetails,
-	type DescribeImageToolInput,
-	type DescribeImageToolOptions,
-} from "./describe-image.ts";
-export {
 	createEditTool,
 	createEditToolDefinition,
 	type EditOperations,
@@ -104,9 +97,9 @@ import {
 	createUpdateGoalToolDefinition,
 	type GoalToolOptions,
 } from "../goal/tools.ts";
+import { createImageGenerationToolDefinition, type ImageGenerationToolOptions } from "../image-generation/tool.ts";
 import { createSetTasksToolDefinition } from "../set-tasks.ts";
 import { type BashToolOptions, createBashToolDefinition } from "./bash.ts";
-import { createDescribeImageToolDefinition, type DescribeImageToolOptions } from "./describe-image.ts";
 import { createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
@@ -129,11 +122,11 @@ const toolNames = [
 	"ls",
 	"web_fetch",
 	"web_search",
+	"image_generate",
 	"set_tasks",
 	"get_goal",
 	"create_goal",
 	"update_goal",
-	"describe_image",
 ] as const;
 export { toolNames as BUILT_IN_TOOL_NAMES };
 export type ToolName = (typeof toolNames)[number];
@@ -148,8 +141,8 @@ export interface ToolsOptions {
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
 	webSearch?: WebSearchToolOptions;
-	describeImage?: DescribeImageToolOptions;
 	goal?: GoalToolOptions;
+	imageGeneration?: ImageGenerationToolOptions;
 }
 
 function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -172,6 +165,8 @@ function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOp
 			return createWebFetchToolDefinition();
 		case "web_search":
 			return createWebSearchToolDefinition(options?.webSearch);
+		case "image_generate":
+			return createImageGenerationToolDefinition(cwd, options?.imageGeneration);
 		case "set_tasks":
 			return createSetTasksToolDefinition();
 		case "get_goal":
@@ -180,8 +175,6 @@ function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOp
 			return createCreateGoalToolDefinition(options?.goal);
 		case "update_goal":
 			return createUpdateGoalToolDefinition(options?.goal);
-		case "describe_image":
-			return createDescribeImageToolDefinition(cwd, options?.describeImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -247,11 +240,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 	return Object.fromEntries(toolNames.map((name) => [name, createTool(name, cwd, options)])) as Record<ToolName, Tool>;
 }
 
-export function getDefaultToolNames(options: {
-	visionEnabled: boolean;
-	webSearchEnabled: boolean;
-	isSubagent: boolean;
-}): ToolName[] {
+export function getDefaultToolNames(options: { webSearchEnabled: boolean; isSubagent: boolean }): ToolName[] {
 	return [
 		"read",
 		"grep",
@@ -259,7 +248,7 @@ export function getDefaultToolNames(options: {
 		"edit",
 		"write",
 		"web_fetch",
-		...(options.visionEnabled ? (["describe_image"] as const) : []),
+		"image_generate",
 		...(options.webSearchEnabled ? (["web_search"] as const) : []),
 		...(options.isSubagent ? [] : (["set_tasks", ...GOAL_TOOL_NAMES] as const)),
 	];

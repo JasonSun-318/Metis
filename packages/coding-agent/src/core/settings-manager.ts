@@ -10,6 +10,11 @@ import { acquireLockSyncWithRetry } from "../utils/lock-retry.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { replaceFileAtomicallySync } from "./durable-file.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import {
+	type ImageGenerationConfig,
+	type ImageGenerationConfigurationView,
+	normalizeImageGenerationConfig,
+} from "./image-generation/config.ts";
 import { type AutoCommandRule, normalizeAutoCommandRules } from "./permissions/auto-command-rules.ts";
 import {
 	createDefaultPermissionRules,
@@ -89,21 +94,6 @@ export interface WebSearchSettings {
 	provider?: WebSearchProvider;
 }
 
-/** Chat API protocol the configured vision-describer service speaks. */
-export type VisionApi = "openai-responses" | "openai-completions" | "anthropic-messages";
-
-/** AuthStorage provider id under which the vision-describer API key is stored. */
-export const VISION_PROVIDER_ID = "vision";
-
-/** User-configured vision-describer service (single). API key lives in AuthStorage under VISION_PROVIDER_ID. */
-export interface VisionSettings {
-	/** Display name shown in settings. */
-	name: string;
-	baseUrl: string;
-	api: VisionApi;
-	modelId: string;
-}
-
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
@@ -159,12 +149,6 @@ export type PackageSource =
 export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
-	/** @deprecated Replaced by `vision`; kept so old settings.json can be cleared on save. */
-	visionProvider?: string;
-	/** @deprecated Replaced by `vision`; kept so old settings.json can be cleared on save. */
-	visionModel?: string;
-	/** User-configured vision-describer service for the describe_image tool. */
-	vision?: VisionSettings;
 	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -213,6 +197,7 @@ export interface Settings {
 	permissionRules?: PermissionRule[]; // global-only effective permission rules (defaults + user entries)
 	permissionRulesVersion?: number; // 1 once the global rule list has been initialized or migrated
 	permissionReviewer?: PermissionReviewerConfig; // global-only independent Auto approval model
+	imageGeneration?: ImageGenerationConfig; // global-only independent image generation service
 	autoReviewerEnabled?: boolean; // global-only; default false
 	autoSessionTitle?: boolean; // global-only; default true
 }
@@ -483,6 +468,11 @@ export class SettingsManager {
 
 	/** Migrate old settings format to new format */
 	private static migrateSettings(settings: Record<string, unknown>): Settings {
+		// Retire the standalone image-description service without changing native model image input.
+		delete settings.vision;
+		delete settings.visionProvider;
+		delete settings.visionModel;
+
 		// Migrate queueMode -> steeringMode
 		if ("queueMode" in settings && !("steeringMode" in settings)) {
 			settings.steeringMode = settings.queueMode;
@@ -763,6 +753,43 @@ export class SettingsManager {
 			if (previous === undefined) delete this.globalSettings.permissionReviewer;
 			else this.globalSettings.permissionReviewer = previous;
 			this.markModified("permissionReviewer");
+			this.save();
+		};
+	}
+
+	getImageGenerationConfig(): ImageGenerationConfig | undefined {
+		return this.getImageGenerationView().config ?? undefined;
+	}
+
+	getImageGenerationView(): ImageGenerationConfigurationView {
+		const value = this.globalSettings.imageGeneration;
+		if (value === undefined || value === null) return { config: null, status: "unconfigured" };
+		try {
+			return { config: normalizeImageGenerationConfig(value) ?? null, status: "configured" };
+		} catch {
+			return { config: null, status: "invalid" };
+		}
+	}
+
+	setImageGenerationConfig(config: ImageGenerationConfig | undefined): void {
+		const normalized = normalizeImageGenerationConfig(config);
+		if (normalized) this.globalSettings.imageGeneration = normalized;
+		else delete this.globalSettings.imageGeneration;
+		this.markModified("imageGeneration");
+		this.save();
+	}
+
+	/** Retain the raw previous value so a failed update also preserves invalid legacy settings. */
+	beginImageGenerationConfigUpdate(config: ImageGenerationConfig | undefined): () => void {
+		const previous = structuredClone(this.globalSettings.imageGeneration);
+		this.setImageGenerationConfig(config);
+		let pending = true;
+		return () => {
+			if (!pending) return;
+			pending = false;
+			if (previous === undefined) delete this.globalSettings.imageGeneration;
+			else this.globalSettings.imageGeneration = previous;
+			this.markModified("imageGeneration");
 			this.save();
 		};
 	}
@@ -1188,42 +1215,6 @@ export class SettingsManager {
 		delete this.globalSettings.defaultModel;
 		this.markModified("defaultProvider");
 		this.markModified("defaultModel");
-		this.save();
-	}
-
-	getVisionSettings(): VisionSettings | undefined {
-		const settings = this.settings.vision;
-		if (!settings || typeof settings !== "object") return undefined;
-		const api =
-			settings.api === "openai-completions" || settings.api === "anthropic-messages"
-				? settings.api
-				: "openai-responses";
-		if (typeof settings.baseUrl !== "string" || typeof settings.modelId !== "string") return undefined;
-		return {
-			name: typeof settings.name === "string" && settings.name.trim() !== "" ? settings.name : settings.modelId,
-			baseUrl: settings.baseUrl,
-			api,
-			modelId: settings.modelId,
-		};
-	}
-
-	setVisionSettings(settings: VisionSettings): void {
-		this.globalSettings.vision = { ...settings };
-		delete this.globalSettings.visionProvider;
-		delete this.globalSettings.visionModel;
-		this.markModified("vision");
-		this.markModified("visionProvider");
-		this.markModified("visionModel");
-		this.save();
-	}
-
-	clearVisionSettings(): void {
-		delete this.globalSettings.vision;
-		delete this.globalSettings.visionProvider;
-		delete this.globalSettings.visionModel;
-		this.markModified("vision");
-		this.markModified("visionProvider");
-		this.markModified("visionModel");
 		this.save();
 	}
 

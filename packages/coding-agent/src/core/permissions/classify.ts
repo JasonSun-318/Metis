@@ -40,7 +40,7 @@ const RISK_ORDER: readonly ActionRisk[] = [
 	"unknown",
 ];
 
-const STRUCTURED_READ_TOOLS = new Set(["read", "grep", "find", "ls", "describe_image"]);
+const STRUCTURED_READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const STRUCTURED_WRITE_TOOLS = new Set(["write", "edit"]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -248,9 +248,7 @@ export function classifyAction(input: ClassifyActionInput): PermissionAction {
 	if (STRUCTURED_READ_TOOLS.has(input.toolName)) {
 		if (args.path !== undefined && typeof args.path !== "string") return action(input, ["unknown"]);
 		if (args.path === undefined && input.toolName === "read") return action(input, ["unknown"]);
-		// describe_image reads a single file like `read`, so it must not be
-		// classified with the directory-traversal semantics of grep/find/ls.
-		const traversal = input.toolName !== "read" && input.toolName !== "describe_image";
+		const traversal = input.toolName !== "read";
 		return classifyStructuredRead(input, typeof args.path === "string" ? args.path : input.cwd, traversal);
 	}
 	if (STRUCTURED_WRITE_TOOLS.has(input.toolName)) {

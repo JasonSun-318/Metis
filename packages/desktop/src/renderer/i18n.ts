@@ -195,10 +195,6 @@ const zhCN = {
 	"Confirm clear credentials": "确认清除凭据",
 	"Remove this custom provider and its model configuration?": "确认移除此自定义提供商及其模型配置？",
 	"Confirm remove provider": "确认移除提供商",
-	"Remove the optional vision configuration?": "确认移除可选的视觉模型配置？",
-	"Confirm remove vision": "确认移除视觉配置",
-	"Configure an optional service for understanding images, independently of your chat model.":
-		"配置用于图片理解的可选服务，与聊天模型独立。",
 	"Collapse queued messages": "收起排队消息",
 	"Expand queued messages": "展开排队消息",
 	"Collapse approval": "收起权限确认",
@@ -383,8 +379,6 @@ const zhCN = {
 	"Font for Chat replies and questions. Your messages and interface controls use the system font.":
 		"用于 Chat 回复与问答内容。你的消息和界面控件使用系统字体。",
 	"Review your profile and token usage.": "查看个人资料、活跃情况和用量。",
-	"Optional services for images. Your chat model works independently.":
-		"用于图片理解的可选服务，聊天模型可以独立使用。",
 	"No providers configured. Browse the catalog to connect one.": "尚未配置提供商，从目录中选择一个开始连接。",
 	"Manage your connected providers and add more when you need them.": "管理已连接的提供商，也可以添加新的提供商。",
 	"No providers match your search.": "没有匹配的提供商。",
@@ -623,6 +617,7 @@ const zhCN = {
 	"Block dangerous bash": "拦截危险的 bash 命令",
 	Event: "事件",
 	"Run mode": "运行方式",
+	"Image loading timed out": "图片加载超时",
 	Process: "进程",
 	"Activity log": "操作记录",
 	"No commands in this conversation yet.": "此会话还没有执行过命令。",
@@ -872,15 +867,6 @@ const zhCN = {
 		"所选 API 格式下未找到此模型。除非选择“通用推理：低、中、高”，否则推理保持关闭。",
 	"Supported reasoning levels: {{levels}}": "支持的推理强度：{{levels}}",
 	"Image input": "支持图片输入",
-	"Vision model": "视觉理解模型",
-	"Specialized models": "专用模型",
-	"Configure a dedicated vision API with your own base URL, API format, model ID, and key.":
-		"单独配置视觉理解 API：填写 Base URL、API 格式、模型 ID 和密钥。",
-	"Pick the chat API format and endpoint describe_image talks to.":
-		"选择 describe_image 所调用的对话 API 格式与端点。",
-	"My vision": "我的视觉服务",
-	"Vision model saved": "视觉理解服务已保存",
-	"Vision model removed": "视觉理解服务已移除",
 	"Approval model": "审批模型",
 	"Optionally review Auto-mode actions with a separate model. Your chat model and default reasoning stay unchanged.":
 		"可选：使用独立模型评审 Auto 模式下的操作。聊天模型与默认推理强度保持不变。",
@@ -938,8 +924,6 @@ const zhCN = {
 	"Choose a supported reasoning level for this model.": "请选择此模型支持的推理强度。",
 	"Timeout must be between 1000 and 15000 ms.": "超时必须在 1000 到 15000 毫秒之间。",
 	"Output token limit must be between 128 and {{max}}.": "输出 Token 上限必须在 128 到 {{max}} 之间。",
-	"Image tools": "图片工具",
-	"Configure the vision describer used by built-in tools.": "配置内置工具使用的视觉理解服务。",
 	"Fill in the name, base URL, and model ID.": "请填写名称、Base URL 和模型 ID。",
 	"Connection tests send a short prompt and may consume provider tokens.":
 		"连接测试会发送一条简短提示词，可能产生少量提供商 Token 消耗。",

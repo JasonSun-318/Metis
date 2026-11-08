@@ -718,6 +718,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private onAgentEvent(event: AgentSessionEvent): void {
 		this.publishProcess(event);
+		if (event.type === "tool_execution_update" && event.toolName === "image_generate") {
+			this.publishStartedItem({
+				role: "toolResult",
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				content: event.partialResult.content,
+				details: event.partialResult.details,
+				isError: false,
+			});
+			return;
+		}
 		if (event.type === "auto_retry_start" || event.type === "auto_retry_end") {
 			this.publish({
 				type: "session/retryChanged",
@@ -764,7 +775,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			}
 			if (
 				event.message.role === "toolResult" &&
-				event.message.toolName === "deliver_file" &&
+				(event.message.toolName === "deliver_file" || event.message.toolName === "image_generate") &&
 				event.message.isError === false
 			) {
 				this.publish({
@@ -921,6 +932,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private itemIdFor(message: object): string {
 		const record = message as Record<string, unknown>;
+		if (record.role === "toolResult" && record.toolName === "image_generate") {
+			const itemId = opaqueId(
+				`image-generation:${this.sessionId}:${this.currentTurnId() ?? "none"}:${String(record.toolCallId)}`,
+				"item",
+			);
+			this.liveItemIds.set(message, itemId);
+			this.liveMessagesByItemId.set(itemId, message);
+			return itemId;
+		}
 		if (record.role === "assistant" && this.liveAssistantItemId) {
 			this.liveItemIds.set(message, this.liveAssistantItemId);
 			this.liveMessagesByItemId.set(this.liveAssistantItemId, message);

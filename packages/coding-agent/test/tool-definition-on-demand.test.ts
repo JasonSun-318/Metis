@@ -63,14 +63,6 @@ vi.mock("../src/core/tools/web-search.ts", async (importOriginal) => {
 	};
 });
 
-vi.mock("../src/core/tools/describe-image.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/core/tools/describe-image.ts")>();
-	return {
-		...actual,
-		createDescribeImageToolDefinition: mocks.track("describe_image", actual.createDescribeImageToolDefinition),
-	};
-});
-
 vi.mock("../src/core/set-tasks.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/set-tasks.ts")>();
 	return {
@@ -108,7 +100,6 @@ const builtInToolNames = [
 	"get_goal",
 	"create_goal",
 	"update_goal",
-	"describe_image",
 ] as const;
 
 const cwd = process.cwd();
@@ -201,6 +192,7 @@ describe("on-demand tool definition construction", () => {
 			"propertyIsEnumerable",
 			"toLocaleString",
 			"__defineGetter__",
+			"describe_image",
 			"unknown_tool",
 			"",
 		];
@@ -216,6 +208,7 @@ describe("on-demand tool definition construction", () => {
 		expect(lookupToolDefinition("constructor", cwd)).toBe(Object);
 		expect(lookupToolDefinition("toString", cwd)).toBe(Object.prototype.toString);
 		expect(lookupToolDefinition("__proto__", cwd)).toBe(Object.prototype);
+		expect(lookupToolDefinition("describe_image", cwd)).toBeUndefined();
 		expect(lookupToolDefinition("unknown_tool", cwd)).toBeUndefined();
 	});
 

@@ -16,18 +16,6 @@ const definitions = createAllToolDefinitions(cwd, {
 		getSettings: () => ({ enabled: true, provider: "brave" }),
 		getApiKey: async () => "test",
 	},
-	describeImage: {
-		getSettings: () => ({
-			api: "openai-completions",
-			name: "Vision",
-			modelId: "vision-test",
-			baseUrl: "https://vision.example.test/v1",
-		}),
-		getApiKey: async () => "test",
-		streamSimple: () => {
-			throw new Error("not executed");
-		},
-	},
 });
 
 const params: Record<keyof typeof definitions, unknown> = {
@@ -40,11 +28,11 @@ const params: Record<keyof typeof definitions, unknown> = {
 	ls: { path: "." },
 	web_fetch: { url: "https://example.com/page" },
 	web_search: { query: "metis" },
+	image_generate: { prompt: "a robot" },
 	set_tasks: { tasks: [{ task: "verify", completed: false }] },
 	get_goal: {},
 	create_goal: { objective: "verify permissions" },
 	update_goal: { status: "complete" },
-	describe_image: { path: "image.png" },
 };
 
 describe("built-in tool permission descriptors", () => {

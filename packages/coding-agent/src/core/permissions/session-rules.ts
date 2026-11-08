@@ -81,6 +81,10 @@ export class SessionPermissionRuleStore {
 		return Object.freeze([...this.rules.values()].filter((rule) => rule.projectPath === project));
 	}
 
+	get size(): number {
+		return this.rules.size;
+	}
+
 	delete(projectPath: string, ruleId: string): boolean {
 		const project = canonicalSessionRuleProjectPath(projectPath);
 		const rule = this.rules.get(ruleId);
