@@ -32,6 +32,7 @@ import {
 	RPC_ERROR_CODES,
 	ServerNotificationMethods,
 	ServerRequestMethods,
+	SessionProcessViewSchema,
 	ThinkingSelectionSchema,
 	validateClientRequest,
 	validateHostRequest,
@@ -88,6 +89,20 @@ const requests = fixture<RequestFixture[]>("requests.json");
 const responses = fixture<ResponseFixture[]>("responses.json");
 const serverRequests = fixture<ServerRequestFixture[]>("server-requests.json");
 const notifications = fixture<NotificationFixture[]>("notifications.json");
+
+it("accepts optional activity start timestamps and rejects malformed dates", () => {
+	const validate = Compile(SessionProcessViewSchema);
+	const process = {
+		processId: "command",
+		command: "echo hello",
+		output: "hello",
+		state: "completed",
+		truncated: false,
+	};
+	expect(validate.Check(process)).toBe(true);
+	expect(validate.Check({ ...process, startedAt: "2026-11-06T12:00:00.000Z" })).toBe(true);
+	expect(validate.Check({ ...process, startedAt: "yesterday" })).toBe(false);
+});
 const errors = fixture<ErrorFixture[]>("errors.json");
 
 function requestFor(direction: "client" | "host", method: string): RequestFixture {
@@ -192,7 +207,6 @@ const scheduleCases = [
 		{},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			vision: null,
 			permissionReviewer: { config: null, status: "unconfigured" },
 			defaultThinkingSelection: "high",
 			autoSessionTitle: true,
@@ -236,13 +250,6 @@ const scheduleCases = [
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			vision: {
-				name: "My vision",
-				baseUrl: "https://api.openai.com/v1",
-				api: "openai-responses",
-				modelId: "gpt-4o",
-				authConfigured: true,
-			},
 			permissionReviewer: { config: null, status: "unconfigured" },
 			defaultThinkingSelection: "high",
 			autoSessionTitle: true,
@@ -267,7 +274,6 @@ const scheduleCases = [
 		},
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			vision: null,
 			permissionReviewer: {
 				config: {
 					provider: "review-provider",
@@ -278,26 +284,6 @@ const scheduleCases = [
 				},
 				status: "configured",
 			},
-			defaultThinkingSelection: "high",
-			autoSessionTitle: true,
-			providers: [],
-			loadError: null,
-		},
-	],
-	[
-		"model/settings/update",
-		{
-			requestId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-			mutation: {
-				type: "set_vision",
-				settings: null,
-				credential: { action: "remove" },
-			},
-		},
-		{
-			defaultModel: { provider: "openai", modelId: "gpt-test" },
-			vision: null,
-			permissionReviewer: { config: null, status: "unconfigured" },
 			defaultThinkingSelection: "high",
 			autoSessionTitle: true,
 			providers: [],
@@ -1006,6 +992,28 @@ describe("manual model thinking map schema", () => {
 });
 
 describe("golden protocol fixtures", () => {
+	it.each([
+		{ settings: null, credential: { action: "remove" } },
+		{
+			settings: {
+				name: "Retired vision service",
+				baseUrl: "https://example.test/v1",
+				api: "openai-responses",
+				modelId: "image-model",
+			},
+			credential: { action: "set", value: "retired-key" },
+		},
+	])("rejects the retired dedicated vision mutation: %j", (mutation) => {
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("model/settings/update", {
+					requestId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+					mutation: { type: "set_vision", ...mutation },
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+	});
+
 	it("requires an exact owner when revoking remembered permissions", () => {
 		const params = { requestId: RUN_ID, ruleId: "a".repeat(64) };
 		expect(() => validateClientRequest(makeClientRequest("permission/rules/revoke", params))).toThrow();
@@ -1839,7 +1847,6 @@ describe("golden protocol fixtures", () => {
 			id: request.id,
 			result: {
 				defaultModel: null,
-				vision: null,
 				permissionReviewer: {
 					config: dedicated,
 					status: "configured",

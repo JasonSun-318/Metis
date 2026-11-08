@@ -42,6 +42,7 @@ import {
 	AgentModeSchema,
 	AgentSummaryViewSchema,
 	AgentTypeIdSchema,
+	ArchivedConversationViewSchema,
 	CollaborationModeSchema,
 	ConnectionEventsParamsSchema,
 	CustomAgentTypeViewSchema,
@@ -50,6 +51,7 @@ import {
 	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
 	HooksListViewSchema,
+	ImageGenerationConfigSchema,
 	InteractionViewSchema,
 	ItemViewSchema,
 	McpCatalogItemDetailViewSchema,
@@ -97,6 +99,7 @@ import {
 	ScheduleSnapshotViewSchema,
 	ScheduleTaskViewSchema,
 	SessionGoalViewSchema,
+	SessionProcessViewSchema,
 	SessionSnapshotSchema,
 	SessionStatusViewSchema,
 	SessionSummarySchema,
@@ -158,6 +161,16 @@ export const SessionListParamsSchema = StrictObject({
 export const SessionListResultSchema = StrictObject({
 	sessions: Type.Array(SessionSummarySchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextAfterSessionId: Type.Union([SessionIdSchema, Type.Null()]),
+});
+
+const ArchivedConversationCursorSchema = Type.String({ minLength: 1, maxLength: 1024 });
+export const ArchivedConversationListParamsSchema = StrictObject({
+	cursor: Type.Optional(ArchivedConversationCursorSchema),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+});
+export const ArchivedConversationListResultSchema = StrictObject({
+	conversations: Type.Array(ArchivedConversationViewSchema, { maxItems: 100 }),
+	nextCursor: Type.Union([ArchivedConversationCursorSchema, Type.Null()]),
 });
 
 export const PersonalizationGetParamsSchema = StrictObject({});
@@ -430,6 +443,17 @@ export const SessionReadItemsParamsSchema = StrictObject({
 export const SessionReadItemsResultSchema = StrictObject({
 	items: Type.Array(ItemViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
 	nextBeforeItemId: Type.Union([OpaqueIdSchema, Type.Null()]),
+});
+
+export const SessionReadProcessParamsSchema = StrictObject({
+	sessionId: SessionIdSchema,
+	index: Type.Optional(Type.Integer({ minimum: 0 })),
+	processId: Type.Optional(OpaqueIdSchema),
+});
+export const SessionReadProcessResultSchema = StrictObject({
+	total: Type.Integer({ minimum: 0 }),
+	index: Type.Integer({ minimum: 0 }),
+	process: Type.Union([SessionProcessViewSchema, Type.Null()]),
 });
 
 export const SessionReadImageParamsSchema = StrictObject({
@@ -840,6 +864,19 @@ export const AgentArchiveParamsSchema = StrictObject({
 	archived: Type.Boolean(),
 });
 export const AgentDeleteParamsSchema = StrictObject(AgentMutationFields);
+export const AgentRenameParamsSchema = StrictObject({
+	...AgentMutationFields,
+	name: Type.Refine(
+		Type.String({
+			minLength: 1,
+			maxLength: 128,
+			pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+			"x-metis-maxUtf16Units": 128,
+		}),
+		(value) => value.length <= 128,
+		"must not exceed 128 UTF-16 code units",
+	),
+});
 export const AgentListParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	includeArchived: Type.Optional(Type.Boolean()),
@@ -1106,26 +1143,14 @@ export const ModelSettingsMutationSchema = Type.Union([
 		enabled: Type.Boolean(),
 	}),
 	StrictObject({
-		type: Type.Literal("set_vision"),
-		settings: Type.Union([
-			StrictObject({
-				name: Type.String({ minLength: 1, maxLength: 120 }),
-				baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-				api: Type.Union([
-					Type.Literal("openai-responses"),
-					Type.Literal("openai-completions"),
-					Type.Literal("anthropic-messages"),
-				]),
-				modelId: Type.String({ minLength: 1, maxLength: 300 }),
-			}),
-			Type.Null(),
-		]),
-		credential: CredentialMutationSchema,
-	}),
-	StrictObject({
 		type: Type.Literal("set_permission_reviewer"),
 		config: Type.Union([PermissionReviewerConfigSchema, Type.Null()]),
 		/** Optional for legacy provider clients; dedicated connections need set or an existing key. */
+		credential: Type.Optional(CredentialMutationSchema),
+	}),
+	StrictObject({
+		type: Type.Literal("set_image_generation"),
+		config: Type.Union([ImageGenerationConfigSchema, Type.Null()]),
 		credential: Type.Optional(CredentialMutationSchema),
 	}),
 ]);
@@ -1849,6 +1874,7 @@ export const ClientRequestMethods = {
 	"session/knowledge/set": method(KnowledgeSetParamsSchema, KnowledgeLibrariesSchema),
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
+	"session/archived/list": method(ArchivedConversationListParamsSchema, ArchivedConversationListResultSchema),
 	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),
 	"skill/get": method(SkillGetParamsSchema, SkillGetResultSchema),
 	"skill/upsert": method(SkillUpsertParamsSchema, SkillUpsertResultSchema),
@@ -1873,6 +1899,7 @@ export const ClientRequestMethods = {
 	"session/create": method(SessionCreateParamsSchema, SessionCreateResultSchema),
 	"session/open": method(SessionRefParamsSchema, SessionOpenResultSchema),
 	"session/markRead": method(SessionMarkReadParamsSchema, SessionMutationResultSchema),
+	"session/readProcess": method(SessionReadProcessParamsSchema, SessionReadProcessResultSchema),
 	"session/readItems": method(SessionReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"session/readImage": method(SessionReadImageParamsSchema, SessionReadImageResultSchema),
 	"session/openDeliveredFile": method(SessionOpenDeliveredFileParamsSchema, SessionOpenDeliveredFileResultSchema),
@@ -1945,6 +1972,7 @@ export const ClientRequestMethods = {
 	"agent/control": method(AgentControlParamsSchema, AgentControlResultSchema),
 	"agent/interrupt": method(AgentInterruptParamsSchema, AgentResultSchema),
 	"agent/archive": method(AgentArchiveParamsSchema, AgentResultSchema),
+	"agent/rename": method(AgentRenameParamsSchema, AgentResultSchema),
 	"agent/delete": method(AgentDeleteParamsSchema, AgentDeleteResultSchema),
 	"agentType/list": method(AgentTypeListParamsSchema, AgentTypeListResultSchema),
 	"agentType/upsert": method(AgentTypeUpsertParamsSchema, AgentTypeUpsertResultSchema),

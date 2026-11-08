@@ -1164,5 +1164,45 @@
 				"delivery": "steer"
 			}
 		}
+	},
+	{
+		"direction": "client",
+		"method": "session/archived/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-archived-list",
+			"method": "session/archived/list",
+			"params": {
+				"limit": 30
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/rename",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-rename",
+			"method": "agent/rename",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"agentId": "22222222-2222-4222-8222-222222222222",
+				"name": "Renamed worker",
+				"requestId": "33333333-3333-4333-8333-333333333333"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/readProcess",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-process",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"index": 0
+			},
+			"method": "session/readProcess"
+		}
 	}
 ]

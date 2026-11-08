@@ -109,6 +109,17 @@ export const SessionSummarySchema = StrictObject({
 	contributeMemory: Type.Boolean(),
 });
 
+export const ArchivedConversationViewSchema = Type.Union([
+	StrictObject({ kind: Type.Literal("session"), session: SessionSummarySchema }),
+	StrictObject({
+		kind: Type.Literal("agent"),
+		session: SessionSummarySchema,
+		agentId: SessionIdSchema,
+		name: NameSchema,
+		updatedAt: TimestampSchema,
+	}),
+]);
+
 export const SkillSourceViewSchema = Type.Union([
 	Type.Literal("system"),
 	Type.Literal("user"),
@@ -508,6 +519,29 @@ export const SessionDeliveredFileViewSchema = StrictObject({
 	availability: Type.Union([Type.Literal("available"), Type.Literal("unavailable")]),
 });
 
+export const GeneratedImageViewSchema = StrictObject({
+	...SessionDeliveredFileViewSchema.properties,
+	mediaType: Type.Union([Type.Literal("image/png"), Type.Literal("image/jpeg"), Type.Literal("image/webp")]),
+	width: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_536 })),
+	height: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_536 })),
+});
+
+export const ImageGenerationViewSchema = StrictObject({
+	status: Type.Union([
+		Type.Literal("generating"),
+		Type.Literal("completed"),
+		Type.Literal("partial"),
+		Type.Literal("failed"),
+		Type.Literal("unconfigured"),
+		Type.Literal("cancelled"),
+	]),
+	requestedCount: Type.Integer({ minimum: 1, maximum: 4 }),
+	images: Type.Array(GeneratedImageViewSchema, { maxItems: 4 }),
+	aspectRatio: Type.Optional(Type.String({ minLength: 1, maxLength: 16, pattern: "^(auto|[0-9]+:[0-9]+)$" })),
+	message: Type.Optional(PublicTextSchema),
+	errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Z][A-Z0-9_]*$" })),
+});
+
 export const CodeChangeCountsViewSchema = StrictObject({
 	additions: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	deletions: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -558,6 +592,7 @@ export const ToolResultBlockViewSchema = StrictObject({
 	output: PublicTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 4 })),
 	deliveredFile: Type.Optional(SessionDeliveredFileViewSchema),
+	imageGeneration: Type.Optional(ImageGenerationViewSchema),
 	codeChanges: Type.Optional(CodeChangesViewSchema),
 	tasks: Type.Optional(SessionTasksSchema),
 	userAnswers: Type.Optional(AskUserAnswersSchema),
@@ -668,6 +703,12 @@ export const ItemViewSchema = StrictObject({
 	agentMessageId: Type.Optional(OpaqueIdSchema),
 	agentTargetId: Type.Optional(SessionIdSchema),
 	agentTaskId: Type.Optional(SessionIdSchema),
+	agentReport: Type.Optional(
+		StrictObject({
+			name: Type.String({ minLength: 1, maxLength: 128 }),
+			status: Type.Union([Type.Literal("done"), Type.Literal("failed"), Type.Literal("stopped")]),
+		}),
+	),
 	deliveryState: Type.Optional(
 		Type.Union([
 			Type.Literal("accepted"),
@@ -890,6 +931,7 @@ export const ModelAuthStatusViewSchema = StrictObject({
 });
 export const ModelSettingsProviderViewSchema = StrictObject({
 	provider: NameSchema,
+	storedApiKey: Type.Optional(Type.Boolean()),
 	name: NameSchema,
 	builtin: Type.Boolean(),
 	baseUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2_048 }), Type.Null()]),
@@ -901,19 +943,6 @@ export const ModelSettingsProviderViewSchema = StrictObject({
 	]),
 	auth: ModelAuthStatusViewSchema,
 	models: Type.Array(ModelSettingsModelViewSchema, { maxItems: 512 }),
-});
-export const VisionApiViewSchema = Type.Union([
-	Type.Literal("openai-responses"),
-	Type.Literal("openai-completions"),
-	Type.Literal("anthropic-messages"),
-]);
-/** User-configured vision-describer service; the API key is never returned. */
-export const VisionSettingsViewSchema = StrictObject({
-	name: Type.String({ minLength: 1, maxLength: 120 }),
-	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-	api: VisionApiViewSchema,
-	modelId: Type.String({ minLength: 1, maxLength: 300 }),
-	authConfigured: Type.Boolean(),
 });
 /** Existing independent reviewer profile: an exact chat provider/model selection. */
 export const PermissionReviewerProviderConfigSchema = StrictObject({
@@ -968,12 +997,46 @@ export const PermissionReviewerViewSchema = StrictObject({
 	/** Credential presence metadata for dedicated connections; never persisted. */
 	authConfigured: Type.Optional(Type.Boolean()),
 });
+export const ImageGenerationConfigSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 120, pattern: "\\S" }),
+	api: Type.Union([
+		Type.Literal("openai-images"),
+		Type.Literal("google-interactions"),
+		Type.Literal("openrouter-images"),
+	]),
+	baseUrl: Type.Refine(
+		Type.String({ minLength: 1, maxLength: 2_048 }),
+		(value) => {
+			try {
+				const url = new URL(value);
+				return (
+					(url.protocol === "http:" || url.protocol === "https:") &&
+					!url.username &&
+					!url.password &&
+					!url.search &&
+					!url.hash
+				);
+			} catch {
+				return false;
+			}
+		},
+		"must be an HTTP(S) URL without credentials, query, or fragment",
+	),
+	modelId: Type.String({ minLength: 1, maxLength: 300, pattern: "\\S" }),
+	credentialProvider: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: "\\S" })),
+});
+
+export const ImageGenerationSettingsViewSchema = StrictObject({
+	config: Type.Union([ImageGenerationConfigSchema, Type.Null()]),
+	status: Type.Union([Type.Literal("unconfigured"), Type.Literal("configured"), Type.Literal("invalid")]),
+	authConfigured: Type.Boolean(),
+});
+
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([ModelRefSchema, Type.Null()]),
-	/** Vision-describer service for image-less models; null when unset. */
-	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
 	/** Independent reviewer profile; invalid legacy objects are never revived. */
 	permissionReviewer: PermissionReviewerViewSchema,
+	imageGeneration: Type.Optional(ImageGenerationSettingsViewSchema),
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	/** Whether new Sessions get a model-generated title. */
 	autoSessionTitle: Type.Boolean(),
@@ -1352,12 +1415,17 @@ export const SessionStatusViewSchema = Type.Refine(
 
 export const SessionProcessViewSchema = StrictObject({
 	processId: OpaqueIdSchema,
+	startedAt: Type.Optional(TimestampSchema),
+	turnId: Type.Optional(OpaqueIdSchema),
+	revision: Type.Optional(Type.Integer({ minimum: 0 })),
 	command: PublicTextSchema,
 	state: Type.Union([
 		Type.Literal("awaiting_approval"),
 		Type.Literal("running"),
 		Type.Literal("completed"),
 		Type.Literal("failed"),
+		Type.Literal("interrupted"),
+		Type.Literal("unavailable"),
 	]),
 	output: PublicTextSchema,
 	truncated: Type.Boolean(),
@@ -1837,6 +1905,7 @@ export type PublicErrorData = Static<typeof PublicErrorDataSchema>;
 export type AgentMode = Static<typeof AgentModeSchema>;
 export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
+export type ArchivedConversationView = Static<typeof ArchivedConversationViewSchema>;
 export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
 export type SkillSourceView = Static<typeof SkillSourceViewSchema>;
 export type WritableSkillSourceView = Static<typeof WritableSkillSourceViewSchema>;
@@ -1874,6 +1943,8 @@ export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
 export type InteractionView = Static<typeof InteractionViewSchema>;
 export type SessionTaskView = Static<typeof SessionTaskViewSchema>;
 export type SessionDeliveredFileView = Static<typeof SessionDeliveredFileViewSchema>;
+export type GeneratedImageView = Static<typeof GeneratedImageViewSchema>;
+export type ImageGenerationView = Static<typeof ImageGenerationViewSchema>;
 export type SessionGoalStatusView = Static<typeof SessionGoalStatusSchema>;
 export type SessionGoalView = Static<typeof SessionGoalViewSchema>;
 export type QueuedTurnAttachmentView = Static<typeof QueuedTurnAttachmentViewSchema>;
@@ -1893,6 +1964,8 @@ export type CustomModelThinkingLevelMap = Static<typeof CustomModelThinkingLevel
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
+export type ImageGenerationConfigView = Static<typeof ImageGenerationConfigSchema>;
+export type ImageGenerationSettingsView = Static<typeof ImageGenerationSettingsViewSchema>;
 export type PermissionReviewerProviderConfigView = Static<typeof PermissionReviewerProviderConfigSchema>;
 export type PermissionReviewerDedicatedConfigView = Static<typeof PermissionReviewerDedicatedConfigSchema>;
 export type PermissionReviewerConfigView = Static<typeof PermissionReviewerConfigSchema>;
@@ -1916,8 +1989,6 @@ export type MemorySessionFlagsView = Static<typeof MemorySessionFlagsViewSchema>
 export type MemorySettingsView = Static<typeof MemorySettingsViewSchema>;
 export type MemoryNoteSummaryView = Static<typeof MemoryNoteSummaryViewSchema>;
 export type MemoryNoteView = Static<typeof MemoryNoteViewSchema>;
-export type VisionApiView = Static<typeof VisionApiViewSchema>;
-export type VisionSettingsView = Static<typeof VisionSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;
 export type HookRunModeView = Static<typeof HookRunModeSchema>;
 export type HookProtocolView = Static<typeof HookProtocolSchema>;
