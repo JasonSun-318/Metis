@@ -12,6 +12,10 @@ let support: string;
 
 beforeAll(initializeShellAnalysis);
 beforeEach(() => {
+	// These cases assert filesystem scope semantics, not the analysis time
+	// budget; freeze the clock so a loaded machine cannot turn a complete
+	// analysis into a time-budget fallback.
+	vi.spyOn(Date, "now").mockReturnValue(Date.now());
 	home = mkdtempSync(join(tmpdir(), "metis-shell-filesystem-"));
 	desktop = join(home, "Desktop");
 	support = join(home, "Library", "Application Support");
@@ -29,6 +33,7 @@ beforeEach(() => {
 	vi.stubEnv("HOME", home);
 });
 afterEach(() => {
+	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
 	rmSync(home, { recursive: true, force: true });
 });
