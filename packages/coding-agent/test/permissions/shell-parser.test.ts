@@ -131,6 +131,9 @@ describe("trusted shell parser", () => {
 	it("rejects trees larger than the node budget", () => {
 		const source = Array.from({ length: 4_000 }, () => "echo a").join("; ");
 		expect(Buffer.byteLength(source, "utf8")).toBeLessThan(32 * 1024);
+		// Freeze the clock so the node budget is the only budget under test; on a
+		// loaded machine the 100ms time budget can otherwise win the race.
+		const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now());
 		const parsed = parseShellSyntax(source, shellPath);
 		try {
 			expect(parsed.complete).toBe(false);
@@ -138,6 +141,7 @@ describe("trusted shell parser", () => {
 			expect(parsed.reason).toMatch(/node budget/u);
 		} finally {
 			parsed.dispose();
+			clock.mockRestore();
 		}
 	});
 
