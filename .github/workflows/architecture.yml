@@ -35,6 +35,16 @@ jobs:
           cache: npm
       - name: Install dependencies for source checks
         run: npm ci --ignore-scripts
+      - name: Check formatting and lint
+        run: npm run check:biome
+      - name: Check pinned dependencies
+        run: npm run check:pinned-deps
+      - name: Check generated protocol schema
+        run: npm run check:generated --workspace @metis/app-protocol
+      - name: Check dependency locks
+        run: npm run check:shrinkwrap && npm run check:install-lock:coding-agent
+      - name: Check source and test types
+        run: npm run check:types
       - name: Check TypeScript imports
         run: npm run check:ts-imports
       - name: Check package boundaries

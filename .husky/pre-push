@@ -1,0 +1,17 @@
+#!/bin/sh
+# Full repository gate. CI runs the same checks; skip only with --no-verify.
+BEFORE_STATUS=$(git status --porcelain)
+
+echo "Running the full pre-push gate (npm run check); this takes several minutes..."
+npm run check || exit 1
+
+# The full gate formats with --write. Changes introduced here are not committed
+# yet, so fail the push and let the author review and commit them instead of
+# pushing a commit that CI formatting will reject.
+if [ "$BEFORE_STATUS" != "$(git status --porcelain)" ]; then
+	echo "The full gate modified tracked files (formatting drift)."
+	echo "Review the changes, commit them, and push again."
+	exit 1
+fi
+
+echo "✅ Pre-push checks passed!"
