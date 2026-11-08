@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -7,6 +8,9 @@ export default defineConfig({
 		// developer machine, so keep the strict local timeout and give CI headroom
 		// instead of failing a correct test on a slow disk.
 		testTimeout: process.env.CI ? 30_000 : 15_000,
-		maxWorkers: process.env.CI && process.platform === "win32" ? 2 : undefined,
+		// These tests start real runtimes and journals; an unbounded worker pool
+		// on a many-core developer machine makes unrelated cases exceed their
+		// timeouts. Cap the pool so the full suite stays reliable and comparable.
+		maxWorkers: process.env.CI ? 2 : Math.min(4, availableParallelism()),
 	},
 });
