@@ -181,6 +181,7 @@ import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { ExtensionDialogSlot } from "./extension-dialog-slot.ts";
 import {
 	buildScopeGroups,
 	formatDiagnostics,
@@ -583,7 +584,14 @@ export class InteractiveMode {
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
-	private finishExtensionDialog: ((value?: string) => void) | undefined;
+	private extensionDialogSlotInstance: ExtensionDialogSlot | undefined;
+
+	// Lazy so prototype-based test harnesses (which bypass the constructor) keep
+	// working with the same dialog seam they exercised before.
+	private get extensionDialogSlot(): ExtensionDialogSlot {
+		this.extensionDialogSlotInstance ??= new ExtensionDialogSlot();
+		return this.extensionDialogSlotInstance;
+	}
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 	private permissionApprovalAbortController?: AbortController;
 
@@ -2030,7 +2038,7 @@ export class InteractiveMode {
 		options: string[],
 		opts?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
-		if (this.finishExtensionDialog) return Promise.resolve(undefined);
+		if (this.extensionDialogSlot.busy) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
@@ -2042,7 +2050,7 @@ export class InteractiveMode {
 				if (closed) return;
 				closed = true;
 				opts?.signal?.removeEventListener("abort", onAbort);
-				this.finishExtensionDialog = undefined;
+				this.extensionDialogSlot.end(finish);
 				this.hideExtensionSelector();
 				resolve(value);
 			};
@@ -2054,7 +2062,7 @@ export class InteractiveMode {
 				onToggleToolsExpanded: () => this.toggleToolOutputExpansion(),
 			});
 
-			this.finishExtensionDialog = finish;
+			this.extensionDialogSlot.begin(finish);
 			opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
 			this.editorContainer.clear();
@@ -2068,8 +2076,8 @@ export class InteractiveMode {
 	 * Hide the extension selector.
 	 */
 	private hideExtensionSelector(): void {
-		if (this.extensionSelector && this.finishExtensionDialog) {
-			this.finishExtensionDialog();
+		if (this.extensionSelector && this.extensionDialogSlot.busy) {
+			this.extensionDialogSlot.settle();
 			return;
 		}
 		this.extensionSelector?.dispose();
@@ -2108,7 +2116,7 @@ export class InteractiveMode {
 		placeholder?: string,
 		opts?: ExtensionUIDialogOptions & { secret?: boolean },
 	): Promise<string | undefined> {
-		if (this.finishExtensionDialog) return Promise.resolve(undefined);
+		if (this.extensionDialogSlot.busy) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
@@ -2120,7 +2128,7 @@ export class InteractiveMode {
 				if (closed) return;
 				closed = true;
 				opts?.signal?.removeEventListener("abort", onAbort);
-				this.finishExtensionDialog = undefined;
+				this.extensionDialogSlot.end(finish);
 				this.hideExtensionInput();
 				resolve(value);
 			};
@@ -2132,7 +2140,7 @@ export class InteractiveMode {
 				secret: opts?.secret,
 			});
 
-			this.finishExtensionDialog = finish;
+			this.extensionDialogSlot.begin(finish);
 			opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
 			this.editorContainer.clear();
@@ -2146,8 +2154,8 @@ export class InteractiveMode {
 	 * Hide the extension input.
 	 */
 	private hideExtensionInput(): void {
-		if (this.extensionInput && this.finishExtensionDialog) {
-			this.finishExtensionDialog();
+		if (this.extensionInput && this.extensionDialogSlot.busy) {
+			this.extensionDialogSlot.settle();
 			return;
 		}
 		this.extensionInput?.dispose();
@@ -2162,13 +2170,13 @@ export class InteractiveMode {
 	 * Show a multi-line editor for extensions (with Ctrl+G support).
 	 */
 	private showExtensionEditor(title: string, prefill?: string): Promise<string | undefined> {
-		if (this.finishExtensionDialog) return Promise.resolve(undefined);
+		if (this.extensionDialogSlot.busy) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
 			let closed = false;
 			const finish = (value?: string) => {
 				if (closed) return;
 				closed = true;
-				this.finishExtensionDialog = undefined;
+				this.extensionDialogSlot.end(finish);
 				this.hideExtensionEditor();
 				resolve(value);
 			};
@@ -2183,7 +2191,7 @@ export class InteractiveMode {
 				this.settingsManager.getExternalEditorCommand(),
 			);
 
-			this.finishExtensionDialog = finish;
+			this.extensionDialogSlot.begin(finish);
 
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.extensionEditor);
@@ -2196,8 +2204,8 @@ export class InteractiveMode {
 	 * Hide the extension editor.
 	 */
 	private hideExtensionEditor(): void {
-		if (this.extensionEditor && this.finishExtensionDialog) {
-			this.finishExtensionDialog();
+		if (this.extensionEditor && this.extensionDialogSlot.busy) {
+			this.extensionDialogSlot.settle();
 			return;
 		}
 		this.editorContainer.clear();
@@ -6890,7 +6898,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
-		this.finishExtensionDialog?.();
+		this.extensionDialogSlot.settle();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}
