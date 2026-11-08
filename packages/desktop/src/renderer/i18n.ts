@@ -2143,7 +2143,6 @@ const zhCN = {
 	"The command has not started.": "命令尚未执行。",
 	"Command completed": "已完成",
 	"Command stopped with an error": "已停止 · 未成功",
-	"Copy output": "复制输出",
 	"Command output": "命令输出",
 	"Waiting for command output…": "等待命令输出…",
 	"This command produced no output.": "此命令没有产生输出。",

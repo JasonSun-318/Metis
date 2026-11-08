@@ -2321,7 +2321,6 @@ export function SessionWorkspaceView({
 									panelId={`process-panel-${tab.id}`}
 									process={tab.process}
 									theme={theme}
-									onError={onError}
 									visible={panelVisible(tab.id)}
 								/>,
 							)

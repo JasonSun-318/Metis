@@ -3,7 +3,6 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy } from "../icons.tsx";
 import { TERMINAL_THEMES } from "./TerminalPanel.tsx";
 
 interface ProcessPanelProps {
@@ -11,10 +10,9 @@ interface ProcessPanelProps {
 	readonly panelId: string;
 	readonly theme: "dark" | "light";
 	readonly visible: boolean;
-	readonly onError: (cause: unknown) => void;
 }
 
-export function ProcessPanel({ process, panelId, theme, visible, onError }: ProcessPanelProps) {
+export function ProcessPanel({ process, panelId, theme, visible }: ProcessPanelProps) {
 	const { t } = useTranslation();
 	const hostRef = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<Terminal | null>(null);
@@ -85,36 +83,22 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 
 	return (
 		<section aria-label={t("Process")} className="process-panel" hidden={!visible} id={panelId} role="tabpanel">
-			<div className="process-toolbar">
-				<output className={`process-state is-${process.state}`}>
-					<span aria-hidden="true" />
-					{t(
-						process.state === "awaiting_approval"
-							? "Waiting for permission approval"
-							: process.state === "running"
-								? "Command running"
-								: process.state === "completed"
-									? "Command completed"
-									: "Command stopped with an error",
-					)}
-				</output>
-				<button
-					aria-label={t("Copy output")}
-					className="icon-button"
-					disabled={!process.output}
-					onClick={() => {
-						void navigator.clipboard.writeText(process.output).catch(onError);
-					}}
-					title={t("Copy output")}
-					type="button"
-				>
-					<Copy aria-hidden="true" size={14} />
-				</button>
-			</div>
 			<pre className="process-command">
 				<span aria-hidden="true">$ </span>
 				{process.command}
 			</pre>
+			<output className={`process-state is-${process.state}`}>
+				<span aria-hidden="true" />
+				{t(
+					process.state === "awaiting_approval"
+						? "Waiting for permission approval"
+						: process.state === "running"
+							? "Command running"
+							: process.state === "completed"
+								? "Command completed"
+								: "Command stopped with an error",
+				)}
+			</output>
 			{process.truncated && (
 				<p className="process-notice">{t("Showing the latest output; earlier output was truncated.")}</p>
 			)}
