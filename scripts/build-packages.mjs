@@ -23,7 +23,7 @@ const npmCommand = isWindows ? "npm.cmd" : "npm";
 
 export const BUILD_TASKS = [
 	{ name: "@metis/tui", dependencies: [] },
-	{ name: "@metis/ai", dependencies: [] },
+	{ name: "@metis/ai", dependencies: [], offlineScript: "build:offline" },
 	{ name: "@metis/app-protocol", dependencies: [] },
 	{ name: "@metis/agent-core", dependencies: ["@metis/ai"] },
 	{ name: "@metis/coding-agent", dependencies: ["@metis/tui", "@metis/ai", "@metis/agent-core"] },
@@ -51,10 +51,18 @@ export function buildTiers(tasks = BUILD_TASKS) {
 	return tiers;
 }
 
-function runBuild(name) {
+// `npm run build` regenerates the model catalog from upstream data. Callers that
+// only need compiled output (or must not rewrite data files) can opt into the
+// offline variant with METIS_SKIP_MODEL_REGENERATION=1.
+export function buildScriptFor(task, environment = process.env) {
+	return environment.METIS_SKIP_MODEL_REGENERATION === "1" && task.offlineScript ? task.offlineScript : "build";
+}
+
+function runBuild(task) {
+	const script = buildScriptFor(task);
 	return new Promise((resolveRun) => {
 		const startedAt = Date.now();
-		const child = spawn(npmCommand, ["run", "build", "--workspace", name], {
+		const child = spawn(npmCommand, ["run", script, "--workspace", task.name], {
 			cwd: root,
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: isWindows,
@@ -126,12 +134,14 @@ async function main() {
 		pending.delete(task.name);
 		active += 1;
 		console.log(`  ▶ ${task.name}`);
-		void runBuild(task.name).then((result) => {
+		void runBuild(task).then((result) => {
 			active -= 1;
 			timings.push(result);
 			if (result.status === 0) {
 				completed.add(task.name);
-				console.log(`  ✓ ${task.name} (${formatSeconds(result.durationMs)})`);
+				console.log(
+					`  ✓ ${task.name}${result.script === "build" ? "" : ` (${result.script})`} (${formatSeconds(result.durationMs)})`,
+				);
 			} else {
 				failures.push(result);
 				console.log(`  ✗ ${task.name} (${formatSeconds(result.durationMs)})`);

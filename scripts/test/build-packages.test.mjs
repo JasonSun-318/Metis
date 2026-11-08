@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUILD_TASKS, buildTiers } from "../build-packages.mjs";
+import { BUILD_TASKS, buildScriptFor, buildTiers } from "../build-packages.mjs";
 
 test("build tiers respect every declared dependency", () => {
 	const tiers = buildTiers();
@@ -22,6 +22,15 @@ test("build tiers respect every declared dependency", () => {
 		}
 	}
 	assert.equal(seen.size, BUILD_TASKS.length);
+});
+
+test("model data regeneration can be skipped for offline builds", () => {
+	const ai = BUILD_TASKS.find((task) => task.name === "@metis/ai");
+	const appServer = BUILD_TASKS.find((task) => task.name === "@metis/app-server");
+	assert.ok(ai && appServer);
+	assert.equal(buildScriptFor(ai, {}), "build");
+	assert.equal(buildScriptFor(ai, { METIS_SKIP_MODEL_REGENERATION: "1" }), "build:offline");
+	assert.equal(buildScriptFor(appServer, { METIS_SKIP_MODEL_REGENERATION: "1" }), "build");
 });
 
 test("the build plan rejects cycles and unknown dependencies", () => {
