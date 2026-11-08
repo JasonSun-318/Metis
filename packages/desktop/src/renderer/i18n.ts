@@ -1094,6 +1094,10 @@ const zhCN = {
 	"Capture decisions, actions, and owners": "提取结论、待办与负责人",
 	"Turn the meeting notes I provide into a summary with key discussion points, decisions, action items, owners, and deadlines. Mark missing information as unconfirmed instead of inventing it. First remind me to paste the notes or attach a file.":
 		"请把我提供的会议记录整理成会议纪要，包含讨论要点、明确结论、待办事项、负责人和截止时间。没有明确的信息标为待确认，不要自行编造。请先提醒我粘贴记录或添加文件。",
+	"Brainstorm ideas": "头脑风暴",
+	"Explore several directions and choose a starting point": "发散思路，选出值得尝试的方向",
+	"Help me brainstorm ideas for [topic or goal]. Ask about the audience and constraints if needed. Suggest several distinct directions, explain what makes each promising, and help me choose one to develop.":
+		"请围绕[主题或目标]和我一起头脑风暴。如果需要，先问我面向谁、有哪些限制。提出几个不同的方向，说明各自值得尝试的理由，并帮我选一个继续细化。",
 	"Implement a feature": "实现功能",
 	"Turn a requirement into a working change": "把需求变成可运行的改动",
 	"Help me implement [feature] in this project. First inspect the relevant code and explain the current behavior, then propose a small implementation plan. Clarify acceptance criteria, constraints, and affected files when they are missing. Implement the change only after the approach is clear, and verify it with focused tests.":
@@ -1118,6 +1122,14 @@ const zhCN = {
 	"Measure a bottleneck and optimize with evidence": "定位瓶颈，用证据指导优化",
 	"Investigate and improve the performance of [operation] in this project. First measure or trace the current bottleneck and establish a useful baseline. Ask for the target workload or constraints if essential information is missing. Propose the smallest evidence-based optimization and verify that behavior remains correct with focused checks.":
 		"请调查并优化这个项目中[操作]的性能。先测量或追踪当前瓶颈，建立有用的基线。缺少目标工作负载或限制条件时，请先和我确认。提出最小且有证据支持的优化方案，并用有针对性的检查确认行为仍然正确。",
+	"Refactor code": "重构代码",
+	"Simplify structure while preserving behavior": "简化结构，保持现有行为",
+	"Help me refactor [file or module] in this project. Inspect the current behavior and callers first. Propose a focused change that improves readability without changing behavior, then verify it with relevant tests.":
+		"请帮我重构项目中的[文件或模块]。先了解现有行为和调用方，再提出范围明确的修改，让代码更易读并保持现有行为，最后用相关测试验证。",
+	"Update project documentation": "补充文档",
+	"Explain setup, usage, or key decisions": "说明配置、用法或关键决定",
+	"Help me update the documentation for [feature or workflow] in this project. Check the implementation and existing docs, then add concise instructions and verified examples where useful. Ask me to clarify the audience or scope if needed.":
+		"请帮我补充项目中[功能或流程]的文档。先核对实际实现和已有文档，再补上简明的说明，必要时给出经过验证的示例。如果读者或范围不明确，请先和我确认。",
 	"Message Metis": "向 Metis 发送消息",
 	"Describe a task or ask a question": "描述任务或提出问题",
 	"Steer the active task…": "引导正在运行的任务…",

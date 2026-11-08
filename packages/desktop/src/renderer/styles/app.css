@@ -801,9 +801,7 @@ textarea { resize: none; }
 	z-index: 1;
 	inset: 100% 0 auto;
 	display: grid;
-	width: min(100%, 520px);
 	grid-template-rows: 0fr;
-	margin-inline: auto;
 	visibility: hidden;
 	opacity: 0;
 	transition: grid-template-rows var(--new-task-drawer-transition), opacity 200ms ease, visibility 240ms;
@@ -815,8 +813,8 @@ textarea { resize: none; }
 }
 .new-task-more-drawer-clip { min-height: 0; overflow: clip; }
 .new-task-more-drawer-body { padding: 8px 0 2px; }
-.new-task-more-drawer-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 4px; border: 1px solid var(--home-border); border-radius: 12px; background: var(--home-panel); padding: 5px; }
-.new-task-starter-extra { display: flex; width: 100%; min-height: 50px; align-items: flex-start; gap: 10px; border: 0; padding: 7px 9px; }
+.new-task-more-drawer-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.new-task-starter-extra { display: flex; width: 100%; min-height: 56px; align-items: flex-start; gap: 10px; border-radius: 10px; background: var(--home-panel); padding: 9px 12px; }
 .new-task-starter-extra:focus-visible { outline-offset: -2px; }
 .new-task-starter-extra > svg { margin-top: 1px; }
 .new-task-starter-extra .new-task-starter-copy { gap: 2px; }

@@ -67,7 +67,7 @@ describe("new task home content", () => {
 		}
 	});
 
-	it("has the agreed nine starters in reading order", () => {
+	it("has the Chat starters in reading order", () => {
 		expect(HOME_STARTERS.map((item) => item.id)).toEqual([
 			"report",
 			"slides",
@@ -78,11 +78,12 @@ describe("new task home content", () => {
 			"writing",
 			"compare",
 			"meeting",
+			"brainstorm",
 		]);
 		expect(new Set(HOME_GREETINGS.map((item) => item.id)).size).toBe(19);
 	});
 
-	it("returns the six Code starters in the agreed order", () => {
+	it("returns the Code starters in reading order", () => {
 		expect(getHomeStarters("chat")).toBe(HOME_STARTERS);
 		expect(getHomeStarters("code").map((item) => item.id)).toEqual([
 			"feature",
@@ -91,9 +92,9 @@ describe("new task home content", () => {
 			"review",
 			"test",
 			"performance",
+			"refactor",
+			"docs",
 		]);
-		expect(getHomeStarters("code")).toHaveLength(6);
-		expect(new Set(getHomeStarters("code").map((item) => item.id)).size).toBe(6);
 		for (const starter of getHomeStarters("code")) {
 			expect(starter.prompt.length).toBeGreaterThan(100);
 			expect(starter.title.length).toBeGreaterThan(0);

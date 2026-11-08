@@ -263,7 +263,8 @@ test.describe("new task home workspace and compact layout", () => {
 				await expect(label).toHaveCSS("opacity", "0");
 				await expect(trigger).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 				await expect(trigger).toHaveCSS("box-shadow", "none");
-				await expect(page.locator(".new-task-starter:visible")).toHaveCount(mode === "chat" ? 9 : 6);
+				const cards = drawer.getByRole("button");
+				await expect(cards).toHaveCount(mode === "chat" ? 6 : 4);
 				expect(await snapshot(page)).toMatchObject({
 					heading: closedLayout.heading,
 					composer: closedLayout.composer,
@@ -271,6 +272,13 @@ test.describe("new task home workspace and compact layout", () => {
 				});
 				const drawerBounds = (await drawer.boundingBox())!;
 				expect(drawerBounds.y).toBeCloseTo(closedLayout.shortcuts.at(-1)!.bottom);
+				const firstCard = (await cards.first().boundingBox())!;
+				const lastCard = (await cards.last().boundingBox())!;
+				const penultimateCard = (await cards.nth(-2).boundingBox())!;
+				expect(firstCard.x).toBeCloseTo(closedLayout.composer.left);
+				expect(lastCard.x + lastCard.width).toBeCloseTo(closedLayout.composer.left + closedLayout.composer.width);
+				expect(lastCard.width).toBeCloseTo(firstCard.width);
+				expect(lastCard.y).toBeCloseTo(penultimateCard.y);
 				const openRecent = (await recent.boundingBox())!;
 				expect(openRecent.y).toBeGreaterThan(recentBounds.y);
 				expect(openRecent.y).toBeGreaterThanOrEqual(drawerBounds.y + drawerBounds.height);
@@ -304,14 +312,16 @@ test.describe("new task home workspace and compact layout", () => {
 		}
 	}
 
-	test("Code requires a workspace and retains its draft when a directory is chosen", async ({ page }) => {
+	test("Code retains its draft when a workspace directory is chosen", async ({ page }) => {
 		const errors = monitorPageErrors(page);
 		await page.setViewportSize({ width: 900, height: 640 });
 		await page.goto(`${fixture.url}/?mode=code&folder=none`, { waitUntil: "load" });
 		await waitForHome(page);
 		await page.locator("#composer-input").fill("Implement my feature");
-		await expect(page.locator(".composer-send")).toBeDisabled();
+		const state = page.locator("output[data-workspace-folder]");
+		await expect(state).toHaveAttribute("data-workspace-folder", "");
 		await page.locator(".home-project-picker-browse").click();
+		await expect(state).toHaveAttribute("data-workspace-folder", "/tmp/metis-home-qa");
 		await expect(page.locator(".composer-send")).toBeEnabled();
 		await expect(page.locator("#composer-input")).toHaveText("Implement my feature");
 		await page.locator(".composer-send").click();
@@ -343,12 +353,12 @@ test.describe("new task home workspace and compact layout", () => {
 		await expect(trigger).toHaveAttribute("aria-expanded", "true");
 		await expect(page.locator('[data-starter-id="test"]')).toBeVisible();
 		await expect(trigger).toBeFocused();
-		await page.keyboard.press("Tab");
-		await expect(page.locator('[data-starter-id="test"]')).toBeFocused();
-		await page.keyboard.press("Tab");
-		await expect(page.locator('[data-starter-id="performance"]')).toBeFocused();
-		await assertWithinViewport(page, '[data-starter-id="performance"]');
-		await expect(page.locator('[data-starter-id="performance"]')).toHaveCSS("outline-style", "solid");
+		for (const id of ["test", "performance", "refactor", "docs"]) {
+			await page.keyboard.press("Tab");
+			await expect(page.locator(`[data-starter-id="${id}"]`)).toBeFocused();
+		}
+		await assertWithinViewport(page, '[data-starter-id="docs"]');
+		await expect(page.locator('[data-starter-id="docs"]')).toHaveCSS("outline-style", "solid");
 		await page.screenshot({ path: testInfo.outputPath("code-keyboard-focus.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
 		await expect(trigger).toBeFocused();
@@ -390,8 +400,8 @@ test.describe("new task home workspace and compact layout", () => {
 		const trigger = page.locator(".new-task-more-trigger");
 		await trigger.click();
 		await expect(trigger.locator(".new-task-more-arrow")).toHaveCSS("rotate", "0deg");
-		const lastTask = page.locator('[data-starter-id="meeting"]');
+		const lastTask = page.getByRole("button", { name: "Brainstorm ideas" });
 		await lastTask.scrollIntoViewIfNeeded();
-		await assertWithinViewport(page, '[data-starter-id="meeting"]');
+		await assertWithinViewport(page, '[data-starter-id="brainstorm"]');
 	});
 });

@@ -17,12 +17,15 @@ export type HomeStarterId =
 	| "writing"
 	| "compare"
 	| "meeting"
+	| "brainstorm"
 	| "feature"
 	| "debug"
 	| "explain"
 	| "review"
 	| "test"
-	| "performance";
+	| "performance"
+	| "refactor"
+	| "docs";
 
 export interface HomeStarter {
 	readonly id: HomeStarterId;
@@ -241,6 +244,13 @@ export const HOME_STARTERS: readonly HomeStarter[] = [
 		prompt:
 			"Turn the meeting notes I provide into a summary with key discussion points, decisions, action items, owners, and deadlines. Mark missing information as unconfirmed instead of inventing it. First remind me to paste the notes or attach a file.",
 	},
+	{
+		id: "brainstorm",
+		title: "Brainstorm ideas",
+		description: "Explore several directions and choose a starting point",
+		prompt:
+			"Help me brainstorm ideas for [topic or goal]. Ask about the audience and constraints if needed. Suggest several distinct directions, explain what makes each promising, and help me choose one to develop.",
+	},
 ];
 
 export const CODE_HOME_STARTERS: readonly HomeStarter[] = [
@@ -285,6 +295,20 @@ export const CODE_HOME_STARTERS: readonly HomeStarter[] = [
 		description: "Measure a bottleneck and optimize with evidence",
 		prompt:
 			"Investigate and improve the performance of [operation] in this project. First measure or trace the current bottleneck and establish a useful baseline. Ask for the target workload or constraints if essential information is missing. Propose the smallest evidence-based optimization and verify that behavior remains correct with focused checks.",
+	},
+	{
+		id: "refactor",
+		title: "Refactor code",
+		description: "Simplify structure while preserving behavior",
+		prompt:
+			"Help me refactor [file or module] in this project. Inspect the current behavior and callers first. Propose a focused change that improves readability without changing behavior, then verify it with relevant tests.",
+	},
+	{
+		id: "docs",
+		title: "Update project documentation",
+		description: "Explain setup, usage, or key decisions",
+		prompt:
+			"Help me update the documentation for [feature or workflow] in this project. Check the implementation and existing docs, then add concise instructions and verified examples where useful. Ask me to clarify the audience or scope if needed.",
 	},
 ];
 

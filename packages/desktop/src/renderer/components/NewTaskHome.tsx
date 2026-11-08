@@ -3,6 +3,7 @@ import { type ReactNode, type Ref, useEffect, useId, useLayoutEffect, useRef, us
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import {
+	BracketsCurly,
 	Bug,
 	CalendarBlank,
 	CaretDown,
@@ -14,8 +15,10 @@ import {
 	FolderSimple,
 	Gauge,
 	GitDiff,
+	Lightbulb,
 	ListChecks,
 	MagnifyingGlass,
+	Notebook,
 	PencilSimple,
 	PresentationChart,
 	Scales,
@@ -42,12 +45,15 @@ const starterIcons: Record<HomeStarterId, typeof FileText> = {
 	writing: PencilSimple,
 	compare: Scales,
 	meeting: ListChecks,
+	brainstorm: Lightbulb,
 	feature: Tool,
 	debug: Bug,
 	explain: TreeStructure,
 	review: GitDiff,
 	test: TestTube,
 	performance: Gauge,
+	refactor: BracketsCurly,
+	docs: Notebook,
 };
 
 const shortcutLabels: Partial<Record<HomeStarterId, string>> = {
@@ -259,7 +265,6 @@ export function NewTaskHome({
 									selectionSessionId={selectionSessionId}
 									skills={skills}
 									knowledge={knowledge}
-									submitDisabled={mode === "code" && folder === null}
 									thinkingControl={thinkingControl}
 								/>
 								<fieldset aria-label={t("Workspace")} className="control-group new-task-home-project-control">
