@@ -16,6 +16,7 @@ import { AgentSessionRuntimeHost } from "../src/agent-session-runtime-host.ts";
 import { BROWSER_TOOL_NAMES } from "../src/browser-tools.ts";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
 import { opaqueId } from "../src/item-projection.ts";
+import { ProjectedItemCache } from "../src/projection/journal-item-history.ts";
 import type { OpenedSessionRuntime, SessionRef } from "../src/session-runtime-host.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
@@ -42,6 +43,157 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		vi.restoreAllMocks();
 		for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
+
+	it("reads persisted process history through the opened runtime without starting a turn", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-runtime-process-"));
+		temporaryRoots.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(agentDir);
+		mkdirSync(cwd);
+		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), { id: SESSION_ID, mode: "chat" });
+		for (const id of ["first", "second"]) {
+			manager.appendMessage({
+				role: "assistant",
+				content: [{ type: "toolCall", id, name: "bash", arguments: { command: "pwd" } }],
+				api: "openai-completions",
+				provider: "openai",
+				model: "test",
+				stopReason: "toolUse",
+				timestamp: 1,
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			});
+			manager.appendMessage({
+				role: "toolResult",
+				toolName: "bash",
+				toolCallId: id,
+				content: [{ type: "text", text: id }],
+				isError: false,
+				timestamp: 2,
+			});
+		}
+		const path = manager.getSessionFile()!;
+		const timestamp = manager.getHeader()!.timestamp;
+		manager.close();
+		const opened = await new AgentSessionRuntimeHost({ agentDir }).open({
+			path,
+			relativePath: basename(path),
+			summary: {
+				sessionId: SESSION_ID,
+				mode: "chat",
+				cwd,
+				cwdOrigin: "user-selected",
+				createdAt: timestamp,
+				updatedAt: timestamp,
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		});
+		try {
+			expect(await opened.readProcess({ sessionId: SESSION_ID })).toMatchObject({
+				total: 2,
+				index: 1,
+				process: { command: "pwd", output: "second", state: "completed" },
+			});
+			expect(await opened.readProcess({ sessionId: SESSION_ID, index: 0 })).toMatchObject({
+				total: 2,
+				index: 0,
+				process: { command: "pwd", output: "first", state: "completed" },
+			});
+			expect((await opened.snapshot(EPOCH, () => 1)).session.state).toBe("idle");
+		} finally {
+			await opened.close();
+		}
+	});
+
+	it.each([false, true])(
+		"opens history lazily and preserves context while paging (images=%s)",
+		async (withImage) => {
+			const root = mkdtempSync(join(tmpdir(), "metis-lazy-history-"));
+			temporaryRoots.push(root);
+			const agentDir = join(root, "agent");
+			const cwd = join(root, "project");
+			mkdirSync(agentDir);
+			mkdirSync(cwd);
+			const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
+				id: SESSION_ID,
+				mode: "code",
+				permissionPreset: "full",
+			});
+			const ids = Array.from({ length: 450 }, (_, index) =>
+				manager.appendMessage({ role: "user", content: `history ${index}`, timestamp: index + 1 }),
+			);
+			const image = {
+				type: "image" as const,
+				mimeType: "image/png",
+				data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6r9sAAAAASUVORK5CYII=",
+			};
+			if (withImage) ids.push(manager.appendMessage({ role: "user", content: [image], timestamp: 451 }));
+			const expectedContext = manager.buildSessionContext();
+			const header = manager.getHeader()!;
+			const path = manager.getSessionFile()!;
+			manager.close();
+			const reads = vi.spyOn(ProjectedItemCache.prototype, "read");
+			const opened = await new AgentSessionRuntimeHost({ agentDir }).open({
+				path,
+				relativePath: basename(path),
+				summary: {
+					sessionId: SESSION_ID,
+					mode: "code",
+					cwdOrigin: "user-selected",
+					cwd,
+					createdAt: header.timestamp,
+					updatedAt: header.timestamp,
+					state: "idle",
+					archived: false,
+					unread: false,
+					useMemory: true,
+					contributeMemory: true,
+				},
+			});
+			try {
+				expect(reads).not.toHaveBeenCalled();
+				const initial = await opened.snapshot(EPOCH, () => 1);
+				expect(initial.recentItems.map((item) => item.itemId)).toEqual(ids.slice(-200));
+				const messageIds = new Set(ids);
+				expect(
+					new Set(reads.mock.calls.map(([, itemId]) => itemId).filter((itemId) => messageIds.has(itemId))).size,
+				).toBe(201);
+				const all = [...initial.recentItems];
+				let beforeItemId = initial.nextBeforeItemId;
+				while (beforeItemId) {
+					const page = await opened.readItems({ sessionId: SESSION_ID, beforeItemId, limit: 200 });
+					all.unshift(...page.items);
+					beforeItemId = page.nextBeforeItemId;
+				}
+				expect(all.map((item) => item.itemId)).toEqual(ids);
+				expect(all.slice(0, 450).map((item) => item.content)).toEqual(
+					Array.from({ length: 450 }, (_, index) => [{ type: "text", text: `history ${index}` }]),
+				);
+				if (withImage)
+					expect(all.at(-1)?.content).toMatchObject([{ type: "image", image: { mediaType: "image/png" } }]);
+				const internal = opened as unknown as { session: AgentSession };
+				const old = internal.session.sessionManager.getEntry(ids[0]!);
+				if (old?.type !== "message") throw new Error("Expected historical message");
+				expect(Object.getOwnPropertyDescriptor(old.message, "content")?.get).toBeTypeOf("function");
+				expect(internal.session.sessionManager.buildSessionContext()).toEqual(expectedContext);
+				expect((await opened.snapshot(EPOCH, () => 2)).recentItems).toEqual(initial.recentItems);
+			} finally {
+				await opened.close();
+			}
+		},
+		30_000,
+	);
 
 	it.each(["startTurn", "steer", "queueTurn"] as const)(
 		"cleans only newly imported attachments when %s fails",

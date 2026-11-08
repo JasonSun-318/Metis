@@ -333,6 +333,21 @@ export class AgentSessionRuntime {
 		return this.queuedTurnQueue.list();
 	}
 
+	canEvictWhenIdle(): boolean {
+		return (
+			!this.disposeRequested &&
+			!this.disposed &&
+			!this.terminalError &&
+			this.pendingLifecycleOperations === 0 &&
+			this.acceptedTasks.size === 0 &&
+			!this.queuedTurnDrainTask &&
+			this.queuedTurnQueue.list().length === 0 &&
+			this._recoverableDrafts.length === 0 &&
+			this._session.canEvictWhenIdle() &&
+			(this.agentCoordinator.manager?.canEvictWhenIdle() ?? true)
+		);
+	}
+
 	subscribeQueuedTurns(listener: (turns: readonly QueuedTurnDraft[]) => void): () => void {
 		this.assertPubliclyAccessible();
 		this.queuedTurnListeners.add(listener);

@@ -2,7 +2,6 @@ import {
 	identifyRuntimeRequest,
 	RequestIdReusedError,
 	type RuntimeRequestIdentity,
-	reduceRuntimeJournal,
 	type SessionManager,
 } from "@metis/coding-agent/host";
 import { AppServerError } from "./session-runtime-host.ts";
@@ -28,7 +27,7 @@ function identity(input: DurableSessionMutation): RuntimeRequestIdentity {
 
 function storedResult(manager: SessionManager, request: RuntimeRequestIdentity): unknown | undefined {
 	let result: unknown;
-	for (const raw of manager.getDurableJournalSnapshot()) {
+	for (const raw of manager.getJournalMetadata()) {
 		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
 		const entry = raw as unknown as Record<string, unknown>;
 		if (entry.type !== "custom" || entry.customType !== RESULT_ENTRY_TYPE) {
@@ -52,7 +51,7 @@ export function prepareSessionMutation(
 	input: DurableSessionMutation,
 ): PreparedSessionMutation {
 	const request = identity(input);
-	const reduced = reduceRuntimeJournal(manager.getDurableJournalSnapshot());
+	const reduced = manager.getRuntimeRecovery();
 	const operation = reduced.operations.find((candidate) => candidate.requestId === request.requestId);
 	if (operation && operation.requestHash !== request.requestHash) throw new RequestIdReusedError(request.requestId);
 	if (operation && operation.kind !== input.kind) throw new RequestIdReusedError(request.requestId);

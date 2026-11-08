@@ -158,6 +158,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 		throw new Error("No MCP server in fixture");
 	}
 
+	async readProcess(): Promise<ClientResult<"session/readProcess">> {
+		return { total: 0, index: 0, process: null };
+	}
+
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
 		return this.projection.readItems(input);
 	}
@@ -247,6 +251,10 @@ class PausableRuntime implements OpenedSessionRuntime {
 
 	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
 		throw new Error("No agent archive in reconnect fixture");
+	}
+
+	async renameAgent(): Promise<ClientResult<"agent/rename">> {
+		throw new Error("No agent rename in fixture");
 	}
 
 	async deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">> {

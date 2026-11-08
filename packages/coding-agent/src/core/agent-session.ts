@@ -250,7 +250,6 @@ import {
 	prepareMicrocompaction,
 } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
-import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
 import { createAllToolDefinitions, getDefaultToolNames } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
@@ -1189,6 +1188,29 @@ export class AgentSession {
 		return this._permissionRuntime.activeGrantCount;
 	}
 
+	/** Reopening must not discard session-scoped authority, resources or pending input. */
+	canEvictWhenIdle(): boolean {
+		return (
+			!this.isStreaming &&
+			!this.isCompacting &&
+			this.activeDurableTurnId === undefined &&
+			this.pendingMessageCount === 0 &&
+			this._pendingNextTurnMessages.length === 0 &&
+			this._pendingBashMessages.length === 0 &&
+			this._pendingSkillPaths.size === 0 &&
+			!this._pendingSessionStartContext &&
+			!this._stopHookActive &&
+			!this._activeWorkDir &&
+			!this._contextUsage.hasRetainedState() &&
+			this._trustedUserMessages.length === 0 &&
+			this.permissionGrantCount === 0 &&
+			(this._sessionPermissionRules?.size ?? 0) === 0 &&
+			this.resourceLoader.getExtensions().extensions.length === 0 &&
+			(this.mcp?.getServerConfigs().length ?? 0) === 0 &&
+			(!this._interactiveBashBoundary || this._interactiveBashBoundary.hasRetainedResources?.() === false)
+		);
+	}
+
 	/**
 	 * Recent prompt-cache layout observations (most recent last, at most 64).
 	 * Empty unless promptCache.diagnostics is enabled; observations carry
@@ -1457,7 +1479,7 @@ export class AgentSession {
 	private _restoreAgentMailbox(): void {
 		const startedDeliveries = new Set<string>();
 		const deliveredEventIds = new Set<string>();
-		for (const entry of this.sessionManager.getDurableJournalSnapshot()) {
+		for (const entry of this.sessionManager.getJournalMetadata()) {
 			if (entry.type === "agent_mailbox_event") {
 				this._knownAgentMailboxEventIds.add(entry.event.eventId);
 				if (!this._pendingAgentMailboxEvents.has(entry.event.eventId)) {
@@ -1646,7 +1668,7 @@ export class AgentSession {
 	}
 
 	private _agentInputForRequest(requestId: string): AgentInputEntry | undefined {
-		const journal = [...this.sessionManager.getDurableJournalSnapshot()].reverse();
+		const journal = [...this.sessionManager.getJournalMetadata()].reverse();
 		const direct = journal.find(
 			(entry): entry is AgentInputEntry => entry.type === "agent_input" && entry.messageId === requestId,
 		);
@@ -1678,7 +1700,7 @@ export class AgentSession {
 
 	private _projectAgentInputSources(messages: AgentMessage[]): AgentMessage[] {
 		if (!this.sessionManager.getHeader()?.agent) return messages;
-		const journal = this.sessionManager.getDurableJournalSnapshot();
+		const journal = this.sessionManager.getJournalMetadata();
 		const inputs = new Map(
 			journal.flatMap((entry) => (entry.type === "agent_input" ? [[entry.messageId, entry] as const] : [])),
 		);
@@ -3615,7 +3637,6 @@ export class AgentSession {
 			this._modelRegistry.authStorage.reload();
 			this._modelRegistry.refresh();
 			this._refreshCurrentModelFromRegistry();
-			this._applyImageToolSettings();
 			this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 			this.refreshSystemPrompt();
 		} finally {
@@ -6423,7 +6444,6 @@ export class AgentSession {
 		const defaultActiveToolNames = this._baseToolDefinitionsOverride
 			? this._baseToolDefinitionsOverride.map(({ name }) => name)
 			: getDefaultToolNames({
-					visionEnabled: this._visionServiceReady() && this._canActivateDescribeImage(),
 					webSearchEnabled: this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch(),
 					isSubagent: this.sessionManager.getHeader()?.agent !== undefined,
 				});
