@@ -199,6 +199,7 @@ import {
 	listLoginProviderOptions,
 	listLogoutProviderOptions,
 } from "./provider-auth-options.ts";
+import { matchSlashCommand } from "./slash-command.ts";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -2907,168 +2908,172 @@ export class InteractiveMode {
 			if (compactionRoute === "handled") return;
 
 			// Handle commands
-			if (text === "/settings") {
-				this.showSettingsSelector();
-				this.editor.setText("");
-				return;
+			const slashCommand = matchSlashCommand(text);
+			if (slashCommand) {
+				switch (slashCommand.id) {
+					case "settings": {
+						this.showSettingsSelector();
+						this.editor.setText("");
+						return;
+					}
+					case "permissions": {
+						this.editor.setText("");
+						this.showPermissionsSelector();
+						return;
+					}
+					case "scoped-models": {
+						this.editor.setText("");
+						await this.showModelsSelector();
+						return;
+					}
+					case "model": {
+						const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
+						this.editor.setText("");
+						await this.handleModelCommand(searchTerm);
+						return;
+					}
+					case "export": {
+						await this.handleExportCommand(text);
+						this.editor.setText("");
+						return;
+					}
+					case "import": {
+						await this.handleImportCommand(text);
+						this.editor.setText("");
+						return;
+					}
+					case "copy": {
+						await this.handleCopyCommand();
+						this.editor.setText("");
+						return;
+					}
+					case "name": {
+						this.handleNameCommand(text);
+						this.editor.setText("");
+						return;
+					}
+					case "session": {
+						this.handleSessionCommand();
+						this.editor.setText("");
+						return;
+					}
+					case "hotkeys": {
+						this.handleHotkeysCommand();
+						this.editor.setText("");
+						return;
+					}
+					case "fork": {
+						this.showUserMessageSelector();
+						this.editor.setText("");
+						return;
+					}
+					case "clone": {
+						this.editor.setText("");
+						await this.handleCloneCommand();
+						return;
+					}
+					case "tree": {
+						this.showTreeSelector();
+						this.editor.setText("");
+						return;
+					}
+					case "trust": {
+						this.showTrustSelector();
+						this.editor.setText("");
+						return;
+					}
+					case "login": {
+						const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
+						this.editor.setText("");
+						await this.handleLoginCommand(providerRef);
+						return;
+					}
+					case "logout": {
+						this.showOAuthSelector("logout");
+						this.editor.setText("");
+						return;
+					}
+					case "add-dir": {
+						const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/add-dir");
+						this.editor.setText("");
+						this.handleAddDirectoryCommand(inputPath);
+						return;
+					}
+					case "remove-dir": {
+						const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/remove-dir");
+						this.editor.setText("");
+						this.handleRemoveDirectoryCommand(inputPath);
+						return;
+					}
+					case "dirs": {
+						this.editor.setText("");
+						this.handleDirectoriesCommand(text.slice("/dirs".length).trim());
+						return;
+					}
+					case "new": {
+						this.editor.setText("");
+						await this.handleNewSessionCommand(text);
+						return;
+					}
+					case "compact": {
+						const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
+						this.editor.setText("");
+						await this.handleCompactCommand(customInstructions);
+						return;
+					}
+					case "memory": {
+						const action = text.slice(7).trim();
+						this.editor.setText("");
+						await this.handleMemoryCommand(action);
+						return;
+					}
+					case "dream": {
+						this.editor.setText("");
+						this.showWarning(DREAM_REMOVED_MESSAGE);
+						return;
+					}
+					case "schedule": {
+						this.editor.setText("");
+						await this.handleScheduleCommand();
+						return;
+					}
+					case "schedule-usage": {
+						this.editor.setText("");
+						this.showWarning("Usage: /schedule");
+						return;
+					}
+					case "mcp": {
+						this.editor.setText("");
+						await this.handleMcpCommand();
+						return;
+					}
+					case "mcp-usage": {
+						this.editor.setText("");
+						this.showWarning("Use /mcp and choose an action from the menu.");
+						return;
+					}
+					case "reload": {
+						this.editor.setText("");
+						await this.handleReloadCommand();
+						return;
+					}
+					case "debug": {
+						this.handleDebugCommand();
+						this.editor.setText("");
+						return;
+					}
+					case "resume": {
+						this.showSessionSelector();
+						this.editor.setText("");
+						return;
+					}
+					case "quit": {
+						this.editor.setText("");
+						await this.shutdown();
+						return;
+					}
+				}
 			}
-			if (text === "/permissions") {
-				this.editor.setText("");
-				this.showPermissionsSelector();
-				return;
-			}
-			if (text === "/scoped-models") {
-				this.editor.setText("");
-				await this.showModelsSelector();
-				return;
-			}
-			if (text === "/model" || text.startsWith("/model ")) {
-				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleModelCommand(searchTerm);
-				return;
-			}
-			if (text === "/export" || text.startsWith("/export ")) {
-				await this.handleExportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/import" || text.startsWith("/import ")) {
-				await this.handleImportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/copy") {
-				await this.handleCopyCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/name" || text.startsWith("/name ")) {
-				this.handleNameCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/session") {
-				this.handleSessionCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/hotkeys") {
-				this.handleHotkeysCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/fork") {
-				this.showUserMessageSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/clone") {
-				this.editor.setText("");
-				await this.handleCloneCommand();
-				return;
-			}
-			if (text === "/tree") {
-				this.showTreeSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/trust") {
-				this.showTrustSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/login" || text.startsWith("/login ")) {
-				const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleLoginCommand(providerRef);
-				return;
-			}
-			if (text === "/logout") {
-				this.showOAuthSelector("logout");
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/add-dir" || text.startsWith("/add-dir ")) {
-				const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/add-dir");
-				this.editor.setText("");
-				this.handleAddDirectoryCommand(inputPath);
-				return;
-			}
-			if (text === "/remove-dir" || text.startsWith("/remove-dir ")) {
-				const inputPath = this.getWorkspaceDirectoryCommandArgument(text, "/remove-dir");
-				this.editor.setText("");
-				this.handleRemoveDirectoryCommand(inputPath);
-				return;
-			}
-			if (text === "/dirs" || text.startsWith("/dirs ")) {
-				this.editor.setText("");
-				this.handleDirectoriesCommand(text.slice("/dirs".length).trim());
-				return;
-			}
-			if (text === "/new" || text.startsWith("/new ")) {
-				this.editor.setText("");
-				await this.handleNewSessionCommand(text);
-				return;
-			}
-			if (text === "/compact" || text.startsWith("/compact ")) {
-				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
-				this.editor.setText("");
-				await this.handleCompactCommand(customInstructions);
-				return;
-			}
-			if (text === "/memory" || text.startsWith("/memory ")) {
-				const action = text.slice(7).trim();
-				this.editor.setText("");
-				await this.handleMemoryCommand(action);
-				return;
-			}
-			if (text === "/dream" || text.startsWith("/dream ")) {
-				this.editor.setText("");
-				this.showWarning(DREAM_REMOVED_MESSAGE);
-				return;
-			}
-			if (text === "/schedule") {
-				this.editor.setText("");
-				await this.handleScheduleCommand();
-				return;
-			}
-			if (text.startsWith("/schedule ")) {
-				this.editor.setText("");
-				this.showWarning("Usage: /schedule");
-				return;
-			}
-			if (text === "/mcp") {
-				this.editor.setText("");
-				await this.handleMcpCommand();
-				return;
-			}
-			if (text.startsWith("/mcp ")) {
-				this.editor.setText("");
-				this.showWarning("Use /mcp and choose an action from the menu.");
-				return;
-			}
-			if (text === "/reload") {
-				this.editor.setText("");
-				await this.handleReloadCommand();
-				return;
-			}
-			if (text === "/debug") {
-				this.handleDebugCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/resume") {
-				this.showSessionSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/quit") {
-				this.editor.setText("");
-				await this.shutdown();
-				return;
-			}
-
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
