@@ -17,7 +17,9 @@ import { dispatchAgentTypeRequest, isAgentTypeRequest } from "./dispatch/agent-t
 import { dispatchHooksRequest, isHooksRequest } from "./dispatch/hooks.ts";
 import { dispatchKnowledgeRequest, isKnowledgeRequest } from "./dispatch/knowledge.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./dispatch/personalization.ts";
+import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
+import { dispatchSkillsRequest, isSkillsRequest } from "./dispatch/skills.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "./dispatch/web-search.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
@@ -570,6 +572,20 @@ export class Dispatcher {
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 			});
 		}
+		if (isSkillsRequest(request)) {
+			return await dispatchSkillsRequest(request, {
+				registry: this.registry,
+				runtimeRef: (sessionId) => this.runtimeRef(sessionId),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isPlanRequest(request)) {
+			return await dispatchPlanRequest(request, {
+				registry: this.registry,
+				runtimeRef: (sessionId) => this.runtimeRef(sessionId),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -604,22 +620,6 @@ export class Dispatcher {
 						return runtime.setKnowledgeLinks(libraries);
 					});
 				});
-			case "skill/list":
-				if ("sessionId" in request.params) {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.listSkills());
-				}
-				return await this.registry.listDraftSkills(request.params.cwd);
-			case "skill/get":
-				return await this.registry.getDraftSkill(request.params);
-			case "skill/upsert":
-				return await this.replayMutation(request, () => this.registry.upsertDraftSkill(request.params));
-			case "skill/remove":
-				return await this.replayMutation(request, () => this.registry.removeDraftSkill(request.params));
-			case "skill/import/inspect":
-				return await this.registry.inspectDraftSkillImport(request.params);
-			case "skill/import":
-				return await this.replayMutation(request, () => this.registry.importDraftSkills(request.params));
 			case "mcp/list":
 				if ("sessionId" in request.params) {
 					const ref = this.runtimeRef(request.params.sessionId);
@@ -1056,16 +1056,6 @@ export class Dispatcher {
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setMemoryFlags(request.params));
-				});
-			case "plan/startExecution":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.startPlanExecution(request.params));
-				});
-			case "plan/cancel":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.cancelPlan(request.params));
 				});
 			case "session/setModel":
 				return await this.replayMutation(request, async () => {

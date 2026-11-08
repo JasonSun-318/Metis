@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "../src/dispatch/agent-types.ts";
 import { dispatchHooksRequest, isHooksRequest } from "../src/dispatch/hooks.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "../src/dispatch/personalization.ts";
+import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
+import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
 import type { HooksService } from "../src/hooks.ts";
 import type { PersonalizationService } from "../src/personalization.ts";
@@ -76,6 +78,33 @@ function agentTypeContext() {
 	return { registry, context: { registry, ...replayTracker() } };
 }
 
+function skillsContext() {
+	const runtime = { listSkills: vi.fn(async () => ({ skills: [] })) };
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+		listDraftSkills: vi.fn(async () => ({ skills: [] })),
+		getDraftSkill: vi.fn(async (input: unknown) => input),
+		upsertDraftSkill: vi.fn(async (input: unknown) => input),
+		removeDraftSkill: vi.fn(async (input: unknown) => input),
+		inspectDraftSkillImport: vi.fn(async (input: unknown) => input),
+		importDraftSkills: vi.fn(async (input: unknown) => input),
+	} as unknown as SessionRegistry;
+	return { runtime, registry, context: { registry, runtimeRef: () => ref, ...replayTracker() } };
+}
+
+function planContext() {
+	const runtime = {
+		startPlanExecution: vi.fn(async (input: unknown) => input),
+		cancelPlan: vi.fn(async (input: unknown) => input),
+	};
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+	} as unknown as SessionRegistry;
+	return { runtime, registry, context: { registry, runtimeRef: () => ref, ...replayTracker() } };
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -106,6 +135,18 @@ const DOMAINS = [
 		recognized: isAgentTypeRequest,
 		dispatch: dispatchAgentTypeRequest,
 		context: agentTypeContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("skill/"),
+		recognized: isSkillsRequest,
+		dispatch: dispatchSkillsRequest,
+		context: skillsContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("plan/"),
+		recognized: isPlanRequest,
+		dispatch: dispatchPlanRequest,
+		context: planContext,
 	},
 ] as const;
 
@@ -160,6 +201,26 @@ describe("dispatcher domain matrix", () => {
 		expect(webSearch.webSearch.update).toHaveBeenCalledWith({ provider: "tavily" });
 		expect(webSearch.refreshOpenWebSearchSettings).toHaveBeenCalledOnce();
 		expect(webSearch.context.mutations).toEqual(["webSearch/update"]);
+	});
+
+	it("routes skill reads by scope and skill mutations through replay", async () => {
+		const skills = skillsContext();
+		await dispatchSkillsRequest(request("skill/list", { cwd: "/work" }), skills.context);
+		await dispatchSkillsRequest(request("skill/list", { sessionId: "s1" }), skills.context);
+		await dispatchSkillsRequest(request("skill/upsert", { name: "lint" }), skills.context);
+		await dispatchSkillsRequest(request("skill/import", { source: "git" }), skills.context);
+		expect(skills.registry.listDraftSkills).toHaveBeenCalledWith("/work");
+		expect(skills.runtime.listSkills).toHaveBeenCalledOnce();
+		expect(skills.context.mutations).toEqual(["skill/upsert", "skill/import"]);
+	});
+
+	it("runs plan mutations through replay and the session runtime", async () => {
+		const plan = planContext();
+		await dispatchPlanRequest(request("plan/startExecution", { sessionId: "s1" }), plan.context);
+		await dispatchPlanRequest(request("plan/cancel", { sessionId: "s1" }), plan.context);
+		expect(plan.runtime.startPlanExecution).toHaveBeenCalledOnce();
+		expect(plan.runtime.cancelPlan).toHaveBeenCalledOnce();
+		expect(plan.context.mutations).toEqual(["plan/startExecution", "plan/cancel"]);
 	});
 
 	it("keeps agent-type mutations replay-routed and reads direct", async () => {
