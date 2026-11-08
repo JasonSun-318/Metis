@@ -56,6 +56,7 @@ import { getThemeByName, theme } from "../presentation/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
+import { createAgentMailboxMessage, planAgentMailboxDelivery } from "./agent-mailbox.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import {
 	canRetryAssistantMessage,
@@ -64,6 +65,7 @@ import {
 	retryProgress,
 } from "./agent-retry-policy.ts";
 import { isAssistantBeforeCompaction, isSameModel } from "./agent-session-compaction-policy.ts";
+import { microcompactionPressureTarget } from "./agent-session-context-budget.ts";
 import { AgentSessionContextUsage } from "./agent-session-context-usage.ts";
 import {
 	createMessageEndExtensionEvent,
@@ -241,15 +243,10 @@ import type { SettingsManager } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { buildAgentMailboxContent, safePromptJson } from "./subagents/prompts.ts";
+import { safePromptJson } from "./subagents/prompts.ts";
 import { queuedAdmissionRequestId } from "./subagents/queued-messages.ts";
-import { utf8Length, utf8Prefix } from "./subagents/trace.ts";
-import {
-	type AgentMailboxEvent,
-	MAX_AGENT_MAILBOX_DELIVERY_EVENTS,
-	MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES,
-	MAX_AGENT_MAILBOX_PENDING_EVENTS,
-} from "./subagents/types.ts";
+import { utf8Prefix } from "./subagents/trace.ts";
+import { type AgentMailboxEvent, MAX_AGENT_MAILBOX_PENDING_EVENTS } from "./subagents/types.ts";
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import {
@@ -258,11 +255,7 @@ import {
 	describeToolAction,
 	ToolPermissionDescriptionError,
 } from "./tool-permission-adapter.ts";
-import {
-	getMicrocompactionTarget,
-	type MicrocompactionTarget,
-	prepareMicrocompaction,
-} from "./tool-result-microcompaction.ts";
+import { type MicrocompactionTarget, prepareMicrocompaction } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions, getDefaultToolNames } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
@@ -1540,21 +1533,7 @@ export class AgentSession {
 	}
 
 	private _agentMailboxDeliveryBatch(eventIds: Iterable<string>): readonly string[] {
-		const batch: string[] = [];
-		let bytes = 0;
-		for (const eventId of new Set(eventIds)) {
-			const pending = this._pendingAgentMailboxEvents.get(eventId);
-			if (!pending) continue;
-			const eventBytes = buildAgentMailboxContent(pending.event).reduce(
-				(total, block) => total + utf8Length(block.text),
-				0,
-			);
-			if (batch.length > 0 && bytes + eventBytes > MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES) break;
-			batch.push(eventId);
-			bytes += eventBytes;
-			if (batch.length >= MAX_AGENT_MAILBOX_DELIVERY_EVENTS) break;
-		}
-		return batch;
+		return planAgentMailboxDelivery(eventIds, (eventId) => this._pendingAgentMailboxEvents.get(eventId)?.event);
 	}
 
 	stageAgentMailboxDelivery(eventIds: readonly string[]): readonly string[] {
@@ -1671,14 +1650,7 @@ export class AgentSession {
 	}
 
 	private _agentMailboxMessage(event: AgentMailboxEvent): CustomMessage<AgentMailboxEvent> {
-		return {
-			role: "custom",
-			customType: "agent_mailbox",
-			content: buildAgentMailboxContent(event),
-			display: true,
-			details: event,
-			timestamp: Date.now(),
-		};
+		return createAgentMailboxMessage(event);
 	}
 
 	private _agentInputForRequest(requestId: string): AgentInputEntry | undefined {
@@ -2124,9 +2096,13 @@ export class AgentSession {
 		const used = estimateView(projectedPairs);
 		this._recordContextGrowth(used);
 		if (mode === "pressure") {
-			const model = this.model;
-			const high = (model?.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
-			if (!getMicrocompactionTarget({ used, high, growthP95: this._growthP95() })) {
+			const target = microcompactionPressureTarget({
+				used,
+				contextWindow: this.model?.contextWindow,
+				reserveTokens: this.settingsManager.getCompactionReserveTokens(),
+				growthP95: this._growthP95(),
+			});
+			if (!target) {
 				return toFullView(projectedPairs);
 			}
 		}
@@ -2153,16 +2129,12 @@ export class AgentSession {
 			const tokensBefore = estimateView(projectedPairs);
 			const target: MicrocompactionTarget =
 				mode === "pressure"
-					? (() => {
-							const model = this.model;
-							const high = (model?.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
-							const computed = getMicrocompactionTarget({
-								used: tokensBefore,
-								high,
-								growthP95: this._growthP95(),
-							});
-							return computed ?? { low: tokensBefore, minimumGain: Number.MAX_SAFE_INTEGER };
-						})()
+					? (microcompactionPressureTarget({
+							used: tokensBefore,
+							contextWindow: this.model?.contextWindow,
+							reserveTokens: this.settingsManager.getCompactionReserveTokens(),
+							growthP95: this._growthP95(),
+						}) ?? { low: tokensBefore, minimumGain: Number.MAX_SAFE_INTEGER })
 					: { low: tokensBefore, minimumGain: 0 };
 			if (mode === "pressure" && target.minimumGain === Number.MAX_SAFE_INTEGER) return undefined;
 
@@ -2222,8 +2194,13 @@ export class AgentSession {
 		const used = estimateView(projectedPairs);
 		this._recordContextGrowth(used);
 		if (mode === "pressure") {
-			const high = (this.model.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
-			if (!getMicrocompactionTarget({ used, high, growthP95: this._growthP95() })) {
+			const target = microcompactionPressureTarget({
+				used,
+				contextWindow: this.model.contextWindow,
+				reserveTokens: this.settingsManager.getCompactionReserveTokens(),
+				growthP95: this._growthP95(),
+			});
+			if (!target) {
 				return "not-needed";
 			}
 		}
