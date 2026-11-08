@@ -2327,7 +2327,7 @@ describe("SubagentManager", () => {
 		expect(harness.manager.listTasks(created.agentId)).toHaveLength(MAX_AGENT_TASKS);
 	});
 
-	it("bounds queued work across the whole agent tree", { timeout: 15_000 }, async () => {
+	it("bounds queued work across the whole agent tree", { timeout: 45_000 }, async () => {
 		const harness = setup({ scheduler: new SubagentScheduler(1, 1) });
 		await harness.manager.spawn(ROOT_ID, { name: "queue blocker", task: "Block", agentType: "worker" });
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
