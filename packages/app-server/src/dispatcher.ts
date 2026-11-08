@@ -13,7 +13,12 @@ import {
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
 import { AgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
 import { ArchivedConversationCatalog, deleteArchivedAgent } from "./archived-conversations.ts";
+import { dispatchAgentTypeRequest, isAgentTypeRequest } from "./dispatch/agent-types.ts";
+import { dispatchHooksRequest, isHooksRequest } from "./dispatch/hooks.ts";
 import { dispatchKnowledgeRequest, isKnowledgeRequest } from "./dispatch/knowledge.ts";
+import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./dispatch/personalization.ts";
+import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
+import { dispatchWebSearchRequest, isWebSearchRequest } from "./dispatch/web-search.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
@@ -534,6 +539,37 @@ export class Dispatcher {
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 			});
 		}
+		if (isProfileRequest(request)) {
+			return await dispatchProfileRequest(request, {
+				profileSummary: this.profileSummary,
+				allSessionRefs: () => this.allSessionRefs(),
+			});
+		}
+		if (isPersonalizationRequest(request)) {
+			return await dispatchPersonalizationRequest(request, {
+				personalization: this.personalization,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isHooksRequest(request)) {
+			return await dispatchHooksRequest(request, {
+				hooks: this.hooks,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isWebSearchRequest(request)) {
+			return await dispatchWebSearchRequest(request, {
+				webSearch: this.webSearch,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+				refreshOpenWebSearchSettings: () => this.registry.refreshOpenWebSearchSettings(),
+			});
+		}
+		if (isAgentTypeRequest(request)) {
+			return await dispatchAgentTypeRequest(request, {
+				registry: this.registry,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -645,22 +681,6 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.clearMcpCredential(request.params));
 				});
-			case "profile/get":
-				return this.profileSummary.summarize(this.allSessionRefs());
-			case "personalization/get":
-				return this.personalization.view();
-			case "personalization/update":
-				return await this.replayMutation(request, async () => this.personalization.update(request.params));
-			case "webSearch/get":
-				return this.webSearch.view();
-			case "webSearch/credential/reveal":
-				return this.webSearch.reveal(request.params);
-			case "webSearch/update":
-				return await this.replayMutation(request, async () => {
-					const result = await this.webSearch.update(request.params);
-					await this.registry.refreshOpenWebSearchSettings();
-					return result;
-				});
 			case "memory/get":
 				return this.memorySettings.view(request.params);
 			case "memory/update":
@@ -692,12 +712,6 @@ export class Dispatcher {
 				return await this.replayMutation(request, () => this.memorySettings.undoRun(request.params));
 			case "memory/dream/run":
 				return await this.memorySettings.dreamRun(request.params);
-			case "hooks/list":
-				return this.hooks.view();
-			case "hooks/upsert":
-				return await this.replayMutation(request, async () => this.hooks.upsert(request.params));
-			case "hooks/delete":
-				return await this.replayMutation(request, async () => this.hooks.delete(request.params));
 			case "plugin/market/list":
 				return this.plugins.listMarkets();
 			case "plugin/market/add":
@@ -744,8 +758,6 @@ export class Dispatcher {
 					const state = await this.getPluginActivationState(res.plugin.plugin.id);
 					return withPluginActivationState(res, state);
 				});
-			case "usage/get":
-				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":
 				this.modelRegistry.refresh();
 				return {
@@ -1013,12 +1025,6 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.renameAgent(request.params));
 				});
-			case "agentType/list":
-				return await this.registry.listAgentTypes();
-			case "agentType/upsert":
-				return await this.replayMutation(request, () => this.registry.upsertAgentType(request.params));
-			case "agentType/remove":
-				return await this.replayMutation(request, () => this.registry.removeAgentType(request.params));
 			case "agent/delete":
 				return await this.replayMutation(request, async () => {
 					if (this.catalog.get(request.params.sessionId).summary.archived) {
