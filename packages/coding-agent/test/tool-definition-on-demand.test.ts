@@ -63,6 +63,14 @@ vi.mock("../src/core/tools/web-search.ts", async (importOriginal) => {
 	};
 });
 
+vi.mock("../src/core/image-generation/tool.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/image-generation/tool.ts")>();
+	return {
+		...actual,
+		createImageGenerationToolDefinition: mocks.track("image_generate", actual.createImageGenerationToolDefinition),
+	};
+});
+
 vi.mock("../src/core/set-tasks.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/set-tasks.ts")>();
 	return {
@@ -96,6 +104,7 @@ const builtInToolNames = [
 	"ls",
 	"web_fetch",
 	"web_search",
+	"image_generate",
 	"set_tasks",
 	"get_goal",
 	"create_goal",

@@ -60,6 +60,7 @@ describe("regression #5109: exclude tools", () => {
 				"edit",
 				"get_goal",
 				"grep",
+				"image_generate",
 				"set_tasks",
 				"submit_plan",
 				"update_goal",
