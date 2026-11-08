@@ -4073,7 +4073,7 @@ classes so their inline layout wins the cascade. */
 .github-brand-icon { display: inline-block; flex: none; background: currentColor; mask-size: contain; mask-repeat: no-repeat; mask-position: center; }
 .transcript-history-access:focus-visible { z-index: 7; top: 8px; left: 50%; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none; transform: translateX(-50%); border: 1px solid var(--border-strong); border-radius: 6px; background: var(--menu-bg); padding: 6px 10px; }
 
-/* Read-only output of the agent's latest shell command. */
+/* Read-only output and activity history of the agent's shell commands. */
 .process-panel { position: absolute; inset: 0; display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 12px; gap: 10px; background: var(--sidebar); }
 .process-panel[hidden] { display: none; }
 .process-state { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 12px; }
@@ -4221,3 +4221,27 @@ classes so their inline layout wins the cascade. */
 .settings-page-scroll, .settings-navigation nav, .plugins-catalog-page, .plugins-detail-page, .plugins-full-list, .scheduled-tasks-scroll, .menu-select-popover { overscroll-behavior: contain; }
 
 :is(.auto-command-allowlist-page, .auto-command-allowlist-section) .permission-rules-heading .auto-command-allowlist-count { flex: none; white-space: nowrap; }
+
+/* Continuous, command-count based navigation with a stable live endpoint. */
+.process-history-footer { position: relative; flex-shrink: 0; margin: 0 -12px -12px; --process-timeline-blue: #239bff; }
+.process-statusbar { display: flex; align-items: center; min-height: 42px; padding: 10px 12px; border-top: 1px solid var(--border-weak); }
+.process-state.is-completed { color: var(--success); }
+.process-history-controls { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--border-weak); padding: 28px 12px 8px; font-size: 11px; }
+.process-history-controls > .icon-button { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; padding: 0; line-height: 1; }
+.process-history-controls > .icon-button > svg { display: block; }
+.process-history-timeline { position: relative; flex: 1; min-width: 24px; height: 28px; }
+.process-history-date { --process-date-width: 148px; position: absolute; width: var(--process-date-width); text-align: center; bottom: calc(100% + 2px); left: 0; max-width: 100%; padding: 3px 6px; border-radius: 4px; background: var(--process-timeline-blue); color: #fff; font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; visibility: hidden; pointer-events: none; }
+.process-history-timeline:has(.process-history-range:active:not(:disabled)) .process-history-date { visibility: visible; }
+.process-history-rail { position: absolute; top: 50%; transform: translateY(-50%); left: 6px; right: 6px; height: 4px; overflow: hidden; border-radius: 2px; background: var(--surface-08); pointer-events: none; }
+.process-history-rail > span { display: block; height: 100%; border-radius: inherit; background: var(--process-timeline-blue); }
+.process-history-range { position: relative; display: block; width: 100%; height: 100%; margin: 0; cursor: pointer; appearance: none; background: transparent; border: 0; border-radius: 0; padding: 0; }
+.process-history-range:disabled { cursor: default; }
+.process-live { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; border: 0; border-radius: 6px; padding: 5px 7px; background: transparent; color: var(--text-muted); font: inherit; white-space: nowrap; cursor: pointer; }
+.process-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.process-live:disabled { cursor: default; }
+.process-return-live { position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); z-index: 1; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 24px); border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px; background: var(--panel-raised); color: var(--text); box-shadow: var(--overlay-shadow); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.process-return-live:hover { border-color: var(--border-strong); }
+.process-state.is-interrupted > span { background: var(--text-muted); }
+.process-history-range::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.process-history-range::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: var(--process-timeline-blue); outline: 2px solid var(--sidebar); }
+.process-history-range:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }

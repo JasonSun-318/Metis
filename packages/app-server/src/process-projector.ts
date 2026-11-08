@@ -4,7 +4,7 @@ import { opaqueId } from "./item-projection.ts";
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 
-function outputView(result: unknown): { output: string; truncated: boolean } {
+export function processOutput(result: unknown): { output: string; truncated: boolean } {
 	const value = result as
 		| { content?: { type?: string; text?: string }[]; details?: { truncation?: { truncated?: boolean } } }
 		| undefined;
@@ -25,19 +25,41 @@ function outputView(result: unknown): { output: string; truncated: boolean } {
 /** One current command per session; older concurrent commands cannot overwrite it. */
 export class ProcessProjector {
 	private current?: SessionProcessView;
+	private readonly active = new Map<string, SessionProcessView>();
+	private revision = 0;
+	private readonly owners = new Map<string, string>();
 
-	apply(event: AgentSessionEvent, agentId = "root"): SessionProcessView | undefined {
+	read(processId: string): SessionProcessView | undefined {
+		return this.current?.processId === processId ? this.current : this.active.get(processId);
+	}
+
+	apply(event: AgentSessionEvent, agentId = "root", turnId?: string): SessionProcessView | undefined {
+		if (event.type === "agent_end") {
+			let changed = false;
+			for (const [id, view] of this.active) {
+				if (this.owners.get(id) !== agentId) continue;
+				this.owners.delete(id);
+				this.active.delete(id);
+				if (this.current?.processId === id) this.current = { ...view, state: "interrupted" };
+				changed = true;
+			}
+			if (changed && this.current) {
+				this.current = { ...this.current, revision: ++this.revision };
+				return this.current;
+			}
+			return;
+		}
 		if (event.type === "permission_review_started" || event.type === "permission_decision") {
 			const processId = opaqueId(`${agentId}:${event.actionId}`, "process");
-			if (
-				this.current?.processId !== processId ||
-				(this.current.state !== "running" && this.current.state !== "awaiting_approval")
-			)
-				return;
-			this.current = {
-				...this.current,
-				state: event.type === "permission_review_started" ? "awaiting_approval" : "running",
+			const current = this.active.get(processId);
+			if (!current) return;
+			const next = {
+				...current,
+				state: event.type === "permission_review_started" ? ("awaiting_approval" as const) : ("running" as const),
 			};
+			this.active.set(processId, next);
+			if (this.current?.processId !== processId) return;
+			this.current = next;
 			return this.current;
 		}
 		if (
@@ -53,24 +75,34 @@ export class ProcessProjector {
 			if (typeof command !== "string") return;
 			this.current = {
 				processId,
-				command: outputView({ content: [{ type: "text", text: command }] }).output,
+				startedAt: new Date().toISOString(),
+				...(turnId ? { turnId } : {}),
+				revision: ++this.revision,
+				command: processOutput({ content: [{ type: "text", text: command }] }).output,
 				state: "running",
 				output: "",
 				truncated: false,
 			};
+			this.active.set(processId, this.current);
+			this.owners.set(processId, agentId);
 		} else {
-			if (
-				this.current?.processId !== processId ||
-				(this.current.state !== "running" && this.current.state !== "awaiting_approval")
-			)
-				return;
-			const output = outputView(event.type === "tool_execution_update" ? event.partialResult : event.result);
-			this.current = {
-				...this.current,
+			const current = this.active.get(processId);
+			if (!current) return;
+			const output = processOutput(event.type === "tool_execution_update" ? event.partialResult : event.result);
+			const next: SessionProcessView = {
+				...current,
 				...output,
-				truncated: this.current.truncated || output.truncated,
+				truncated: current.truncated || output.truncated,
 				state: event.type === "tool_execution_end" ? (event.isError ? "failed" : "completed") : "running",
 			};
+			if (event.type === "tool_execution_end") {
+				this.active.delete(processId);
+				this.owners.delete(processId);
+			} else this.active.set(processId, next);
+			if (this.current?.processId === processId) this.current = next;
+			else if (event.type === "tool_execution_update") return;
+			if (event.type === "tool_execution_end" && this.current)
+				this.current = { ...this.current, revision: ++this.revision };
 		}
 		return this.current;
 	}

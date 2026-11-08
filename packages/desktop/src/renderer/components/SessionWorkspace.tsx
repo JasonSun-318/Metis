@@ -523,7 +523,6 @@ export function SessionWorkspaceView({
 	);
 
 	const seenProcesses = useRef(new Map<string, string>());
-	const autoOpenedProcessSessions = useRef(new Set<string>());
 
 	const workspaceRef = useRef(workspace);
 	workspaceRef.current = workspace;
@@ -870,46 +869,47 @@ export function SessionWorkspaceView({
 		);
 	}, [inlineInteractions, updateWorkspace]);
 
-	const openProcess = useCallback(() => {
-		if (!chatSessionId || !process) return;
-		const id = `process-${chatSessionId}`;
-		const tab: WorkspaceTab = { kind: "process", id, sessionId: chatSessionId, title: "Process", process };
-		updateWorkspace((current) => {
-			const existing = workspaceTabs(current).some((candidate) => candidate.id === id);
-			const replaced = existing ? mapTabs(current, (item) => (item.id === id ? tab : item)) : placeTab(current, tab);
-			return activateTab(replaced, id);
-		});
-	}, [process, chatSessionId, placeTab, updateWorkspace]);
+	const openProcess = useCallback(
+		(sessionId: string | null = chatSessionId) => {
+			if (!sessionId) return;
+			const id = `process-${sessionId}`;
+			updateWorkspace((current) => {
+				const existing = workspaceTabs(current).some((tab) => tab.id === id);
+				const tab: WorkspaceTab = {
+					kind: "process",
+					id,
+					sessionId,
+					title: "Activity log",
+					...(sessionId === chatSessionId && process ? { process } : {}),
+				};
+				return activateTab(existing ? current : placeTab(current, tab), id);
+			});
+			showToolsSidebar();
+		},
+		[process, chatSessionId, placeTab, updateWorkspace, showToolsSidebar],
+	);
 
 	useEffect(() => {
 		if (!chatSessionId) return;
+		const seenSession = seenProcesses.current.has(chatSessionId);
 		if (!process) {
-			seenProcesses.current.delete(chatSessionId);
+			if (!seenSession) seenProcesses.current.set(chatSessionId, "");
 			return;
 		}
-		const previousId = seenProcesses.current.get(chatSessionId);
-		seenProcesses.current.set(chatSessionId, process.processId);
-		if (previousId !== process.processId) {
-			autoOpenedProcessSessions.current.add(chatSessionId);
-			openProcess();
-			return;
-		}
+		const turn = process.turnId ?? process.processId;
+		const first = seenProcesses.current.get(chatSessionId) !== turn;
+		seenProcesses.current.set(chatSessionId, turn);
 		updateWorkspace((current) =>
 			mapTabs(current, (tab) =>
 				tab.id === `process-${chatSessionId}` && tab.kind === "process" ? { ...tab, process } : tab,
 			),
 		);
-	}, [openProcess, process, chatSessionId, updateWorkspace]);
-
-	useEffect(() => {
-		if (!chatSessionId || !process || (process.state !== "completed" && process.state !== "failed")) return;
-		if (!autoOpenedProcessSessions.current.has(chatSessionId)) return;
-		autoOpenedProcessSessions.current.delete(chatSessionId);
-		updateWorkspace((current) => {
-			const chat = findChatTab(current, chatSessionId);
-			return chat ? activateTab(current, chat.id) : current;
-		});
-	}, [process, chatSessionId, updateWorkspace]);
+		if (!first || (!seenSession && process.state !== "running" && process.state !== "awaiting_approval")) return;
+		const strip = toolStripOf(workspaceRef.current, chatSessionId);
+		const active = strip.tabs.find((tab) => tab.id === strip.activeId);
+		if (sidebarOpen && active && active.kind !== "process" && !(active.kind === "browser" && !active.url)) return;
+		openProcess();
+	}, [openProcess, process, chatSessionId, sidebarOpen, updateWorkspace]);
 
 	useEffect(() => {
 		let active = true;
@@ -1819,6 +1819,10 @@ export function SessionWorkspaceView({
 		const codeWorkspace = codeWorkspaceFor(target.sessionId);
 		return (
 			<nav aria-label={t("Available tools")} className="tool-sidebar-menu">
+				<button disabled={!target.sessionId} onClick={() => openProcess(target.sessionId)} type="button">
+					<ClockCounterClockwise aria-hidden="true" size={18} />
+					<span>{t("Activity log")}</span>
+				</button>
 				{codeWorkspace && (
 					<button onClick={() => addReview(codeWorkspace.sessionId)} type="button">
 						<ClipboardText aria-hidden="true" size={18} />
@@ -1966,7 +1970,9 @@ export function SessionWorkspaceView({
 					? t("New tab")
 					: tab.kind === "file" && tab.relativePath === null
 						? t("Open file")
-						: tab.title;
+						: tab.kind === "process"
+							? t("Activity log")
+							: tab.title;
 		const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
 		const dirty = draft !== undefined && draft.text !== draft.savedText;
 		const saving = savingFileTabIds.has(tab.id);
@@ -2351,6 +2357,8 @@ export function SessionWorkspaceView({
 						? wrap(
 								tab.id,
 								<ProcessPanel
+									api={api}
+									sessionId={tab.sessionId}
 									panelId={`process-panel-${tab.id}`}
 									process={tab.process}
 									theme={theme}
@@ -2418,20 +2426,13 @@ export function SessionWorkspaceView({
 										: tab.kind === "agent"
 											? wrap(
 													tab.id,
-													<AgentTreePanel
-														onOpenConversation={(agent) =>
-															openAgentConversation({
-																sessionId: tab.sessionId,
-																agentId: agent.agentId,
-																name: agent.name,
-															})
-														}
-														api={api}
-														onError={onError}
-														sessionId={tab.sessionId}
-														store={store}
-														visible={panelVisible(tab.id)}
-													/>,
+													<div
+														className="tool-panel plan-panel"
+														id={`plan-panel-${tab.id}`}
+														role="tabpanel"
+													>
+														<PlanPreview plan={tab.plan} />
+													</div>,
 												)
 											: tab.kind === "plan"
 												? wrap(

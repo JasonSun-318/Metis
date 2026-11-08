@@ -1,5 +1,5 @@
 import { createBashTool } from "@metis/coding-agent/host";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProcessProjector } from "../src/process-projector.ts";
 import { SessionProjection } from "../src/projection/session-projection.ts";
 
@@ -25,6 +25,19 @@ const end = (toolCallId: string, text: string, isError = false) => ({
 });
 
 describe("Process projection", () => {
+	it("retains the execution start date through output and completion", () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date("2026-11-06T12:00:00.000Z"));
+			const projector = new ProcessProjector();
+			expect(projector.apply(start("dated"))?.startedAt).toBe("2026-11-06T12:00:00.000Z");
+			vi.setSystemTime(new Date("2026-11-07T13:00:00.000Z"));
+			expect(projector.apply(update("dated", "first"))?.startedAt).toBe("2026-11-06T12:00:00.000Z");
+			expect(projector.apply(end("dated", "done"))?.startedAt).toBe("2026-11-06T12:00:00.000Z");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 	it("tracks matching permission reviews until execution is allowed or the tool ends", () => {
 		const projector = new ProcessProjector();
 		const review = {
@@ -102,7 +115,8 @@ describe("Process projection", () => {
 		const next = projector.apply(start("same", "new command"), "child");
 		expect(next).toMatchObject({ command: "new command", output: "", state: "running" });
 		expect(projector.apply(update("same", "old late"))).toBeUndefined();
-		expect(projector.apply(end("same", "old done"))).toBeUndefined();
+		expect(projector.read("root:same")?.output).toBe("old late");
+		expect(projector.apply(end("same", "old done"))).toMatchObject({ command: "new command", output: "" });
 		expect(projector.apply({ ...start("other"), toolName: "read" })).toBeUndefined();
 		expect(projector.apply(end("same", "failed", true), "child")).toMatchObject({
 			output: "failed",

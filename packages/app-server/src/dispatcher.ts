@@ -881,6 +881,10 @@ export class Dispatcher {
 				}
 				return { session };
 			}
+			case "session/readProcess": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.readProcess(request.params));
+			}
 			case "session/readItems": {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readItems(request.params));

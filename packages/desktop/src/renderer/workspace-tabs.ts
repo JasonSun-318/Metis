@@ -76,7 +76,7 @@ export interface ProcessTab {
 	readonly id: string;
 	readonly sessionId: string;
 	readonly title: string;
-	readonly process: SessionProcessView;
+	readonly process?: SessionProcessView;
 }
 
 export interface KnowledgeTab {

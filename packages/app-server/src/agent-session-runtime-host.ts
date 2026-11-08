@@ -86,6 +86,7 @@ import {
 import { createAgentHostTools, DELEGATABLE_HOST_TOOL_NAMES } from "./agent-host-tools.ts";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
 import { prepareAgentMessage } from "./agent-message-service.ts";
+import { AgentProcessHistory } from "./agent-process-history.ts";
 import { projectAgentQueuedTurns } from "./agent-queued-message-projection.ts";
 import { agentSummaryView, boundedAgentSummaryViews } from "./agent-summary-projection.ts";
 import { createBrowserPermissionAudit } from "./browser-permission-audit.ts";
@@ -119,6 +120,7 @@ import {
 	publicMcpServers,
 } from "./mcp-projection.ts";
 import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-file.ts";
+import { ProcessHistory } from "./process-history.ts";
 import { ProcessProjector } from "./process-projector.ts";
 import { JournalItemHistory, ProjectedItemCache } from "./projection/journal-item-history.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
@@ -310,6 +312,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private session: AgentSession;
 	private readonly ref: SessionRef;
 	private readonly processProjector = new ProcessProjector();
+	private readonly processHistory = new ProcessHistory();
+	private readonly agentProcessHistory: AgentProcessHistory;
 	private readonly projection: SessionProjection;
 	private readonly agentLive: AgentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
@@ -546,7 +550,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				return;
 			}
 			if (event.type === "activity") {
-				this.publishProcess(event.event, event.agentId);
+				this.publishProcess(event.event, event.agentId, event.taskId);
 				this.agentLive.apply(event.agentId, event.taskId, event.event);
 				return;
 			}
@@ -699,8 +703,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return new Map(this.deliveredFileViews().map((file) => [file.fileId, file]));
 	}
 
-	private publishProcess(event: AgentSessionEvent, agentId?: string): void {
-		const process = this.processProjector.apply(event, agentId);
+	private publishProcess(event: AgentSessionEvent, agentId?: string, taskId?: string): void {
+		const turnId = this.currentTurnId() ?? (taskId ? opaqueId(taskId, "turn") : undefined);
+		if (agentId && event.type === "tool_execution_start" && event.toolName === "bash") {
+			this.session.sessionManager.appendCustomEntry("metis.process", {
+				agentId,
+				toolCallId: event.toolCallId,
+				...(turnId ? { turnId } : {}),
+			});
+		}
+		const process = this.processProjector.apply(event, agentId, turnId);
 		if (process) this.publish({ type: "session/processChanged", sessionId: this.sessionId, process });
 	}
 
@@ -2450,6 +2462,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.unsubscribeQueuedTurns?.();
 					this.unsubscribeQueuedTurns = undefined;
 					this.agentLive.clear();
+					this.agentProcessHistory.close();
 					this.pendingAgentReceiptRefreshes.clear();
 					this.agentInputReceipts.clear();
 					this.liveMessagesByItemId.clear();
@@ -2474,6 +2487,8 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	readonly sessionId: string;
 	private readonly deliveredArtifacts: SessionDeliveredArtifacts;
 	private readonly projection: SessionProjection;
+	private readonly processHistory = new ProcessHistory();
+	private readonly manager: ReturnType<typeof SessionManager.openReadOnly>;
 	private readonly mcpServers: ClientResult<"mcp/list">;
 
 	constructor(
