@@ -58,7 +58,7 @@ export function HomeProjectPicker({
 					<span>{t("Create a new project")}</span>
 				</button>
 			)}
-			{mode === "chat" && folder && onClearFolder && (
+			{folder && onClearFolder && (
 				<button
 					aria-label={t("No project context")}
 					className="home-project-picker-clear"

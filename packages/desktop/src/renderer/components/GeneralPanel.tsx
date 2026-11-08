@@ -1,3 +1,4 @@
+import type { AgentMode } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
@@ -15,6 +16,8 @@ import { WebSearchSettingsPanel } from "./WebSearchSettingsPanel.tsx";
 
 export function GeneralPanel({
 	api,
+	workMode = "chat",
+	onWorkModeChange,
 	generalPreferences,
 	onGeneralPreferencesChange,
 	onThemeChange,
@@ -26,6 +29,8 @@ export function GeneralPanel({
 		MetisDesktopApi,
 		"getWebSearchSettings" | "revealWebSearchCredential" | "updateWebSearchSettings"
 	>;
+	readonly workMode?: AgentMode;
+	readonly onWorkModeChange?: (mode: AgentMode) => void;
 	readonly generalPreferences: GeneralPreferences;
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
@@ -45,6 +50,29 @@ export function GeneralPanel({
 					<h3>{t("Interface & Appearance")}</h3>
 				</header>
 				<div className="settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Work mode")}</span>
+							<p>{t("Choose how conversations and file changes are displayed.")}</p>
+						</div>
+						<div className="general-setting-control">
+							<fieldset
+								aria-label={t("Work mode")}
+								className="control-group settings-segmented work-mode-segmented"
+							>
+								{(["chat", "code"] as const).map((value) => (
+									<button
+										key={value}
+										type="button"
+										aria-pressed={workMode === value}
+										onClick={() => onWorkModeChange?.(value)}
+									>
+										{t(value === "chat" ? "Daily work" : "Code development")}
+									</button>
+								))}
+							</fieldset>
+						</div>
+					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Language")}</span>
@@ -141,10 +169,10 @@ export function GeneralPanel({
 					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
-							<span>{t("Chat reply font")}</span>
+							<span>{t("Daily work reply font")}</span>
 							<p>
 								{t(
-									"Font for Chat replies and questions. Your messages and interface controls use the system font.",
+									"Font for daily work replies and questions. Your messages and interface controls use the system font.",
 								)}
 							</p>
 							{generalPreferences.chatFont === "anthropic-serif" ? (
@@ -157,7 +185,7 @@ export function GeneralPanel({
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
-								ariaLabel={t("Chat reply font")}
+								ariaLabel={t("Daily work reply font")}
 								className="general-font-select"
 								menuAlign="end"
 								onChange={(chatFont) => onGeneralPreferencesChange({ ...generalPreferences, chatFont })}
@@ -168,10 +196,10 @@ export function GeneralPanel({
 					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
-							<span>{t("Code reply font")}</span>
+							<span>{t("Code development reply font")}</span>
 							<p>
 								{t(
-									"Font for Code replies and questions. Your messages use the system font; code and tools remain monospaced.",
+									"Font for code development replies and questions. Your messages use the system font; code and tools remain monospaced.",
 								)}
 							</p>
 							{generalPreferences.codeFont === "anthropic-serif" ? (
@@ -184,7 +212,7 @@ export function GeneralPanel({
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
-								ariaLabel={t("Code reply font")}
+								ariaLabel={t("Code development reply font")}
 								className="general-font-select"
 								menuAlign="end"
 								onChange={(codeFont) => onGeneralPreferencesChange({ ...generalPreferences, codeFont })}

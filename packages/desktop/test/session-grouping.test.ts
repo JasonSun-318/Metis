@@ -8,7 +8,7 @@ import {
 	groupSessionsByUnread,
 	loadSessionGroupingPreferences,
 	saveSessionGroupingPreferences,
-	sessionsForMode,
+	sidebarSessions,
 } from "../src/renderer/store/session-grouping.ts";
 
 // Local-time constructor keeps grouping assertions deterministic in any timezone.
@@ -32,7 +32,7 @@ function session(sessionId: string, mode: "chat" | "code", updatedAt: string, un
 }
 
 describe("session grouping", () => {
-	it("sorts one mode deterministically into local date and unread sections", () => {
+	it("sorts both legacy modes deterministically into local date and unread sections", () => {
 		const store = new AppStore();
 		const sessions = [
 			session("b", "chat", local(2026, 7, 31, 1), true),
@@ -43,9 +43,9 @@ describe("session grouping", () => {
 			session("code", "code", local(2026, 7, 31, 23), true),
 		];
 		store.setSessions({ sessions: sessions.reverse(), nextAfterSessionId: null });
-		const chat = sessionsForMode(store.getSnapshot(), "chat");
+		const chat = sidebarSessions(store.getSnapshot());
 
-		expect(chat.map(({ sessionId }) => sessionId)).toEqual(["a", "b", "yesterday", "older", "previous-year"]);
+		expect(chat.map(({ sessionId }) => sessionId)).toEqual(["code", "a", "b", "yesterday", "older", "previous-year"]);
 		expect(groupSessionsByDate(chat, new Date(2026, 6, 31, 12)).map(({ label }) => label)).toEqual([
 			"Today",
 			"Yesterday",
@@ -58,7 +58,7 @@ describe("session grouping", () => {
 				grouped.map(({ sessionId }) => sessionId),
 			]),
 		).toEqual([
-			["Unread", ["b"]],
+			["Unread", ["code", "b"]],
 			["Read", ["a", "yesterday", "older", "previous-year"]],
 		]);
 		expect(
@@ -66,19 +66,20 @@ describe("session grouping", () => {
 		).toEqual(["Read"]);
 	});
 
-	it("loads safe defaults and saves independent mode preferences", () => {
+	it("loads safe defaults and saves unified preferences", () => {
 		const values = new Map<string, string>();
 		const storage = {
 			getItem: (key: string) => values.get(key) ?? null,
 			setItem: (key: string, value: string) => values.set(key, value),
 		};
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
-		saveSessionGroupingPreferences(storage, { chat: "unread", code: "none" });
-		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "unread", code: "none" });
+		saveSessionGroupingPreferences(storage, { chat: "unread", code: "unread" });
+		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "unread", code: "unread" });
 		saveSessionGroupingPreferences(storage, { chat: "status", code: "project" });
-		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "status", code: "project" });
+		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "status", code: "status" });
+		values.delete("metis.session-grouping.v2");
 		values.set("metis.session-grouping.v1", '{"chat":"broken","code":"project"}');
-		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "date", code: "project" });
+		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "date", code: "date" });
 		values.set("metis.session-grouping.v1", "{");
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
 	});

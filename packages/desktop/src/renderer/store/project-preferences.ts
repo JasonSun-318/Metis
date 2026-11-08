@@ -1,6 +1,8 @@
 import type { AgentMode } from "@metis/app-protocol";
 
-const STORAGE_KEY = "metis.projectPreferences.v1";
+import { loadWorkMode } from "../work-mode.ts";
+
+const STORAGE_KEY = "metis.projectPreferences.v2";
 const MAX_ALIAS_CODE_POINTS = 80;
 
 export interface ProjectPreference {
@@ -42,7 +44,7 @@ function parsePreference(value: unknown): ProjectPreference | undefined {
 
 export function loadProjectPreferences(storage: Pick<Storage, "getItem">): ProjectPreferenceMap {
 	try {
-		const raw = storage.getItem(STORAGE_KEY);
+		const raw = storage.getItem(STORAGE_KEY) ?? storage.getItem("metis.projectPreferences.v1");
 		if (raw === null) return new Map();
 		const parsed = JSON.parse(raw) as unknown;
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
@@ -54,7 +56,14 @@ export function loadProjectPreferences(storage: Pick<Storage, "getItem">): Proje
 			const preference = parsePreference(value);
 			if (preference) preferences.set(preferenceKey(preference.mode, preference.cwd), preference);
 		}
-		return preferences;
+		const unified = new Map<string, ProjectPreference>();
+		const preferred = loadWorkMode(storage);
+		for (const entry of [...preferences.values()].sort(
+			(a, b) => Number(a.mode === preferred) - Number(b.mode === preferred),
+		)) {
+			unified.set(preferenceKey("chat", entry.cwd), { ...entry, mode: "chat" });
+		}
+		return unified;
 	} catch {
 		return new Map();
 	}

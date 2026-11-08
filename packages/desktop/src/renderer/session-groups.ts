@@ -1,4 +1,4 @@
-import type { AgentMode, SessionSummary } from "@metis/app-protocol";
+import type { AgentMode, ClientResult, SessionSummary } from "@metis/app-protocol";
 
 export interface ProjectSessionGroup {
 	readonly mode: AgentMode;
@@ -7,3 +7,8 @@ export interface ProjectSessionGroup {
 	readonly pinned: boolean;
 	readonly sessions: readonly SessionSummary[];
 }
+
+/** The second legacy classification shares the same visible project folder. */
+export type ProjectDeletePreview = ClientResult<"project/deletePreview"> & {
+	readonly additionalProjects?: readonly ClientResult<"project/deletePreview">[];
+};

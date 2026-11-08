@@ -2867,6 +2867,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .settings-segmented, .usage-view-toggle { display: flex; align-items: center; min-height: var(--control-height); border-radius: var(--radius-control); background: var(--surface-06); padding: 2px; }
 .usage-view-toggle { gap: 2px; background: transparent; padding: 0; }
 .settings-segmented button { min-width: 48px; height: var(--control-height-compact); border-radius: 6px; color: var(--text-10); font-size: 12px; font-weight: 520; transition: background-color 120ms ease, color 120ms ease; }
+.work-mode-segmented button { padding: 0 12px; white-space: nowrap; }
 .settings-segmented button[aria-pressed="true"], .usage-view-toggle button[aria-pressed="true"] { background: var(--panel-selected); color: var(--text-strong); }
 .usage-summary-cards { display: grid; gap: 12px; margin-top: 8px; margin-bottom: 16px; grid-template-columns: 1fr 1fr; }
 .usage-metric-card { display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-02); padding: 14px 16px; }

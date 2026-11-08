@@ -575,6 +575,24 @@ const zhCN = {
 	"Content font size": "内容字号",
 	"Adjust Chat and Code reading text without changing interface controls or layout.":
 		"调整 Chat 与 Code 阅读内容的字号，不改变界面控件或布局。",
+	"Delete project?": "删除项目？",
+	"{{count}} sessions, including archived sessions, will move to Trash.":
+		"{{count}} 个会话（包括已归档会话）将移到废纸篓。",
+	"Matching attachments, images, tool outputs, Subagents, document work, and project memory are included.":
+		"包括对应的附件、图片、工具输出、子代理、文档工作和项目记忆。",
+	"Retry to check the remaining project data.": "重试以检查剩余的项目数据。",
+	"Work mode": "工作模式",
+	"Conversation list": "会话列表",
+	"Daily work": "日常工作",
+	"Code development": "代码开发",
+	"Choose how conversations and file changes are displayed.": "选择对话和文件改动的展示方式。",
+	"Daily work reply font": "日常工作回复字体",
+	"Code development reply font": "代码开发回复字体",
+	"Font for daily work replies and questions. Your messages and interface controls use the system font.":
+		"日常工作下回复和提问的字体。你的消息与界面控件使用系统字体。",
+	"Font for code development replies and questions. Your messages use the system font; code and tools remain monospaced.":
+		"代码开发下回复和提问的字体。你的消息使用系统字体，代码与工具内容使用等宽字体。",
+	"No tasks yet.": "暂无任务。",
 	"Chat reply font": "Chat 回复字体",
 	"Font used for assistant prose in Chat mode.": "用于 Chat 模式助手正文的字体。",
 	"Code reply font": "Code 回复字体",

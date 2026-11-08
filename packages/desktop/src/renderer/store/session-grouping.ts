@@ -1,6 +1,7 @@
 import type { AgentMode, SessionSummary } from "@metis/app-protocol";
 import type { AgentActivity } from "../agent-activity.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
+import { loadWorkMode } from "../work-mode.ts";
 import type { AppStoreSnapshot } from "./app-store.ts";
 
 const SESSION_GROUPING_KEY = "metis.session-grouping.v1";
@@ -23,11 +24,12 @@ function isSessionGroupBy(value: unknown): value is SessionGroupBy {
 
 export function loadSessionGroupingPreferences(storage: Pick<Storage, "getItem">): SessionGroupingPreferences {
 	try {
+		const unified = storage.getItem("metis.session-grouping.v2");
+		if (isSessionGroupBy(unified)) return { chat: unified, code: unified };
 		const value = JSON.parse(storage.getItem(SESSION_GROUPING_KEY) ?? "null") as Record<string, unknown> | null;
-		return {
-			chat: isSessionGroupBy(value?.chat) ? value.chat : "date",
-			code: isSessionGroupBy(value?.code) ? value.code : "date",
-		};
+		const grouping = value?.[loadWorkMode(storage)];
+		const selected = isSessionGroupBy(grouping) ? grouping : "date";
+		return { chat: selected, code: selected };
 	} catch {
 		return DEFAULT_SESSION_GROUPING;
 	}
@@ -37,16 +39,13 @@ export function saveSessionGroupingPreferences(
 	storage: Pick<Storage, "setItem">,
 	preferences: SessionGroupingPreferences,
 ): void {
-	storage.setItem(SESSION_GROUPING_KEY, JSON.stringify(preferences));
+	storage.setItem("metis.session-grouping.v2", preferences.chat);
 }
 
-export function sessionsForMode(
-	state: Pick<AppStoreSnapshot, "sessionOrder" | "sessionsById">,
-	mode: AgentMode,
-): SessionSummary[] {
+export function sidebarSessions(state: Pick<AppStoreSnapshot, "sessionOrder" | "sessionsById">): SessionSummary[] {
 	return state.sessionOrder
 		.map((sessionId) => state.sessionsById.get(sessionId))
-		.filter((session): session is SessionSummary => session?.mode === mode)
+		.filter((session): session is SessionSummary => session !== undefined && !session.archived)
 		.sort(
 			(left, right) =>
 				right.updatedAt.localeCompare(left.updatedAt) || left.sessionId.localeCompare(right.sessionId),

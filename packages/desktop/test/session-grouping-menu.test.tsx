@@ -254,6 +254,6 @@ describe("sidebar status grouping", () => {
 		const project = view.container.querySelector(".project-group");
 		expect(project?.querySelector('[aria-label="ordinary"]')).not.toBeNull();
 		expect(project?.querySelector('[aria-label="pinned"]')).toBeNull();
-		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"project"}');
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("project");
 	});
 });

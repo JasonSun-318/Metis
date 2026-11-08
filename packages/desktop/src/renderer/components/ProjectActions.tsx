@@ -1,16 +1,13 @@
-import type { ClientResult } from "@metis/app-protocol";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
-import type { ProjectSessionGroup } from "../session-groups.ts";
+import type { ProjectDeletePreview, ProjectSessionGroup } from "../session-groups.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
 
 export { DialogFrame } from "./DialogFrame.tsx";
-
-type ProjectDeletePreview = ClientResult<"project/deletePreview">;
 
 export type DeleteDialogState =
 	| { readonly status: "loading" }
@@ -162,8 +159,6 @@ export function ProjectActions({
 			setDeleteState({ status: "error", message: errorMessage(cause) });
 		}
 	};
-	const modeLabel = t(group.mode === "chat" ? "Chat" : "Code");
-	const otherModeLabel = t(group.mode === "chat" ? "Code" : "Chat");
 
 	return (
 		<div className="project-actions" data-open={menuOpen} ref={root}>
@@ -312,7 +307,7 @@ export function ProjectActions({
 						onCancel={cancelDialog}
 						titleId="project-delete-title"
 					>
-						<h2 id="project-delete-title">{t("Delete {{mode}} project?", { mode: modeLabel })}</h2>
+						<h2 id="project-delete-title">{t("Delete project?")}</h2>
 						<div id="project-delete-description">
 							{deleteState.status === "loading" && (
 								<output className="status-paragraph">{t("Checking project data…")}</output>
@@ -320,15 +315,14 @@ export function ProjectActions({
 							{deleteState.status === "error" && (
 								<>
 									<p role="alert">{t(deleteState.message)}</p>
-									<p>{t("No data was removed. Retry to load a fresh preview.")}</p>
+									<p>{t("Retry to check the remaining project data.")}</p>
 								</>
 							)}
 							{(deleteState.status === "ready" || deleteState.status === "deleting") && (
 								<>
 									<p>
-										{t("{{count}} {{mode}} sessions, including archived sessions, will move to Trash.", {
+										{t("{{count}} sessions, including archived sessions, will move to Trash.", {
 											count: deleteState.preview.sessionCount,
-											mode: modeLabel,
 										})}
 									</p>
 									<p className="project-delete-path">
@@ -337,12 +331,8 @@ export function ProjectActions({
 									<ul>
 										<li>
 											{t(
-												"Matching attachments, images, tool outputs, Subagents, document work, and {{mode}} project memory are included.",
-												{ mode: modeLabel },
+												"Matching attachments, images, tool outputs, Subagents, document work, and project memory are included.",
 											)}
-										</li>
-										<li>
-											{t("The {{mode}} project and its memory are unchanged.", { mode: otherModeLabel })}
 										</li>
 										<li>{t("The source folder and its files are unchanged.")}</li>
 										<li>{t("Schedules are not deleted automatically.")}</li>
