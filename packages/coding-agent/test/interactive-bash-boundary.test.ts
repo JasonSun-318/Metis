@@ -123,8 +123,10 @@ describe("interactive Bash boundary", () => {
 		const instance = sandbox(sandboxExec);
 		const createSandbox = vi.fn(async () => instance);
 		const value = boundary({ hostExec, createSandbox });
+		expect(value.hasRetainedResources?.()).toBe(false);
 
 		bind(value, "safe-1", "sandbox", "pwd");
+		expect(value.hasRetainedResources?.()).toBe(true);
 		await value.operations.exec("pwd", cwd, options("safe-1"));
 		bind(value, "safe-2", "sandbox", "npm test");
 		await value.operations.exec("npm test", cwd, options("safe-2"));
@@ -137,6 +139,8 @@ describe("interactive Bash boundary", () => {
 		expect(hostExec).toHaveBeenCalledOnce();
 		expect(createSandbox).toHaveBeenCalledOnce();
 		await expect(value.operations.exec("pwd", cwd, options("safe-1"))).rejects.toThrow("no permission binding");
+		await value.reset();
+		expect(value.hasRetainedResources?.()).toBe(false);
 	});
 
 	it("rejects missing, reused, and unbound action IDs without host fallback", async () => {

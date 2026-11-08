@@ -33,6 +33,8 @@ export function buildInteractiveBashReadOnlyRoots(input: {
 
 export interface InteractiveBashBoundary {
 	readonly operations: BashOperations;
+	/** Omit for custom boundaries whose resource lifetime cannot be inspected. */
+	hasRetainedResources?(): boolean;
 	bind(grant: ExecutionGrant): void;
 	unbind(actionId: string): void;
 	reset(): Promise<void>;
@@ -120,6 +122,10 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 	private generation = 0;
 	private closed = false;
 	private disposeTask?: Promise<void>;
+
+	hasRetainedResources(): boolean {
+		return this.sandbox !== undefined || this.bindings.size > 0;
+	}
 
 	constructor(input: {
 		hostOperations: BashOperations;
