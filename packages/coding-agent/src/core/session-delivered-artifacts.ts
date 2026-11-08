@@ -9,6 +9,7 @@ import {
 	parseDeliverFileDetails,
 } from "./deliver-file.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
+import { type GeneratedImageDetails, parseImageGenerationDetails } from "./image-generation/types.ts";
 import {
 	copySessionDeliveredFiles,
 	getOwnedSessionWorkDirs,
@@ -20,10 +21,7 @@ import {
 import type { SessionManager } from "./session-manager.ts";
 import { fileReadPermissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
-type DeliveredArtifactsSession = Pick<
-	SessionManager,
-	"getBranch" | "getCwd" | "getDurableJournalSnapshot" | "getSessionId"
->;
+type DeliveredArtifactsSession = Pick<SessionManager, "getBranch" | "getCwd" | "getJournalMetadata" | "getSessionId">;
 
 export type DeliveredArtifactAvailability = "available" | "unavailable";
 
@@ -36,21 +34,38 @@ export interface ResolvedSessionDeliveredArtifact {
 	readonly path: string;
 }
 
-function deliveryDetails(entry: unknown): DeliverFileDetails | undefined {
-	if (typeof entry !== "object" || entry === null) return undefined;
+function artifactView<TAvailability extends DeliveredArtifactAvailability>(
+	details: DeliverFileDetails,
+	availability: TAvailability,
+	byteLength = details.byteLength,
+): SessionDeliveredArtifact & { readonly availability: TAvailability } {
+	const { fileId, sourcePath, name, message, deliveredAt } = details;
+	return {
+		fileId,
+		name,
+		byteLength,
+		deliveredAt,
+		availability,
+		...(sourcePath === undefined ? {} : { sourcePath }),
+		...(message === undefined ? {} : { message }),
+	};
+}
+
+function deliveryDetails(entry: unknown): DeliverFileDetails[] {
+	if (typeof entry !== "object" || entry === null) return [];
 	const record = entry as Record<string, unknown>;
 	const message = record.type === "message" ? record.message : entry;
-	if (typeof message !== "object" || message === null) return undefined;
+	if (typeof message !== "object" || message === null) return [];
 	const result = message as Record<string, unknown>;
-	if (result.role !== "toolResult" || result.toolName !== "deliver_file" || result.isError !== false) return undefined;
-	return parseDeliverFileDetails(result.details);
+	if (result.role !== "toolResult" || result.isError !== false) return [];
+	if (result.toolName === "image_generate") return parseImageGenerationDetails(result.details)?.images ?? [];
+	if (result.toolName !== "deliver_file") return [];
+	const details = parseDeliverFileDetails(result.details);
+	return details ? [details] : [];
 }
 
 function deliveries(entries: readonly unknown[]): DeliverFileDetails[] {
-	return entries.flatMap((entry) => {
-		const details = deliveryDetails(entry);
-		return details ? [details] : [];
-	});
+	return entries.flatMap(deliveryDetails);
 }
 
 /** Resolve a journal-authorized delivery, preserving legacy copies and reading current live-file metadata. */
@@ -67,7 +82,7 @@ export function resolveSessionDeliveredArtifact(
 		const metadata = lstatSync(path);
 		if (!metadata.isFile() || metadata.size < 1 || metadata.size > MAX_SESSION_ATTACHMENT_BYTES) return undefined;
 		if (!details.sourcePath && metadata.size !== details.byteLength) return undefined;
-		return { path, artifact: { ...details, byteLength: metadata.size, availability: "available" } };
+		return { path, artifact: artifactView(details, "available", metadata.size) };
 	} catch {
 		return undefined;
 	}
@@ -77,6 +92,7 @@ export function resolveSessionDeliveredArtifact(
 export class SessionDeliveredArtifacts {
 	private readonly agentDir: string;
 	private readonly sessionManager: DeliveredArtifactsSession;
+	private readonly pendingImages = new Map<string, GeneratedImageDetails[]>();
 
 	constructor(agentDir: string, sessionManager: DeliveredArtifactsSession) {
 		this.agentDir = agentDir;
@@ -84,7 +100,7 @@ export class SessionDeliveredArtifacts {
 		removeUnreferencedSessionDeliveredFiles(
 			agentDir,
 			sessionManager.getSessionId(),
-			deliveries(sessionManager.getDurableJournalSnapshot()).filter((file) => !file.sourcePath),
+			deliveries(sessionManager.getJournalMetadata()).filter((file) => !file.sourcePath),
 		);
 	}
 
@@ -144,17 +160,18 @@ export class SessionDeliveredArtifacts {
 	list(): SessionDeliveredArtifact[] {
 		const files = new Map<string, DeliverFileDetails>();
 		for (const artifact of deliveries(this.sessionManager.getBranch())) files.set(artifact.fileId, artifact);
+		for (const images of this.pendingImages.values()) for (const image of images) files.set(image.fileId, image);
 		return [...files.values()]
 			.slice(-MAX_SESSION_DELIVERED_FILES)
 			.map(
 				(artifact) =>
-					resolveSessionDeliveredArtifact(this.agentDir, this.sessionManager.getSessionId(), artifact)
-						?.artifact ?? { ...artifact, availability: "unavailable" },
+					resolveSessionDeliveredArtifact(this.agentDir, this.sessionManager.getSessionId(), artifact)?.artifact ??
+					artifactView(artifact, "unavailable"),
 			);
 	}
 
 	resolve(fileId: string): ResolvedSessionDeliveredArtifact | undefined {
-		const branch = deliveries(this.sessionManager.getBranch());
+		const branch = [...deliveries(this.sessionManager.getBranch()), ...[...this.pendingImages.values()].flat()];
 		for (let index = branch.length - 1; index >= 0; index -= 1) {
 			const details = branch[index]!;
 			if (details.fileId === fileId)
@@ -163,8 +180,26 @@ export class SessionDeliveredArtifacts {
 		return undefined;
 	}
 
+	/** Authorize already-written outputs while the same tool call is still producing further images. */
+	stageGeneratedImage(toolCallId: string, image: GeneratedImageDetails): void {
+		const images = this.pendingImages.get(toolCallId) ?? [];
+		images.push(image);
+		this.pendingImages.set(toolCallId, images);
+	}
+
+	/** Called only after the final tool result has been durably appended. */
+	finishGeneration(toolCallId: string): void {
+		this.pendingImages.delete(toolCallId);
+	}
+
+	getGeneratedImage(fileId: string): GeneratedImageDetails | undefined {
+		const candidates = [...deliveries(this.sessionManager.getBranch()), ...[...this.pendingImages.values()].flat()];
+		const image = candidates.reverse().find((candidate) => candidate.fileId === fileId && "mediaType" in candidate);
+		return image as GeneratedImageDetails | undefined;
+	}
+
 	copyTo(target: SessionManager): void {
-		// Only legacy deliveries own copies; live references are carried by the forked journal.
+		// Generated images and legacy deliveries own copies; live references travel in the forked journal.
 		copySessionDeliveredFiles({
 			agentDir: this.agentDir,
 			sourceSessionId: this.sessionManager.getSessionId(),

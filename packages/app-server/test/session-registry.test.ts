@@ -36,6 +36,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	closed = false;
 	readonly calls: string[] = [];
 	refreshMemorySettings?: () => Promise<void>;
+	canEvictWhenIdle?: () => boolean;
 
 	constructor(sessionId: string) {
 		this.sessionId = sessionId;
@@ -107,6 +108,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async clearMcpCredential(): Promise<ClientResult<"mcp/credential/clear">> {
 		throw new Error("No MCP server in fixture");
+	}
+
+	async readProcess(): Promise<ClientResult<"session/readProcess">> {
+		return { total: 0, index: 0, process: null };
 	}
 
 	async readItems(_input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
@@ -198,6 +203,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
 		throw new Error("No agent archive in registry fixture");
+	}
+
+	async renameAgent(): Promise<ClientResult<"agent/rename">> {
+		throw new Error("No agent rename in fixture");
 	}
 
 	async deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">> {
@@ -384,6 +393,157 @@ class FakeHost implements SessionRuntimeHost {
 }
 
 describe("SessionRegistry", () => {
+	it("keeps the most recent idle runtimes warm and waits through the grace period", async () => {
+		vi.useFakeTimers();
+		const host = new FakeHost();
+		const evicted = vi.fn();
+		const registry = new SessionRegistry(host, {
+			maxIdleRuntimes: 1,
+			idleRuntimeGraceMs: 60,
+			onRuntimeEvicted: evicted,
+		});
+		try {
+			const first = (await registry.open(ref("first"))) as FakeRuntime;
+			const second = (await registry.open(ref("second"))) as FakeRuntime;
+			first.canEvictWhenIdle = second.canEvictWhenIdle = () => true;
+			await registry.open(ref("first"));
+			await vi.advanceTimersByTimeAsync(59);
+			expect(second.closed).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(second.closed).toBe(true);
+			expect(first.closed).toBe(false);
+			expect(evicted).toHaveBeenCalledExactlyOnceWith("second");
+		} finally {
+			await registry.shutdown();
+			vi.useRealTimers();
+		}
+	});
+
+	it.each(["unknown", "active", "interaction", "subscription", "retained-state"])(
+		"protects %s runtimes while reclaiming eligible history viewers",
+		async (reason) => {
+			vi.useFakeTimers();
+			const host = new FakeHost();
+			const registry = new SessionRegistry(host, {
+				maxIdleRuntimes: 1,
+				idleRuntimeGraceMs: 60,
+				isSessionSubscribed: (id) => reason === "subscription" && id === "protected",
+			});
+			try {
+				const protectedRuntime = (await registry.open(ref("protected"))) as FakeRuntime;
+				if (reason !== "unknown") protectedRuntime.canEvictWhenIdle = () => reason !== "retained-state";
+				protectedRuntime.active = reason === "active";
+				protectedRuntime.pendingInteractions = reason === "interaction";
+				const old = (await registry.open(ref("old"))) as FakeRuntime;
+				const recent = (await registry.open(ref("recent"))) as FakeRuntime;
+				old.canEvictWhenIdle = recent.canEvictWhenIdle = () => true;
+				await vi.advanceTimersByTimeAsync(60);
+				expect(protectedRuntime.closed).toBe(false);
+				expect(old.closed).toBe(true);
+				expect(recent.closed).toBe(false);
+			} finally {
+				await registry.shutdown();
+				vi.useRealTimers();
+			}
+		},
+	);
+
+	it("serializes a new operation behind eviction and reopens before delivering it", async () => {
+		vi.useFakeTimers();
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host, { maxIdleRuntimes: 1, idleRuntimeGraceMs: 60 });
+		let finishClose!: () => void;
+		let startedClose!: () => void;
+		const started = new Promise<void>((resolve) => {
+			startedClose = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			finishClose = resolve;
+		});
+		try {
+			const first = (await registry.open(ref("first"))) as FakeRuntime;
+			const second = (await registry.open(ref("second"))) as FakeRuntime;
+			first.canEvictWhenIdle = second.canEvictWhenIdle = () => true;
+			vi.spyOn(first, "close").mockImplementation(async () => {
+				startedClose();
+				await gate;
+				first.closed = true;
+			});
+			vi.setSystemTime(Date.now() + 61);
+			const sweep = registry.pruneIdleRuntimes();
+			await started;
+			const operation = registry.run(ref("first"), (runtime) => {
+				expect(runtime).not.toBe(first);
+				expect((runtime as FakeRuntime).closed).toBe(false);
+				return runtime.sessionId;
+			});
+			finishClose();
+			await sweep;
+			await expect(operation).resolves.toBe("first");
+			expect(host.open).toHaveBeenCalledTimes(3);
+		} finally {
+			finishClose?.();
+			await registry.shutdown();
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not close queued operations or runtimes under model settings refresh", async () => {
+		vi.useFakeTimers();
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host, { maxIdleRuntimes: 0, idleRuntimeGraceMs: 60 });
+		let finish!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		try {
+			const runtime = (await registry.open(ref("first"))) as FakeRuntime;
+			runtime.canEvictWhenIdle = () => true;
+			const pending = registry.run(ref("first"), async () => {
+				await gate;
+			});
+			await vi.advanceTimersByTimeAsync(60);
+			expect(runtime.closed).toBe(false);
+			finish();
+			await pending;
+			const unlock = await registry.beginModelServiceSettingsRefresh();
+			await vi.advanceTimersByTimeAsync(60);
+			expect(runtime.closed).toBe(false);
+			unlock();
+			await vi.advanceTimersByTimeAsync(60);
+			expect(runtime.closed).toBe(true);
+		} finally {
+			finish();
+			await registry.shutdown();
+			vi.useRealTimers();
+		}
+	});
+
+	it("reports failed disposal without removing the channel and retries cleanup at shutdown", async () => {
+		vi.useFakeTimers();
+		const host = new FakeHost();
+		const evicted = vi.fn();
+		const registry = new SessionRegistry(host, {
+			maxIdleRuntimes: 0,
+			idleRuntimeGraceMs: 60,
+			onRuntimeEvicted: evicted,
+		});
+		try {
+			const runtime = (await registry.open(ref("first"))) as FakeRuntime;
+			runtime.canEvictWhenIdle = () => true;
+			const close = vi.spyOn(runtime, "close").mockRejectedValueOnce(new Error("disposal failed"));
+			vi.setSystemTime(Date.now() + 61);
+			await expect(registry.pruneIdleRuntimes()).rejects.toThrow("disposal failed");
+			expect(registry.has("first")).toBe(true);
+			expect(evicted).not.toHaveBeenCalled();
+			await registry.shutdown();
+			expect(close).toHaveBeenCalledTimes(2);
+		} finally {
+			await registry.shutdown();
+			vi.useRealTimers();
+		}
+	});
+
 	it("reads only existing runtimes without opening a cold session", async () => {
 		const host = new FakeHost();
 		const registry = new SessionRegistry(host);

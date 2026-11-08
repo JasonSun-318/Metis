@@ -32,6 +32,8 @@ export type SessionEventListener = (event: DomainEvent) => void;
 
 /** One opened runtime hidden behind app-server operations and projections. */
 export interface OpenedSessionRuntime {
+	/** Explicit opt-in: custom runtimes are retained unless they can safely reopen. */
+	canEvictWhenIdle?(): boolean;
 	readonly sessionId: string;
 	isActive(): boolean;
 	hasPendingInteractions(): boolean;

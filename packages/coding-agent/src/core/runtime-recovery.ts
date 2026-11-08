@@ -1118,16 +1118,39 @@ function userMessageTurnEvidence(fields: ReadonlyMap<string, unknown>): string |
 	return typeof turnId === "string" && turnId.length > 0 ? turnId : undefined;
 }
 
+function createRuntimeJournalState() {
+	return {
+		operations: new Map<string, OperationAccumulator>(),
+		requestHashes: new Map<string, string>(),
+		queues: new Map<string, QueueAccumulator>(),
+		turns: new Map<string, TurnAccumulator>(),
+		tools: new Map<string, ToolAccumulator>(),
+		toolsByTurn: new Map<string, ToolAccumulator[]>(),
+		toolCalls: new Map<string, ToolCallAccumulator>(),
+		activeToolsByCallId: new Map<string, ToolAccumulator>(),
+		proposals: new Map<string, { planId: unknown; revision: unknown }>(),
+	};
+}
+
+type RuntimeJournalState = ReturnType<typeof createRuntimeJournalState>;
+
+/** Append-only reduction. Owners discard this accumulator if reduction fails. */
+export class RuntimeJournalReducer {
+	private readonly state = createRuntimeJournalState();
+
+	reduce(entries: readonly unknown[]): RuntimeRecoveryResult {
+		appendRuntimeJournal(this.state, entries);
+		return projectRuntimeJournal(this.state);
+	}
+}
+
 export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecoveryResult {
-	const operations = new Map<string, OperationAccumulator>();
-	const requestHashes = new Map<string, string>();
-	const queues = new Map<string, QueueAccumulator>();
-	const turns = new Map<string, TurnAccumulator>();
-	const tools = new Map<string, ToolAccumulator>();
-	const toolsByTurn = new Map<string, ToolAccumulator[]>();
-	const toolCalls = new Map<string, ToolCallAccumulator>();
-	const activeToolsByCallId = new Map<string, ToolAccumulator>();
-	const proposals = new Map<string, { planId: unknown; revision: unknown }>();
+	return new RuntimeJournalReducer().reduce(entries);
+}
+
+function appendRuntimeJournal(state: RuntimeJournalState, entries: readonly unknown[]): void {
+	const { operations, requestHashes, queues, turns, tools, toolsByTurn, toolCalls, activeToolsByCallId, proposals } =
+		state;
 
 	for (const rawEntry of entries) {
 		const fields = dataFields(rawEntry, "session journal entry");
@@ -1353,7 +1376,10 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 			}
 		}
 	}
+}
 
+function projectRuntimeJournal(state: RuntimeJournalState): RuntimeRecoveryResult {
+	const { operations, queues, turns, tools, toolsByTurn, toolCalls } = state;
 	const claimedQueues = new Map<string, TurnAccumulator>();
 	const operationTurns = new Map<string, TurnAccumulator>();
 	for (const turn of turns.values()) {

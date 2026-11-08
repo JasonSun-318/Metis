@@ -22,6 +22,7 @@ const CLEARABLE_BUILTIN_TOOLS = new Set([
 	"ls",
 	"web_fetch",
 	"web_search",
+	// Retired tool results remain clearable when resuming historical conversations.
 	"describe_image",
 ]);
 

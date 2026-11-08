@@ -11,6 +11,7 @@ import {
 	parseDurablePromptSubmission,
 	parseRuntimeControlEntry,
 	RequestIdReusedError,
+	RuntimeJournalReducer,
 	type RuntimeOperationEntry,
 	type RuntimeQueueEntry,
 	type RuntimeRequestIdentity,
@@ -23,6 +24,44 @@ const method = "session/submitPrompt";
 const timestamp = "2026-01-01T00:00:00.000Z";
 const input: DurablePromptInput = { text: "hello" };
 let entrySequence = 0;
+
+describe("incremental runtime journal", () => {
+	it("matches full recovery at every tool and turn transition without changing earlier results", () => {
+		const request = identity("incremental-tools");
+		const journal = [
+			operation(request, "accepted"),
+			runtimeTurn(request.turnId, [request.operationId], "started"),
+			assistantToolCall(request.turnId),
+			tool(request, "started"),
+			toolResult(request.turnId),
+			tool(request, "completed"),
+			assistantMessage(request.turnId),
+			runtimeTurn(request.turnId, [request.operationId], "completed"),
+			operation(request, "completed"),
+		];
+		const reducer = new RuntimeJournalReducer();
+		const snapshots: Array<{ actual: unknown; expected: unknown }> = [];
+		for (let index = 0; index < journal.length; index += 1) {
+			const actual = reducer.reduce([journal[index]]);
+			expect(actual).toEqual(reduceRuntimeJournal(journal.slice(0, index + 1)));
+			snapshots.push({ actual, expected: structuredClone(actual) });
+		}
+		for (const { actual, expected } of snapshots) expect(actual).toEqual(expected);
+	});
+
+	it("retains queue state and rejects conflicting requests across appended batches", () => {
+		const request = identity("incremental-queue");
+		const first = [operation(request, "accepted", { kind: "steer" }), queue(request, "enqueued")];
+		const reducer = new RuntimeJournalReducer();
+		expect(reducer.reduce(first)).toEqual(reduceRuntimeJournal(first));
+		const cancelled = queue(request, "cancelled", { input: undefined, reason: "cancelled" });
+		expect(reducer.reduce([cancelled])).toEqual(reduceRuntimeJournal([...first, cancelled]));
+		const conflicting = operation(identity(request.requestId, { text: "different" }), "accepted", {
+			input: { text: "different" },
+		});
+		expect(() => reducer.reduce([conflicting])).toThrow(RequestIdReusedError);
+	});
+});
 
 function entryBase() {
 	entrySequence += 1;

@@ -19,6 +19,7 @@ import {
 	MAX_PROJECTED_VISIBLE_TEXT_BYTES,
 } from "../item-projection.ts";
 import { AppServerError } from "../session-runtime-host.ts";
+import type { SessionItemHistory } from "./journal-item-history.ts";
 
 export { MAX_PROJECTED_THINKING_BYTES, MAX_PROJECTED_VISIBLE_TEXT_BYTES };
 const MAX_SNAPSHOT_ITEMS = 200;
@@ -29,6 +30,7 @@ export interface SessionProjectionSeed {
 	readonly session: SessionSummary;
 	readonly turns?: readonly TurnView[];
 	readonly items?: readonly ItemView[];
+	readonly history?: SessionItemHistory;
 	readonly pendingInteractions?: readonly InteractionView[];
 	readonly tasks?: readonly SessionTaskView[];
 	readonly deliveredFiles?: readonly SessionDeliveredFileView[];
@@ -50,6 +52,7 @@ export class SessionProjection {
 	private readonly itemsById = new Map<string, ItemView>();
 	private readonly itemOrder: string[] = [];
 	private readonly itemIndexById = new Map<string, number>();
+	private readonly history?: SessionItemHistory;
 	private pendingInteractions: InteractionView[];
 	private tasks: SessionTaskView[];
 	private deliveredFiles: SessionDeliveredFileView[];
@@ -58,6 +61,11 @@ export class SessionProjection {
 
 	constructor(seed: SessionProjectionSeed) {
 		this.session = clone(seed.session);
+		this.history = seed.history;
+		for (const itemId of seed.history?.itemIds ?? []) {
+			this.itemIndexById.set(itemId, this.itemOrder.length);
+			this.itemOrder.push(itemId);
+		}
 		for (const turn of seed.turns ?? []) this.upsertTurn(turn);
 		for (const item of seed.items ?? []) this.upsertItem(item);
 		this.pendingInteractions = clone([...(seed.pendingInteractions ?? [])]);
@@ -81,7 +89,17 @@ export class SessionProjection {
 
 	private upsertItem(item: ItemView): void {
 		this.assertSession(item.sessionId);
-		if (!this.itemsById.has(item.itemId)) {
+		const previousIndex = this.itemIndexById.get(item.itemId);
+		if (previousIndex !== undefined && !this.itemsById.has(item.itemId) && !this.history?.readItem(item.itemId)) {
+			// Hidden journal metadata did not occupy a display row in the eager
+			// projection. If a live event reveals it, retain the original append order.
+			this.itemOrder.splice(previousIndex, 1);
+			this.itemIndexById.delete(item.itemId);
+			for (let index = previousIndex; index < this.itemOrder.length; index += 1) {
+				this.itemIndexById.set(this.itemOrder[index]!, index);
+			}
+		}
+		if (!this.itemIndexById.has(item.itemId)) {
 			this.itemIndexById.set(item.itemId, this.itemOrder.length);
 			this.itemOrder.push(item.itemId);
 		}
@@ -95,8 +113,10 @@ export class SessionProjection {
 		details: Omit<PermissionDecisionView, "source"> = {},
 	): readonly ItemView[] {
 		const updated: ItemView[] = [];
-		for (const itemId of this.itemOrder) {
-			const item = this.itemsById.get(itemId)!;
+		const candidates = new Set([...(this.history?.toolCallItemIds(actionId) ?? []), ...this.itemsById.keys()]);
+		for (const itemId of candidates) {
+			const item = this.getItem(itemId);
+			if (!item) continue;
 			if (!item.content.some((block) => block.type === "tool_call" && block.toolCallId === actionId)) continue;
 			const next = {
 				...item,
@@ -171,7 +191,7 @@ export class SessionProjection {
 				return clone(event);
 			case "item/delta": {
 				this.assertSession(event.sessionId);
-				const item = this.itemsById.get(event.itemId);
+				const item = this.getItem(event.itemId);
 				if (!item || item.state !== "streaming") return undefined;
 				const projected = appendProjectedDelta(item, event.delta);
 				if (!projected) return undefined;
@@ -185,20 +205,32 @@ export class SessionProjection {
 		return clone(this.session);
 	}
 
-	private itemPage(end: number, limit: number): readonly string[] {
-		const itemIds: string[] = [];
+	private getItem(itemId: string): ItemView | undefined {
+		return this.itemsById.get(itemId) ?? this.history?.readItem(itemId);
+	}
+
+	private itemPage(end: number, limit: number): ClientResult<"session/readItems"> {
+		const items: ItemView[] = [];
 		let bytes = 2;
-		for (let index = end - 1; index >= 0 && itemIds.length < limit; index -= 1) {
+		let startIndex = end;
+		for (let index = end - 1; index >= 0 && items.length < limit; index -= 1) {
 			const itemId = this.itemOrder[index]!;
-			const itemBytes = Buffer.byteLength(JSON.stringify(this.itemsById.get(itemId)!), "utf8") + 1;
-			if (itemIds.length > 0 && bytes + itemBytes > MAX_PROJECTED_ITEM_PAGE_UTF8_BYTES) break;
-			itemIds.unshift(itemId);
+			const item = this.getItem(itemId);
+			if (!item) continue;
+			const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8") + 1;
+			if (items.length > 0 && bytes + itemBytes > MAX_PROJECTED_ITEM_PAGE_UTF8_BYTES) break;
+			items.push(item);
+			startIndex = index;
 			bytes += itemBytes;
 		}
-		if (itemIds.length === 0 && end > 0) {
-			itemIds.push(this.itemOrder[end - 1]!);
+		let hasEarlier = false;
+		for (let index = startIndex - 1; items.length > 0 && index >= 0; index -= 1) {
+			if (!this.getItem(this.itemOrder[index]!)) continue;
+			hasEarlier = true;
+			break;
 		}
-		return itemIds;
+		items.reverse();
+		return { items: items.map(clone), nextBeforeItemId: hasEarlier ? items[0]!.itemId : null };
 	}
 
 	readItems(input: ClientParams<"session/readItems">): ClientResult<"session/readItems"> {
@@ -206,15 +238,11 @@ export class SessionProjection {
 		let end = this.itemOrder.length;
 		if (input.beforeItemId) {
 			const index = this.itemIndexById.get(input.beforeItemId);
-			if (index === undefined) throw new AppServerError("NOT_FOUND", { sessionId: this.session.sessionId });
+			if (index === undefined || !this.getItem(input.beforeItemId))
+				throw new AppServerError("NOT_FOUND", { sessionId: this.session.sessionId });
 			end = index;
 		}
-		const itemIds = this.itemPage(end, input.limit);
-		const startIndex = itemIds.length > 0 ? this.itemIndexById.get(itemIds[0]!)! : 0;
-		return {
-			items: itemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId: startIndex > 0 ? itemIds[0]! : null,
-		};
+		return this.itemPage(end, input.limit);
 	}
 
 	snapshot(
@@ -248,16 +276,15 @@ export class SessionProjection {
 			nextAgentAfterId: null,
 		},
 	): SessionSnapshot {
-		const recentItemIds = this.itemPage(this.itemOrder.length, MAX_SNAPSHOT_ITEMS);
+		const recent = this.itemPage(this.itemOrder.length, MAX_SNAPSHOT_ITEMS);
 		const turns = this.turnOrder.slice(-MAX_SNAPSHOT_TURNS).map((turnId) => clone(this.turnsById.get(turnId)!));
-		const startIndex = recentItemIds.length > 0 ? this.itemIndexById.get(recentItemIds[0]!)! : 0;
 		return {
 			session: this.getSummary(),
 			...(this.process ? { process: clone(this.process) } : {}),
 			...(this.retry ? { retry: clone(this.retry) } : {}),
 			turns,
-			recentItems: recentItemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
-			nextBeforeItemId: startIndex > 0 ? recentItemIds[0]! : null,
+			recentItems: recent.items,
+			nextBeforeItemId: recent.nextBeforeItemId,
 			activeTurnId: [...turns].reverse().find((turn) => turn.state === "running")?.turnId ?? null,
 			pendingInteractions: clone(this.pendingInteractions),
 			queuedTurns: clone(this.queuedTurns),

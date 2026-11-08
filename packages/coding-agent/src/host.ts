@@ -8,6 +8,13 @@ export {
 	hasConfiguredManualThinkingLevel,
 	normalizeManualThinkingLevelMap,
 } from "./core/custom-model-reasoning.ts";
+export {
+	IMAGE_GENERATION_AUTH_KEY,
+	type ImageGenerationApi,
+	type ImageGenerationConfig,
+	normalizeImageGenerationConfig,
+} from "./core/image-generation/config.ts";
+export { parseImageGenerationDetails } from "./core/image-generation/types.ts";
 export { readKnowledgeCatalog } from "./core/knowledge-catalog.ts";
 export {
 	KNOWLEDGE_LINKS_CUSTOM_TYPE,
@@ -70,7 +77,7 @@ export { resolveDeliveredFilePath } from "./core/session-attachments.ts";
 export { resolveSessionDeliveredArtifact } from "./core/session-delivered-artifacts.ts";
 export { agentSummaryFromRecord } from "./core/subagents/manager.ts";
 export { queuedAdmissionRequestId, queuedAgentMessages } from "./core/subagents/queued-messages.ts";
-export { AgentStore } from "./core/subagents/store.ts";
+export { type AgentCatalogMetadata, AgentStore } from "./core/subagents/store.ts";
 export { BUILT_IN_TOOL_NAMES } from "./core/tools/index.ts";
 export type {
 	WorkspaceSandboxCheck,

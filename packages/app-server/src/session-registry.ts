@@ -36,10 +36,19 @@ interface RuntimeSlot {
 	tail: Promise<void>;
 	pending: number;
 	accepting: boolean;
+	lastUsed: number;
+	order: number;
+	eviction?: Promise<void>;
 }
 
 export interface SessionRegistryOptions {
 	maxQueuedOperationsPerSession?: number;
+	/** Eligible, unsubscribed idle runtimes kept warm (default: 8). Stateful runtimes are pinned. */
+	maxIdleRuntimes?: number;
+	/** Minimum idle time before reclaiming an excess runtime (default: 60 seconds). */
+	idleRuntimeGraceMs?: number;
+	isSessionSubscribed?: (sessionId: string) => boolean;
+	onRuntimeEvicted?: (sessionId: string) => void;
 }
 
 /** Owns lazy runtimes and the bounded, per-session operation queues. */
@@ -52,9 +61,26 @@ export class SessionRegistry {
 	private modelServiceRefreshActive = false;
 	private modelServiceRefreshTail: Promise<void> = Promise.resolve();
 	private shutdownPromise?: Promise<void>;
+	private readonly options: SessionRegistryOptions;
+	private readonly maxIdleRuntimes: number;
+	private readonly idleRuntimeGraceMs: number;
+	private retentionTimer?: ReturnType<typeof setTimeout>;
+	private retentionTask?: Promise<void>;
+	private useOrder = 0;
 
 	constructor(host: SessionRuntimeHost, options: SessionRegistryOptions = {}) {
 		this.host = host;
+		this.options = options;
+		this.maxIdleRuntimes = options.maxIdleRuntimes ?? 8;
+		this.idleRuntimeGraceMs = options.idleRuntimeGraceMs ?? 60_000;
+		if (
+			!Number.isSafeInteger(this.maxIdleRuntimes) ||
+			this.maxIdleRuntimes < 0 ||
+			!Number.isSafeInteger(this.idleRuntimeGraceMs) ||
+			this.idleRuntimeGraceMs < 1
+		) {
+			throw new TypeError("Idle runtime limits must be safe integers with a positive grace period");
+		}
 		const maximum = options.maxQueuedOperationsPerSession ?? 128;
 		if (!Number.isSafeInteger(maximum) || maximum < 1) {
 			throw new TypeError("maxQueuedOperationsPerSession must be a positive safe integer");
@@ -66,6 +92,73 @@ export class SessionRegistry {
 		return this.slots.has(sessionId);
 	}
 
+	private scheduleRetention(): void {
+		if (!this.accepting || this.retentionTimer || this.retentionTask || this.slots.size <= this.maxIdleRuntimes)
+			return;
+		this.retentionTimer = setTimeout(() => {
+			this.retentionTimer = undefined;
+			void this.pruneIdleRuntimes().catch((error: unknown) => {
+				console.error("Failed to reclaim idle session runtime", error);
+			});
+		}, this.idleRuntimeGraceMs);
+		this.retentionTimer.unref();
+	}
+
+	/** Serialized with session operations; safe to invoke explicitly in diagnostics/tests. */
+	pruneIdleRuntimes(): Promise<void> {
+		if (this.retentionTask) return this.retentionTask;
+		this.retentionTask = this.pruneIdleRuntimesOnce().finally(() => {
+			this.retentionTask = undefined;
+			this.scheduleRetention();
+		});
+		return this.retentionTask;
+	}
+
+	private canEvict(slot: RuntimeSlot, runtime: OpenedSessionRuntime): boolean {
+		return (
+			this.accepting &&
+			!this.modelServiceRefreshActive &&
+			slot.accepting &&
+			slot.pending === 0 &&
+			!this.blockedSessionIds.has(slot.ref.summary.sessionId) &&
+			!this.options.isSessionSubscribed?.(slot.ref.summary.sessionId) &&
+			!runtime.isActive() &&
+			!runtime.hasPendingInteractions() &&
+			runtime.canEvictWhenIdle?.() === true
+		);
+	}
+
+	private async pruneIdleRuntimesOnce(): Promise<void> {
+		const eligible: { slot: RuntimeSlot; runtime: OpenedSessionRuntime }[] = [];
+		for (const slot of this.slots.values()) {
+			if (slot.eviction || slot.pending > 0 || !slot.accepting) continue;
+			let runtime: OpenedSessionRuntime;
+			try {
+				runtime = await slot.runtime;
+			} catch {
+				// Failed opens are removed by their owning operation queue.
+				continue;
+			}
+			if (this.canEvict(slot, runtime)) eligible.push({ slot, runtime });
+		}
+		eligible.sort((left, right) => left.slot.order - right.slot.order);
+		for (const { slot, runtime } of eligible.slice(0, Math.max(0, eligible.length - this.maxIdleRuntimes))) {
+			if (Date.now() - slot.lastUsed < this.idleRuntimeGraceMs) continue;
+			const eviction = slot.tail.then(async () => {
+				if (!this.canEvict(slot, runtime) || Date.now() - slot.lastUsed < this.idleRuntimeGraceMs) return;
+				await runtime.close();
+				if (this.slots.get(slot.ref.summary.sessionId) === slot) {
+					this.slots.delete(slot.ref.summary.sessionId);
+					this.options.onRuntimeEvicted?.(slot.ref.summary.sessionId);
+				}
+			});
+			slot.eviction = eviction;
+			slot.tail = eviction.catch(() => undefined);
+			await eviction;
+			slot.eviction = undefined;
+		}
+	}
+
 	/** Read an already-open runtime without creating one when the session is cold. */
 	async withOpenRuntime<T>(
 		sessionId: string,
@@ -73,6 +166,10 @@ export class SessionRegistry {
 	): Promise<{ open: true; result: T } | { open: false }> {
 		const slot = this.slots.get(sessionId);
 		if (!slot) return { open: false };
+		if (slot.eviction) {
+			await slot.eviction;
+			return await this.withOpenRuntime(sessionId, operation);
+		}
 		return { open: true, result: await this.enqueue(slot, operation) };
 	}
 
@@ -166,6 +263,8 @@ export class SessionRegistry {
 			tail: Promise.resolve(),
 			pending: 0,
 			accepting: true,
+			lastUsed: Date.now(),
+			order: ++this.useOrder,
 		};
 		this.slots.set(ref.summary.sessionId, slot);
 		return slot;
@@ -175,12 +274,18 @@ export class SessionRegistry {
 		slot: RuntimeSlot,
 		operation: (runtime: OpenedSessionRuntime) => Promise<T> | T,
 	): Promise<T> {
+		if (slot.eviction) await slot.eviction;
+		if (this.slots.get(slot.ref.summary.sessionId) !== slot) {
+			return await this.enqueue(this.slotFor(slot.ref), operation);
+		}
 		if (!slot.accepting) throw new AppServerError("BUSY", { sessionId: slot.ref.summary.sessionId });
 		if (slot.pending >= this.maxQueuedOperationsPerSession) {
 			throw new AppServerError("OVERLOADED", { sessionId: slot.ref.summary.sessionId });
 		}
 
 		slot.pending += 1;
+		slot.lastUsed = Date.now();
+		slot.order = ++this.useOrder;
 		const result = slot.tail.then(async () => operation(await slot.runtime));
 		slot.tail = result.then(
 			() => undefined,
@@ -190,6 +295,8 @@ export class SessionRegistry {
 			return await result;
 		} finally {
 			slot.pending -= 1;
+			slot.lastUsed = Date.now();
+			slot.order = ++this.useOrder;
 			if (slot.pending === 0) {
 				try {
 					await slot.runtime;
@@ -197,6 +304,7 @@ export class SessionRegistry {
 					if (this.slots.get(slot.ref.summary.sessionId) === slot) this.slots.delete(slot.ref.summary.sessionId);
 				}
 			}
+			this.scheduleRetention();
 		}
 	}
 
@@ -296,6 +404,7 @@ export class SessionRegistry {
 	}
 
 	async beginModelServiceSettingsRefresh(): Promise<() => void> {
+		if (this.retentionTask) await this.retentionTask;
 		if (!this.accepting) throw new AppServerError("BUSY");
 		let unlock!: () => void;
 		const lock = new Promise<void>((resolve) => {
@@ -363,6 +472,8 @@ export class SessionRegistry {
 		sessionId: string,
 		prepareClose?: (runtime: OpenedSessionRuntime) => Promise<boolean> | boolean,
 	): Promise<void> {
+		const evicting = this.slots.get(sessionId)?.eviction;
+		if (evicting) await evicting;
 		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY", { sessionId });
 		if (this.blockedSessionIds.has(sessionId)) throw new AppServerError("BUSY", { sessionId });
 		const slot = this.slots.get(sessionId);
@@ -409,6 +520,7 @@ export class SessionRegistry {
 		operation: () => Promise<T>,
 		beforeClose?: () => void,
 	): Promise<T> {
+		if (this.retentionTask) await this.retentionTask;
 		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
 		const ids = [...new Set(sessionIds)];
 		for (const sessionId of ids) assertValidSessionId(sessionId);
@@ -457,6 +569,10 @@ export class SessionRegistry {
 
 	private async shutdownOnce(): Promise<void> {
 		this.accepting = false;
+		if (this.retentionTimer) clearTimeout(this.retentionTimer);
+		this.retentionTimer = undefined;
+		// A close already in progress owns its runtime until it settles.
+		await this.retentionTask?.catch(() => undefined);
 		const slots = [...this.slots.values()];
 		for (const slot of slots) slot.accepting = false;
 		await Promise.allSettled(slots.map((slot) => slot.tail));

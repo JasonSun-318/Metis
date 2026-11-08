@@ -13,13 +13,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type DurableImageRef,
 	MAX_DURABLE_IMAGE_BYTES,
 	MAX_DURABLE_PROMPT_IMAGE_BYTES,
 	MAX_DURABLE_PROMPT_IMAGES,
 	parseDurablePromptSubmission,
+	RuntimeJournalReducer,
+	reduceRuntimeJournal,
 } from "../../src/core/runtime-recovery.ts";
 import { getSessionImageDir } from "../../src/core/session-manager.ts";
 import {
@@ -65,6 +67,53 @@ function acceptedTurn(requestId: string, text = "hello"): RuntimeControlPayload 
 }
 
 describe("SessionManager runtime journal", () => {
+	it("parses only appended records and resets recovery when managed state is replaced", () => {
+		const manager = SessionManager.create(directory, directory, { id: "recovery-cache" });
+		const reduce = vi.spyOn(RuntimeJournalReducer.prototype, "reduce");
+		try {
+			const first = manager.getRuntimeRecovery();
+			expect(manager.getRuntimeRecovery()).toBe(first);
+			expect(reduce).toHaveBeenCalledTimes(1);
+			manager.appendRuntimeControl(acceptedTurn("cached-request"));
+			const second = manager.getRuntimeRecovery();
+			expect(reduce.mock.calls.map(([entries]) => entries.length)).toEqual([1, 1]);
+			expect(second).toEqual(reduceRuntimeJournal(manager.getDurableJournalSnapshot()));
+			expect(first.operations).toEqual([]);
+			expect(Object.isFrozen(second.operations[0]?.input)).toBe(true);
+			manager.newSession({ id: "recovery-replaced" });
+			expect(manager.getRuntimeRecovery()).toEqual({
+				operations: [],
+				queues: [],
+				turns: [],
+				tools: [],
+				decisions: [],
+			});
+		} finally {
+			reduce.mockRestore();
+			manager.close();
+		}
+	});
+
+	it("rebuilds failed reduction instead of skipping invalid evidence on the next read", () => {
+		const manager = SessionManager.create(directory, directory, { id: "recovery-rebuild" });
+		try {
+			const request = identifySubmitPromptRequest("missing-operation", { text: "hello" });
+			manager.appendRuntimeControl({
+				type: "runtime_turn",
+				turnId: request.turnId,
+				operationIds: [request.operationId],
+				consumedQueueItemIds: [],
+				state: "started",
+			});
+			expect(() => manager.getRuntimeRecovery()).toThrow(/unknown operation/);
+			expect(() => manager.getRuntimeRecovery()).toThrow(/unknown operation/);
+			manager.appendRuntimeControl(acceptedTurn(request.requestId));
+			expect(manager.getRuntimeRecovery()).toEqual(reduceRuntimeJournal(manager.getDurableJournalSnapshot()));
+		} finally {
+			manager.close();
+		}
+	});
+
 	it("reuses an immutable journal snapshot until the next append", () => {
 		const manager = SessionManager.create(directory, directory, { id: "snapshot-cache" });
 		const first = manager.getDurableJournalSnapshot();
@@ -73,8 +122,12 @@ describe("SessionManager runtime journal", () => {
 		manager.appendMessage({ role: "user", content: "changed", timestamp: 1 });
 		const second = manager.getDurableJournalSnapshot();
 		expect(second).not.toBe(first);
+		expect(second[0]).toBe(first[0]);
+		expect(first).toHaveLength(1);
+		expect(second).toHaveLength(2);
 		expect(manager.getDurableJournalSnapshot()).toBe(second);
 		expect(Object.isFrozen(second)).toBe(true);
+		expect(Object.isFrozen(second[1])).toBe(true);
 		manager.close();
 	});
 

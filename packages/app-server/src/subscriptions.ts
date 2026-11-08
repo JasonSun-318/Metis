@@ -49,6 +49,10 @@ export class SessionSubscriptions {
 		return this.cursor;
 	}
 
+	hasSubscribers(sessionId: string): boolean {
+		return (this.channels.get(sessionId)?.subscribers.size ?? 0) > 0;
+	}
+
 	private channelFor(runtime: OpenedSessionRuntime): SessionChannel {
 		const existing = this.channels.get(runtime.sessionId);
 		if (existing) {

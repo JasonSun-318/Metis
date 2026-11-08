@@ -47,6 +47,8 @@ export interface SessionJournalReplaceOptions {
 export interface SessionJournal<T = unknown> {
 	append(record: T): void;
 	readStrict(options?: SessionJournalReadOptions): SessionJournalReadResult<T>;
+	/** Read one complete record using the offsets collected by strict validation. */
+	readRecord(index: number): T;
 	replaceAtomically(records: readonly T[], options?: SessionJournalReplaceOptions): void;
 	close(): void;
 }
@@ -739,6 +741,7 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 	private closed = false;
 	private poisoned = false;
 	private poisonCause: unknown;
+	private positions?: { offset: number; bytes: number }[];
 
 	constructor(
 		filePath: string,
@@ -773,6 +776,7 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 				writeAllSync(fd, data);
 				this.syncFile(fd);
 				const stats = fstatSync(fd);
+				this.positions?.push({ offset: this.identity.size, bytes: data.byteLength - 1 });
 				this.identity = {
 					device: stats.dev,
 					inode: stats.ino,
@@ -783,6 +787,28 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 				closeQuietly(fd);
 			}
 		});
+	}
+
+	readRecord(index: number): T {
+		this.assertUsable();
+		if (!Number.isSafeInteger(index) || index < 0) throw new RangeError("Invalid journal record index");
+		if (!this.positions) this.readStrict();
+		const position = this.positions![index];
+		if (!position) throw new RangeError("Journal record index out of range");
+		const snapshot = this.readSnapshot;
+		const fd = snapshot?.fd ?? openRegularFile(this.filePath, fsConstants.O_RDONLY, 0o600, this.identity);
+		try {
+			const bytes = Buffer.allocUnsafe(position.bytes);
+			let read = 0;
+			while (read < bytes.length) {
+				const count = readSync(fd, bytes, read, bytes.length - read, position.offset + read);
+				if (count === 0) throw new CorruptSessionError(this.displayPath, index + 1, "Journal record was truncated");
+				read += count;
+			}
+			return this.parseRecord(bytes, index + 1);
+		} finally {
+			if (!snapshot) closeQuietly(fd);
+		}
 	}
 
 	readStrict(options: SessionJournalReadOptions = {}): SessionJournalReadResult<T> {
@@ -856,6 +882,13 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 			const lines = records.map((record) => serializeRecord(record, this.serializer, this.maxRecordBytes));
 			const data = Buffer.from(lines.length === 0 ? "" : `${lines.join("\n")}\n`, "utf8");
 			this.replace(data, options.backupTag);
+			let offset = 0;
+			this.positions = lines.map((line) => {
+				const bytes = Buffer.byteLength(line, "utf8");
+				const position = { offset, bytes };
+				offset += bytes + 1;
+				return position;
+			});
 		});
 	}
 
@@ -889,6 +922,8 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 
 	private readRecords(): { records: T[]; partial: Buffer; completeEnd: number } {
 		const records: T[] = [];
+		const positions: { offset: number; bytes: number }[] = [];
+		let recordOffset = 0;
 		const pending: Buffer[] = [];
 		let pendingBytes = 0;
 		let totalBytes = 0;
@@ -918,6 +953,8 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 					const line =
 						pendingBytes === 0 ? segment : Buffer.concat([...pending, segment], pendingBytes + segment.length);
 					records.push(this.parseRecord(line, lineNumber));
+					positions.push({ offset: recordOffset, bytes: line.byteLength });
+					recordOffset += line.byteLength + 1;
 					// Classify the header before any later record is interpreted: a
 					// future-format body must fail here, never as a repairable body error.
 					if (records.length === 1 && this.validateFirstRecord) this.validateFirstRecord(records[0]!);
@@ -939,6 +976,7 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 			if (!snapshot) closeQuietly(fd);
 		}
 
+		this.positions = positions;
 		return {
 			records,
 			partial: pendingBytes === 0 ? Buffer.alloc(0) : Buffer.concat(pending, pendingBytes),

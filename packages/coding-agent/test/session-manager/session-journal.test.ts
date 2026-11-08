@@ -52,6 +52,43 @@ describe("session journal", () => {
 		expect(journal.readStrict()).toEqual({ records: [header], recovery: { status: "clean" } });
 	});
 
+	it("reads indexed UTF-8 records across buffer boundaries, append and replacement", () => {
+		const records = [{ text: "你好".repeat(20_000) }, { text: "tail" }];
+		const journal = openSessionJournal(path, { create: true, initialRecords: records });
+		expect(journal.readStrict().records).toEqual(records);
+		expect(journal.readRecord(1)).toEqual(records[1]);
+		expect(journal.readRecord(0)).toEqual(records[0]);
+		journal.append({ text: "追加" });
+		expect(journal.readRecord(2)).toEqual({ text: "追加" });
+		journal.replaceAtomically([{ text: "replacement" }]);
+		expect(journal.readRecord(0)).toEqual({ text: "replacement" });
+		expect(() => journal.readRecord(1)).toThrow(RangeError);
+		journal.close();
+		expect(() => journal.readRecord(0)).toThrow(/closed/);
+	});
+
+	it("indexes a repaired tail and rejects an externally replaced journal", () => {
+		writeFileSync(path, '{"text":"complete"}\n{"partial":');
+		const journal = openSessionJournal(path);
+		expect(journal.readStrict().recovery.status).toBe("tail_repaired");
+		journal.append({ text: "after repair" });
+		expect(journal.readRecord(1)).toEqual({ text: "after repair" });
+		renameSync(path, join(directory, "old.jsonl"));
+		writeFileSync(path, '{"text":"replacement"}\n');
+		expect(() => journal.readRecord(0)).toThrow(/changed|identity/i);
+		journal.close();
+	});
+
+	it("keeps indexed read-only records pinned across replacement", () => {
+		const writer = openSessionJournal(path, { create: true, initialRecords: [{ text: "original" }] });
+		const reader = openSessionJournal(path, { readOnly: true });
+		reader.readStrict();
+		writer.replaceAtomically([{ text: "new" }]);
+		expect(reader.readRecord(0)).toEqual({ text: "original" });
+		reader.close();
+		writer.close();
+	});
+
 	it("accepts an exactly published journal when the final directory sync reports failure", () => {
 		const header = { type: "session", version: 4, id: "session-1" };
 		const journal = openSessionJournal(path, {

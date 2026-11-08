@@ -41,7 +41,9 @@ import { DefaultSessionTitleGenerator, type SessionTitleGenerator } from "./sess
 import { SessionSubscriptions } from "./subscriptions.ts";
 import { WebSearchService } from "./web-search.ts";
 
-export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueLimits {
+export interface AppServerOptions
+	extends Omit<SessionRegistryOptions, "isSessionSubscribed" | "onRuntimeEvicted">,
+		OutboundQueueLimits {
 	readonly agentDir: string;
 	readonly sessionsRoot?: string;
 	readonly runtimeHost?: SessionRuntimeHost;
@@ -134,6 +136,10 @@ export class AppServer {
 				}),
 			{
 				maxQueuedOperationsPerSession: options.maxQueuedOperationsPerSession,
+				maxIdleRuntimes: options.maxIdleRuntimes,
+				idleRuntimeGraceMs: options.idleRuntimeGraceMs,
+				isSessionSubscribed: (sessionId) => this.subscriptions.hasSubscribers(sessionId),
+				onRuntimeEvicted: (sessionId) => this.subscriptions.removeSession(sessionId),
 			},
 		);
 		this.dispatcher = new Dispatcher(

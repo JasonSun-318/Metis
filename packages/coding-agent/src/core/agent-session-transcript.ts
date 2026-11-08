@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@metis/ai/compat";
 import type { AgentMode } from "./agent-mode.ts";
 import type { ContextUsage } from "./extensions/index.ts";
+import { sessionToolCallCount } from "./indexed-session-records.ts";
 import type { PermissionPreset } from "./permissions/settings.ts";
 import type { CwdOrigin, SessionEntry } from "./session-manager.ts";
 
@@ -80,9 +81,7 @@ export function buildSessionStats(options: {
 		} else if (message.role === "assistant") {
 			assistantMessages++;
 			const assistantMessage = message as AssistantMessage;
-			if (Array.isArray(assistantMessage.content)) {
-				toolCalls += assistantMessage.content.filter((part) => part.type === "toolCall").length;
-			}
+			toolCalls += sessionToolCallCount(entry);
 			const usage = assistantMessage.usage;
 			totalInput += usage.input;
 			totalOutput += usage.output;

@@ -56,8 +56,8 @@ async function execute(session: AgentSession, name: string, id: string, args: Re
 }
 
 describe("AgentSession Code diffs", () => {
-	it("attaches actual authorized edit/write changes and net totals to finalized tool details", async () => {
-		const session = await fixture("code");
+	it.each(["chat", "code"] as const)("attaches actual authorized edit/write changes in %s", async (mode) => {
+		const session = await fixture(mode);
 		const written = await execute(session, "write", "write-1", { path: "app.ts", content: "new\n" });
 		expect(written.details).toMatchObject({
 			codeChanges: { files: [{ additions: 1, deletions: 1 }], turn: { additions: 1, deletions: 1 } },
@@ -81,10 +81,12 @@ describe("AgentSession Code diffs", () => {
 		});
 	});
 
-	it("leaves Chat mode tool results unchanged", async () => {
+	it("records Chat changes for later development presentation", async () => {
 		const session = await fixture("chat");
 		const result = await execute(session, "write", "chat-write", { path: "app.ts", content: "new\n" });
 		expect(result.isError).toBe(false);
-		expect(result.details?.codeChanges).toBeUndefined();
+		expect(result.details?.codeChanges).toMatchObject({
+			files: [{ additions: 1, deletions: 1, diff: expect.stringContaining("+new") }],
+		});
 	});
 });

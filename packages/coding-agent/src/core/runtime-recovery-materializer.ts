@@ -1,13 +1,12 @@
 import type { AgentMessage } from "@metis/agent-core";
 import type { ToolResultMessage } from "@metis/ai/compat";
-import {
-	type DurablePromptInput,
-	type ReducedRuntimeOperation,
-	type ReducedRuntimeQueueItem,
-	type ReducedRuntimeTurn,
-	type RuntimeRecoveryDecision,
-	type RuntimeRecoveryResult,
-	reduceRuntimeJournal,
+import type {
+	DurablePromptInput,
+	ReducedRuntimeOperation,
+	ReducedRuntimeQueueItem,
+	ReducedRuntimeTurn,
+	RuntimeRecoveryDecision,
+	RuntimeRecoveryResult,
 } from "./runtime-recovery.ts";
 import type { SessionManager } from "./session-manager.ts";
 
@@ -121,9 +120,9 @@ function appendQueuePause(sessionManager: SessionManager, queue: ReducedRuntimeQ
  * a thrown append leaves only durable prefix work for the next invocation.
  */
 export function materializeRuntimeRecovery(sessionManager: SessionManager): MaterializedRuntimeRecovery {
-	const reduced = reduceRuntimeJournal(sessionManager.getDurableJournalSnapshot());
+	const reduced = sessionManager.getRuntimeRecovery();
 	if (reduced.decisions.length === 0) {
-		return { drafts: collectRecoverableDrafts(reduced), syntheticMessages: [], state: reduced };
+		return { drafts: collectRecoverableDrafts(reduced), syntheticMessages: [], state: structuredClone(reduced) };
 	}
 	const turns = new Map(reduced.turns.map((turn) => [turn.turnId, turn]));
 	const operations = new Map(reduced.operations.map((operation) => [operation.operationId, operation]));
@@ -182,7 +181,7 @@ export function materializeRuntimeRecovery(sessionManager: SessionManager): Mate
 		}
 	}
 
-	const state = reduceRuntimeJournal(sessionManager.getDurableJournalSnapshot());
+	const state = structuredClone(sessionManager.getRuntimeRecovery());
 	return { drafts: collectRecoverableDrafts(state), syntheticMessages, state };
 }
 

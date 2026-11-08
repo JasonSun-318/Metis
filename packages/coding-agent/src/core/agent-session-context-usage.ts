@@ -51,6 +51,11 @@ export class AgentSessionContextUsage {
 		this._source = source;
 	}
 
+	/** Reported anchors/calibration affect context status and automatic compaction. */
+	hasRetainedState(): boolean {
+		return this._prepared !== undefined || this._reported !== undefined || this._calibration !== undefined;
+	}
+
 	capturePrepared(prepared: BeforeProviderRequestContext): void {
 		const systemPrompt = prepared.llmContext.systemPrompt ?? "";
 		const tools = prepared.llmContext.tools ?? [];

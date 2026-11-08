@@ -120,6 +120,7 @@ import {
 } from "./mcp-projection.ts";
 import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-file.ts";
 import { ProcessProjector } from "./process-projector.ts";
+import { JournalItemHistory, ProjectedItemCache } from "./projection/journal-item-history.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
 import { readDeliveredFile as readDeliveredFileOnDisk } from "./read-delivered-file.ts";
 import { isSessionActivityEntry } from "./session-catalog.ts";
@@ -297,6 +298,8 @@ function mapRuntimeTurns(
 }
 
 class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
+	private readonly agentCatalog: AgentCatalog;
+	private readonly historyCache: ProjectedItemCache;
 	// Projection needs delivery state, never the potentially large input text/images.
 	private readonly agentInputReceipts = new Map<string, AgentInputDelivery>();
 	private readonly pendingAgentReceiptRefreshes = new Set<string>();
@@ -334,6 +337,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		runtime: AgentSessionRuntime,
 		ref: SessionRef,
 		agentDir: string,
+		agentCatalog: AgentCatalog,
+		historyCache: ProjectedItemCache,
 		interactions?: InteractionBroker,
 		authStorage?: AuthStorage,
 		mcpConfiguration?: McpConfigurationCoordinator,
@@ -342,6 +347,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.session = runtime.session;
 		this.ref = ref;
 		this.agentDir = agentDir;
+		this.agentProcessHistory = new AgentProcessHistory(agentDir);
+		this.agentCatalog = agentCatalog;
+		this.historyCache = historyCache;
 		this.interactions = interactions;
 		this.authStorage = authStorage;
 		if (!mcpConfiguration) throw new Error("Opened MCP session requires a configuration coordinator");
@@ -354,8 +362,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.pluginReloadError = error instanceof Error ? error.message : String(error);
 		}
 		const journal = this.journal();
-		const reduced = reduceRuntimeJournal(journal);
-		const items = this.itemsFromJournal(journal, reduced);
+		const reduced = this.reduced();
+		const history = this.historyFromJournal(journal, reduced);
 		const turns = this.turnsFromJournal(journal, reduced);
 		for (const turn of turns) this.projectedTurnStates.set(turn.turnId, turn.state);
 		const queuedTurns = this.runtime.queuedTurns;
@@ -368,7 +376,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.projection = new SessionProjection({
 			session: this.summaryFromRuntime(journal, reduced),
 			turns,
-			items,
+			history,
 			tasks: projectLatestTasks(this.session.sessionManager.getBranch()),
 			deliveredFiles,
 			goal: projectGoal(this.session.getGoal()),
@@ -512,7 +520,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (event.type === "notification_ready") {
 				if (event.event.parentSessionId === this.sessionId) {
 					const entry = this.session.sessionManager
-						.getDurableJournalSnapshot()
+						.getJournalMetadata()
 						.find(
 							(candidate) =>
 								candidate.type === "agent_mailbox_event" && candidate.event.eventId === event.event.eventId,
@@ -588,7 +596,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		});
 		const notificationAgents = new Set(
 			this.session.sessionManager
-				.getDurableJournalSnapshot()
+				.getJournalMetadata()
 				.flatMap((entry) =>
 					entry.type === "agent_mailbox_event" && entry.event.type === "intervention" ? [entry.event.agentId] : [],
 				),
@@ -635,7 +643,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				this.agentInputReceipts.set(id, { agentId, state: receipt.state });
 			}
 			if (!changed.size) return;
-			for (const entry of this.session.sessionManager.getDurableJournalSnapshot()) {
+			for (const entry of this.session.sessionManager.getJournalMetadata()) {
 				if (
 					entry.type !== "agent_mailbox_event" ||
 					entry.event.agentId !== agentId ||
@@ -803,7 +811,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 		if (event.type === "agent_settled") {
 			const journal = this.journal();
-			const lastTurn = reduceRuntimeJournal(journal).turns.at(-1);
+			const lastTurn = this.reduced().turns.at(-1);
 			if (
 				lastTurn?.state === "interrupted" ||
 				(lastTurn?.state === "completed" && completedTurnHasVisibleAssistantText(journal, lastTurn.turnId))
@@ -981,11 +989,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	private journal(): readonly unknown[] {
-		return this.session.sessionManager.getDurableJournalSnapshot();
+		return this.session.sessionManager.getJournalMetadata();
 	}
 
 	private reduced() {
-		return reduceRuntimeJournal(this.journal());
+		return this.session.sessionManager.getRuntimeRecovery();
 	}
 
 	private projectJournalItem(entry: Record<string, unknown>): ItemView | undefined {
@@ -1022,10 +1030,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		);
 	}
 
-	private itemsFromJournal(
+	private historyFromJournal(
 		journal: readonly unknown[] = this.journal(),
-		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
-	): ItemView[] {
+		reduced: ReturnType<typeof reduceRuntimeJournal> = this.reduced(),
+	): JournalItemHistory {
+		const source = this.session.sessionManager.readDurableJournal();
 		const activeBranchIds = new Set(this.session.sessionManager.getBranch().map(({ id }) => id));
 		const planState = reducePlanState(journal, activeBranchIds);
 		const planByEntryId = new Map(planState.plans.map((plan) => [plan.entryId, plan]));
@@ -1033,9 +1042,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const deliveredFiles = this.deliveredFileMap();
 		const permissionDecisions = projectPermissionDecisions(journal);
-		return journal
-			.map((entry) => {
-				const record = entry as Record<string, unknown>;
+		return new JournalItemHistory(
+			journal,
+			(record) => {
 				if (record.type === "agent_mailbox_event")
 					return projectAgentMailboxItem(
 						record as unknown as Extract<FileEntry, { type: "agent_mailbox_event" }>,
@@ -1062,20 +1071,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					deliveredFiles,
 					fallbackTimestamp: this.ref.summary.createdAt,
 				});
-			})
-			.filter((item): item is ItemView => item !== undefined);
+			},
+			this.historyCache,
+			(index) => source[index] as unknown as Record<string, unknown>,
+		);
 	}
 
 	private turnsFromJournal(
 		journal: readonly unknown[] = this.journal(),
-		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
+		reduced: ReturnType<typeof reduceRuntimeJournal> = this.reduced(),
 	): TurnView[] {
 		return mapRuntimeTurns(journal, reduced, this.sessionId, this.ref.summary.createdAt);
 	}
 
 	private publishCurrentTurn(
 		journal: readonly unknown[] = this.journal(),
-		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
+		reduced: ReturnType<typeof reduceRuntimeJournal> = this.reduced(),
 	): void {
 		const activeTurnId = this.currentTurnId();
 		const turns = this.turnsFromJournal(journal, reduced);
@@ -1097,7 +1108,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private refreshLifecycleProjection(): void {
 		const journal = this.journal();
-		const reduced = reduceRuntimeJournal(journal);
+		const reduced = this.reduced();
 		this.publishCurrentTurn(journal, reduced);
 		const next = this.summaryFromRuntime(journal, reduced);
 		if (JSON.stringify(next) !== JSON.stringify(this.projection.getSummary())) {
@@ -1107,6 +1118,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	isActive(): boolean {
 		return this.isRootActive() || (this.runtime.subagentManager?.hasActiveWork() ?? false);
+	}
+
+	canEvictWhenIdle(): boolean {
+		return !this.hasPendingInteractions() && this.runtime.canEvictWhenIdle();
 	}
 
 	private isRootActive(): boolean {
@@ -1560,7 +1575,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private summaryFromRuntime(
 		journal: readonly unknown[] = this.journal(),
-		reduced: ReturnType<typeof reduceRuntimeJournal> = reduceRuntimeJournal(journal),
+		reduced: ReturnType<typeof reduceRuntimeJournal> = this.reduced(),
 	): SessionSummary {
 		const manager = this.session.sessionManager;
 		const lastTurn = reduced.turns.at(-1);
@@ -1598,6 +1613,15 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			contributeMemory: manager.getContributeMemory(),
 			...(recoveryNotice === undefined ? {} : { recoveryNotice }),
 		};
+	}
+
+	async readProcess(input: ClientParams<"session/readProcess">): Promise<ClientResult<"session/readProcess">> {
+		return this.processHistory.read(
+			this.session.sessionManager.getJournalMetadata(),
+			input,
+			(id) => this.processProjector.read(id),
+			(agentId, toolCallId) => this.agentProcessHistory.read(this.ref, agentId, toolCallId),
+		);
 	}
 
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
@@ -2442,12 +2466,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 }
 
 class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
+	canEvictWhenIdle(): boolean {
+		// This viewer owns no scheduler, writer lease or execution resources.
+		return true;
+	}
+
 	readonly sessionId: string;
 	private readonly deliveredArtifacts: SessionDeliveredArtifacts;
 	private readonly projection: SessionProjection;
 	private readonly mcpServers: ClientResult<"mcp/list">;
 
-	constructor(ref: SessionRef, agentDir: string, mcpServers: ClientResult<"mcp/list"> = { servers: [] }) {
+	constructor(
+		ref: SessionRef,
+		agentDir: string,
+		historyCache: ProjectedItemCache,
+		mcpServers: ClientResult<"mcp/list"> = { servers: [] },
+	) {
 		this.sessionId = ref.summary.sessionId;
 		this.mcpServers = mcpServers;
 		let manager: ReturnType<typeof SessionManager.openReadOnly>;
@@ -2474,7 +2508,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		this.deliveredArtifacts = new SessionDeliveredArtifacts(agentDir, manager);
 		const deliveredFiles = this.deliveredArtifacts.list();
 		const deliveredFileMap = new Map(deliveredFiles.map((file) => [file.fileId, file]));
-		const journal = manager.getDurableJournalSnapshot();
+		const journal = manager.getJournalMetadata();
 		const reduced = reduceRuntimeJournal(journal);
 		const legacyTurnId =
 			reduced.turns.length === 0 ? opaqueId(`scheduled-turn:${ref.scheduled!.runId}`, "turn") : undefined;
@@ -2495,9 +2529,9 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		if (legacyTurnId !== undefined) turnStates.set(legacyTurnId, "completed");
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const permissionDecisions = projectPermissionDecisions(journal);
-		const items = journal
-			.map((entry) => {
-				const record = entry as unknown as Record<string, unknown>;
+		const history = new JournalItemHistory(
+			journal,
+			(record) => {
 				return projectSessionEntry({
 					entry:
 						legacyTurnId !== undefined && record.type === "message" && record.turnId === undefined
@@ -2515,7 +2549,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		this.projection = new SessionProjection({
 			session: ref.summary,
 			turns,
-			items,
+			history,
 			tasks: projectLatestTasks(manager.getBranch()),
 			deliveredFiles,
 			goal: projectGoal(readThreadGoal(manager)),
@@ -2593,6 +2627,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 
 	async clearMcpCredential(): Promise<ClientResult<"mcp/credential/clear">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async readProcess(input: ClientParams<"session/readProcess">): Promise<ClientResult<"session/readProcess">> {
+		return this.processHistory.read(this.manager.getJournalMetadata(), input);
 	}
 
 	async readItems(input: ClientParams<"session/readItems">): Promise<ClientResult<"session/readItems">> {
@@ -2782,6 +2820,8 @@ function toRuntimeImage(image: DurableImageRefView) {
 }
 
 export class AgentSessionRuntimeHost implements SessionRuntimeHost {
+	private readonly historyCache = new ProjectedItemCache();
+	private readonly agentCatalog: AgentCatalog;
 	private readonly agentDir: string;
 	private readonly options: AgentSessionRuntimeHostOptions;
 	private readonly trustStore: ProjectTrustStore;
@@ -2898,7 +2938,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					agentId: child.agentId,
 					taskId: () => {
 						const tasks = new Map<string, string>();
-						for (const entry of options.sessionManager.getDurableJournalSnapshot()) {
+						for (const entry of options.sessionManager.getJournalMetadata()) {
 							if (entry.type === "agent_task") tasks.set(entry.taskId, entry.status);
 						}
 						return [...tasks].find(([, state]) => state === "running")?.[0];
@@ -3269,10 +3309,15 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	async open(ref: SessionRef): Promise<OpenedSessionRuntime> {
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
 		if (ref.scheduled)
-			return new ReadonlyScheduledSessionRuntime(ref, this.agentDir, await this.listMcpServers(ref.summary.cwd));
+			return new ReadonlyScheduledSessionRuntime(
+				ref,
+				this.agentDir,
+				this.historyCache,
+				await this.listMcpServers(ref.summary.cwd),
+			);
 		let manager: SessionManager;
 		try {
-			manager = SessionManager.open(ref.path);
+			manager = SessionManager.open(ref.path, undefined, undefined, { indexedHistory: true });
 		} catch (error) {
 			const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
 			if (code === "ENOENT") throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
@@ -3298,11 +3343,14 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 					runtime,
 					ref,
 					this.agentDir,
+					this.agentCatalog,
+					this.historyCache,
 					this.options.interactions,
 					this.authStorage,
 					this.mcpConfigurationCoordinator,
 				);
 				await opened.initialize();
+				manager.releaseJournalReadCache();
 				return opened;
 			} catch (error) {
 				await runtime.dispose().catch(() => undefined);

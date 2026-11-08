@@ -10,6 +10,7 @@ import {
 	readdirSync,
 	realpathSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
@@ -341,6 +342,23 @@ export function deliveredFileStorageName(fileId: string, name: string): string {
 	const extension = extname(name);
 	const suffix = /^\.[a-z0-9_-]{1,31}$/i.test(extension) ? extension : "";
 	return `${fileId}${suffix}`;
+}
+
+/** Store a newly generated artifact under an exclusive session-owned filename. */
+export function writeSessionDeliveredFile(
+	agentDir: string,
+	sessionId: string,
+	fileId: string,
+	name: string,
+	bytes: Uint8Array,
+): string {
+	if (bytes.byteLength < 1 || bytes.byteLength > MAX_SESSION_ATTACHMENT_BYTES)
+		throw new Error("Invalid delivered file size");
+	const storageName = deliveredFileStorageName(fileId, name);
+	const directory = ensureOwnedSessionDeliveredDir(agentDir, sessionId);
+	const path = join(directory, storageName);
+	writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+	return path;
 }
 
 /** Resolve one staged delivered file by id within a Metis-owned session directory. */
