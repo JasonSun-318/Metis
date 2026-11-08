@@ -22,7 +22,7 @@ function getEnv(): NodeJS.ProcessEnv {
 	}
 }
 
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { maxSatisfying, rcompare, satisfies } from "semver";
 import { getMetisEnv, getProjectConfigDir } from "../config.ts";
@@ -31,6 +31,15 @@ import type { GitSource } from "../utils/git.ts";
 import { markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
 import { addAutoDiscoveredResources, resolveLocalEntries } from "./package-manager/auto-discovery.ts";
+import {
+	getBaseDirForScope,
+	getGitInstallPath as getGitInstallPathFromSource,
+	getGitInstallRoot as getGitInstallRootFromScope,
+	getManagedNpmInstallPath,
+	getNpmInstallRoot,
+	type InstallPathContext,
+	resolveManagedPath,
+} from "./package-manager/install-paths.ts";
 import { collectPackageResources, type PackageFilter, RESOURCE_TYPES } from "./package-manager/resource-collection.ts";
 import type { ResourceType } from "./package-manager/resource-discovery.ts";
 import {
@@ -1254,15 +1263,51 @@ export class DefaultPackageManager implements PackageManager {
 		}
 	}
 
+	private resolveManagedPath(root: string, ...parts: string[]): string {
+		return resolveManagedPath(root, ...parts);
+	}
+
+	private getBaseDirForScope(scope: SourceScope): string {
+		return getBaseDirForScope(scope, this.installPathContext());
+	}
+
 	private getNpmInstallRoot(scope: SourceScope, temporary: boolean): string {
-		if (temporary) {
-			return this.getTemporaryDir("npm");
-		}
-		if (scope === "project") {
-			this.assertProjectTrustedForScope(scope);
-			return join(getProjectConfigDir(this.cwd), "npm");
-		}
-		return join(this.agentDir, "npm");
+		return getNpmInstallRoot(
+			scope,
+			temporary,
+			(prefix, suffix) => this.getTemporaryDir(prefix, suffix),
+			this.installPathContext(),
+		);
+	}
+
+	private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
+		return getManagedNpmInstallPath(
+			source,
+			scope,
+			(prefix, suffix) => this.getTemporaryDir(prefix, suffix),
+			this.installPathContext(),
+		);
+	}
+
+	private getGitInstallRoot(scope: SourceScope): string | undefined {
+		return getGitInstallRootFromScope(scope, this.installPathContext());
+	}
+
+	private getGitInstallPath(source: GitSource, scope: SourceScope): string {
+		return getGitInstallPathFromSource(
+			source,
+			scope,
+			(prefix, suffix) => this.getTemporaryDir(prefix, suffix),
+			this.installPathContext(),
+		);
+	}
+
+	private installPathContext(): InstallPathContext {
+		return {
+			cwd: this.cwd,
+			agentDir: this.agentDir,
+			assertProjectTrusted: (scope) => this.assertProjectTrustedForScope(scope),
+		};
 	}
 
 	private getGlobalNpmRoot(): string {
@@ -1309,17 +1354,6 @@ export class DefaultPackageManager implements PackageManager {
 		return this.pnpmGlobalPackages.paths.get(packageName);
 	}
 
-	private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
-		if (scope === "temporary") {
-			return join(this.getTemporaryDir("npm"), "node_modules", source.name);
-		}
-		if (scope === "project") {
-			this.assertProjectTrustedForScope(scope);
-			return join(getProjectConfigDir(this.cwd), "npm", "node_modules", source.name);
-		}
-		return join(this.agentDir, "npm", "node_modules", source.name);
-	}
-
 	private getLegacyGlobalNpmInstallPath(source: NpmSource): string | undefined {
 		try {
 			return this.getPnpmGlobalPackagePath(source.name) ?? join(this.getGlobalNpmRoot(), source.name);
@@ -1337,28 +1371,6 @@ export class DefaultPackageManager implements PackageManager {
 		return legacyPath && existsSync(legacyPath) ? legacyPath : managedPath;
 	}
 
-	private getGitInstallPath(source: GitSource, scope: SourceScope): string {
-		if (scope === "temporary") {
-			return this.getTemporaryDir(`git-${source.host}`, source.path);
-		}
-		const installRoot = this.getGitInstallRoot(scope);
-		if (!installRoot) {
-			throw new Error("Missing git install root");
-		}
-		return this.resolveManagedPath(installRoot, source.host, source.path);
-	}
-
-	private getGitInstallRoot(scope: SourceScope): string | undefined {
-		if (scope === "temporary") {
-			return undefined;
-		}
-		if (scope === "project") {
-			this.assertProjectTrustedForScope(scope);
-			return join(getProjectConfigDir(this.cwd), "git");
-		}
-		return join(this.agentDir, "git");
-	}
-
 	private getTemporaryDir(prefix: string, suffix?: string): string {
 		const root = this.resolveManagedPath(getExtensionTempFolder(this.agentDir), prefix);
 		const hash = createHash("sha256")
@@ -1366,26 +1378,6 @@ export class DefaultPackageManager implements PackageManager {
 			.digest("hex")
 			.slice(0, 8);
 		return this.resolveManagedPath(root, hash, suffix ?? "");
-	}
-
-	private resolveManagedPath(root: string, ...parts: string[]): string {
-		const resolvedRoot = resolve(root);
-		const resolvedPath = resolve(resolvedRoot, ...parts);
-		if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${sep}`)) {
-			throw new Error(`Refusing to use path outside package install root: ${resolvedPath}`);
-		}
-		return resolvedPath;
-	}
-
-	private getBaseDirForScope(scope: SourceScope): string {
-		if (scope === "project") {
-			this.assertProjectTrustedForScope(scope);
-			return getProjectConfigDir(this.cwd);
-		}
-		if (scope === "user") {
-			return this.agentDir;
-		}
-		return this.cwd;
 	}
 
 	private resolvePath(input: string): string {
