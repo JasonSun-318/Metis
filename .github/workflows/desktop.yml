@@ -59,6 +59,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
+      METIS_SKIP_MODEL_REGENERATION: "1"
       METIS_CI_E2E: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v') || inputs.runner == 'all' || inputs.e2e == 'full') && 'full' || 'smoke' }}
       METIS_UPDATE_BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.METIS_UPDATE_BASE_URL || '' }}
       MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_SIGN_IDENTITY || '' }}
