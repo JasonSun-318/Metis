@@ -14,6 +14,7 @@ import { AgentConversationDetails } from "./AgentConversationDetails.tsx";
 import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
 import { ConversationScopeContext, useConversationScope } from "./ConversationScope.tsx";
+import { type ImageGenerationActions, ImageGenerationContext } from "./ImageGenerationContext.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import type { SessionChatViewContext } from "./SessionChatView.tsx";
@@ -61,7 +62,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 			document.removeEventListener("visibilitychange", refresh);
 		};
 	}, [visible, reloadCatalog, reloadHistory, reloadQueue]);
-	const mode = agent?.mode ?? root?.mode ?? "chat";
+	const mode = context.appearance ?? "chat";
 	const running = agent !== undefined && isAgentRunning(agent);
 	const settledTaskKey =
 		agent && !running
@@ -78,6 +79,32 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 	const askUserDrafts = useRef(new Map<string, AskUserDraft>());
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const [prefill, setPrefill] = useState<{ identity: string; request: ComposerPrefillRequest }>();
+	const imageEditingEnabled = Boolean(agent && !agent.archived);
+	const imageGenerationActions = useMemo<ImageGenerationActions>(
+		() => ({
+			api,
+			onConfigure: context.onConfigureImageGeneration,
+			onReveal: (owner, fileId) =>
+				api
+					.openDeliveredFile({ sessionId: owner, rootSessionId: target.sessionId, fileId, action: "reveal" })
+					.then(() => undefined),
+			onEdit: !imageEditingEnabled
+				? undefined
+				: (_owner, image) => {
+						setPrefill((current) => ({
+							identity,
+							request: {
+								id: (current?.request.id ?? 0) + 1,
+								text: t("Please continue editing {{name}} ({{reference}}):", {
+									name: image.name,
+									reference: `metis-image:${image.fileId}`,
+								}),
+							},
+						}));
+					},
+		}),
+		[api, context.onConfigureImageGeneration, identity, target.sessionId, t, imageEditingEnabled],
+	);
 	const [pendingQueues, setPendingQueues] = useState<ReadonlySet<string>>(new Set());
 	const queueActions = useRef(new Set<string>());
 	const queueBusy = pendingQueues.has(identity);
@@ -263,43 +290,52 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 						</button>
 					</div>
 				)}
-				<Transcript
-					interactions={{
-						requests: [...snapshot.interactionsById.values()].filter(
-							(
-								pending,
-							): pending is Extract<typeof pending, { kind: "ask_user" | "session_permission_approval" }> =>
-								(pending.actorSessionId ?? pending.sessionId) === target.agentId &&
-								(pending.kind === "ask_user" || pending.kind === "session_permission_approval"),
-						),
-						onRespond: context.onRespond,
-						askUserDrafts: askUserDrafts.current,
-						disabled: !visible || !context.bootstrapped,
-					}}
-					ariaLabel={t("Agent conversation")}
-					appearance={mode}
-					submittedMessageId={
-						receipt?.state === "accepted" || receipt?.state === "delivered" ? receipt.messageId : undefined
-					}
-					activeTurnId={activeTurnId}
-					activeRunId={agent?.currentTask?.taskId}
-					activeTurnStartedAt={agent?.currentTask?.createdAt}
-					retry={agent?.retry}
-					waitingForAnswer={interaction?.kind === "ask_user"}
-					quoteSessionId={target.agentId}
-					hasOlder={history.cursor !== null}
-					itemIds={itemIds}
-					itemsById={itemsById}
-					loadingOlder={history.loading}
-					onLoadOlder={history.loadOlder}
-					onOpenDeliveredFile={(fileId, action) =>
-						void api
-							.openDeliveredFile({ sessionId: target.agentId, rootSessionId: target.sessionId, fileId, action })
-							.catch(onError)
-					}
-					onPreviewDeliveredFile={(file) => context.onPreviewDeliveredFile(target.agentId, file, target.sessionId)}
-					onCopy={(text) => void navigator.clipboard.writeText(text).catch(onError)}
-				/>
+				<ImageGenerationContext.Provider value={imageGenerationActions}>
+					<Transcript
+						interactions={{
+							requests: [...snapshot.interactionsById.values()].filter(
+								(
+									pending,
+								): pending is Extract<typeof pending, { kind: "ask_user" | "session_permission_approval" }> =>
+									(pending.actorSessionId ?? pending.sessionId) === target.agentId &&
+									(pending.kind === "ask_user" || pending.kind === "session_permission_approval"),
+							),
+							onRespond: context.onRespond,
+							askUserDrafts: askUserDrafts.current,
+							disabled: !visible || !context.bootstrapped,
+						}}
+						ariaLabel={t("Agent conversation")}
+						appearance={mode}
+						submittedMessageId={
+							receipt?.state === "accepted" || receipt?.state === "delivered" ? receipt.messageId : undefined
+						}
+						activeTurnId={activeTurnId}
+						activeRunId={agent?.currentTask?.taskId}
+						activeTurnStartedAt={agent?.currentTask?.createdAt}
+						retry={agent?.retry}
+						waitingForAnswer={interaction?.kind === "ask_user"}
+						quoteSessionId={target.agentId}
+						hasOlder={history.cursor !== null}
+						itemIds={itemIds}
+						itemsById={itemsById}
+						loadingOlder={history.loading}
+						onLoadOlder={history.loadOlder}
+						onOpenDeliveredFile={(fileId, action) =>
+							void api
+								.openDeliveredFile({
+									sessionId: target.agentId,
+									rootSessionId: target.sessionId,
+									fileId,
+									action,
+								})
+								.catch(onError)
+						}
+						onPreviewDeliveredFile={(file) =>
+							context.onPreviewDeliveredFile(target.agentId, file, target.sessionId)
+						}
+						onCopy={(text) => void navigator.clipboard.writeText(text).catch(onError)}
+					/>
+				</ImageGenerationContext.Provider>
 				<div className="conversation-composer">
 					{agent?.runControl && agent.runControl !== "enabled" && (
 						<div className="agent-conversation-notice">

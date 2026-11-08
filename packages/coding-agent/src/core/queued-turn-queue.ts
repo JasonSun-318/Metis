@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	type DurablePromptInput,
-	identifyRuntimeRequest,
-	RequestIdReusedError,
-	reduceRuntimeJournal,
-} from "./runtime-recovery.ts";
+import { type DurablePromptInput, identifyRuntimeRequest, RequestIdReusedError } from "./runtime-recovery.ts";
 import { formatSessionAttachments, splitSessionAttachmentPrompt } from "./session-attachments.ts";
 import { formatSessionConversationQuotes } from "./session-conversation-quotes.ts";
 import { formatSessionFileSelections } from "./session-file-selections.ts";
@@ -57,19 +52,12 @@ type PauseReason = "delivery_failed" | "turn_interrupted" | "server_restarted";
 
 export class QueuedTurnQueue {
 	private readonly sessionManager: SessionManager;
-	private journalSnapshot?: ReturnType<SessionManager["getDurableJournalSnapshot"]>;
-	private journalProjection?: ReturnType<typeof reduceRuntimeJournal>;
 	constructor(sessionManager: SessionManager) {
 		this.sessionManager = sessionManager;
 	}
 
-	private reduced(): ReturnType<typeof reduceRuntimeJournal> {
-		const snapshot = this.sessionManager.getDurableJournalSnapshot();
-		if (snapshot !== this.journalSnapshot) {
-			this.journalSnapshot = snapshot;
-			this.journalProjection = reduceRuntimeJournal(snapshot);
-		}
-		return this.journalProjection!;
+	private reduced() {
+		return this.sessionManager.getRuntimeRecovery();
 	}
 
 	list(): readonly QueuedTurnDraft[] {

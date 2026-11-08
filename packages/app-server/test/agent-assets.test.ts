@@ -2,10 +2,17 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { AgentStore, SessionDeliveredArtifacts, SessionManager } from "@metis/coding-agent/host";
+import { PROTOCOL_VERSION } from "@metis/app-protocol";
+import {
+	AgentStore,
+	importSessionAttachments,
+	SessionDeliveredArtifacts,
+	SessionManager,
+} from "@metis/coding-agent/host";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "../src/agent-assets.ts";
-import type { SessionRef } from "../src/session-runtime-host.ts";
+import { AppServer } from "../src/app-server.ts";
+import type { OpenedSessionRuntime, SessionRef } from "../src/session-runtime-host.ts";
 
 function setup() {
 	const directory = mkdtempSync(join(tmpdir(), "metis-agent-assets-"));
@@ -13,10 +20,13 @@ function setup() {
 		agentDir = join(directory, "agent");
 	mkdirSync(cwd);
 	mkdirSync(agentDir);
-	const root = SessionManager.create(cwd, join(directory, "sessions"), { id: "asset-root", mode: "chat" });
+	const root = SessionManager.create(cwd, join(directory, "sessions"), {
+		id: "11111111-1111-4111-8111-111111111111",
+		mode: "chat",
+	});
 	const store = new AgentStore(root, agentDir);
 	const config: Parameters<AgentStore["create"]>[0] = {
-		agentId: "asset-child",
+		agentId: "22222222-2222-4222-8222-222222222222",
 		name: "File reviewer",
 		agentType: "default",
 		initialTask: "Review files",
@@ -32,9 +42,9 @@ function setup() {
 		mayDelegate: false,
 		parentSessionId: root.getSessionId(),
 		rootSessionId: root.getSessionId(),
-		agentPath: ["asset-child"],
+		agentPath: ["22222222-2222-4222-8222-222222222222"],
 	};
-	const record = store.create(config, [], "asset-task");
+	const record = store.create(config, [], "33333333-3333-4333-8333-333333333333");
 	const child = SessionManager.open(record.path);
 	onTestFinished(() => {
 		child.close();
@@ -72,6 +82,125 @@ function setup() {
 }
 
 describe("read-only child asset access", () => {
+	it("reads pending and durable generated child images only after validating the root relationship", async () => {
+		const value = setup();
+		const artifacts = new SessionDeliveredArtifacts(value.agentDir, value.child);
+		const bytes = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
+			"base64",
+		);
+		const source = join(value.cwd, "fixture.png");
+		writeFileSync(source, bytes);
+		const [attachment] = importSessionAttachments({
+			agentDir: value.agentDir,
+			sessionId: value.child.getSessionId(),
+			cwd: value.cwd,
+			attachments: [{ path: source }],
+		});
+		const directory = join(dirname(attachment!.path), "delivered");
+		mkdirSync(directory);
+		writeFileSync(join(directory, "0123456789abcdef.png"), bytes);
+		const image = {
+			fileId: "0123456789abcdef",
+			name: "generated.png",
+			byteLength: bytes.length,
+			deliveredAt: new Date().toISOString(),
+			mediaType: "image/png" as const,
+			continuation: {
+				api: "google-interactions" as const,
+				modelId: "image-model",
+				baseUrl: "https://example.test",
+				interactionId: "private-continuation",
+			},
+		};
+		artifacts.stageGeneratedImage("generation", image);
+		const input = { ...value.input, fileId: image.fileId };
+		const resolveLive = vi.fn(() => artifacts.resolve(image.fileId));
+		await expect(readAgentDeliveredFile(value.ref, value.agentDir, input)).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		const pending = await readAgentDeliveredFile(value.ref, value.agentDir, input, resolveLive);
+		expect(Buffer.from(pending.data, "base64")).toEqual(bytes);
+		expect(JSON.stringify(pending)).not.toContain("private-continuation");
+		const open = vi.fn(async () => {});
+		await openAgentDeliveredFile(value.ref, value.agentDir, { ...input, action: "reveal" }, open, resolveLive);
+		expect(open).toHaveBeenCalledOnce();
+		resolveLive.mockClear();
+		await expect(
+			readAgentDeliveredFile(value.ref, value.agentDir, { ...input, rootSessionId: "wrong-root" }, resolveLive),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(
+			readAgentDeliveredFile(value.ref, value.agentDir, { ...input, sessionId: "wrong-child" }, resolveLive),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		expect(resolveLive).not.toHaveBeenCalled();
+		value.root.close();
+		const openRuntime = vi.fn(async (ref: SessionRef) => {
+			// The model runtime is the external boundary for this dispatcher test.
+			// Keep the actual artifact store and ownership checks, while the manager's
+			// hot-child lookup is covered separately without reopening this live writer.
+			return {
+				sessionId: ref.summary.sessionId,
+				isActive: () => false,
+				hasPendingInteractions: () => false,
+				close: async () => {},
+				resolveAgentDeliveredFile: (agentId: string, fileId: string) =>
+					agentId === value.child.getSessionId() ? artifacts.resolve(fileId) : undefined,
+			} as OpenedSessionRuntime;
+		});
+		const server = await AppServer.create({
+			agentDir: value.agentDir,
+			sessionsRoot: dirname(value.ref.path),
+			runtimeHost: { open: openRuntime },
+			titleGenerator: { generate: async () => undefined },
+		});
+		try {
+			const connection = server.connect();
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "initialize",
+				method: "initialize",
+				params: {
+					protocolVersion: PROTOCOL_VERSION,
+					client: { name: "image-test", version: "1" },
+					capabilities: [],
+				},
+			});
+			const cold = await connection.handle({
+				jsonrpc: "2.0",
+				id: "cold-image",
+				method: "session/readDeliveredFile",
+				params: input,
+			});
+			expect(cold).toHaveProperty("error");
+			expect(openRuntime).not.toHaveBeenCalled();
+			await server.registry.run(value.ref, async () => undefined);
+			const live = await connection.handle({
+				jsonrpc: "2.0",
+				id: "live-image",
+				method: "session/readDeliveredFile",
+				params: input,
+			});
+			expect(live).toMatchObject({ result: { fileId: image.fileId, data: bytes.toString("base64") } });
+			expect(openRuntime).toHaveBeenCalledOnce();
+		} finally {
+			server.beginShutdown();
+			await server.waitForShutdown();
+		}
+		value.child.appendMessage({
+			role: "toolResult",
+			toolName: "image_generate",
+			toolCallId: "generation",
+			content: [{ type: "text", text: "Generated image" }],
+			isError: false,
+			timestamp: Date.now(),
+			details: { kind: "image_generation", status: "completed", requestedCount: 1, images: [image] },
+		});
+		artifacts.finishGeneration("generation");
+		const restored = await readAgentDeliveredFile(value.ref, value.agentDir, input);
+		expect(Buffer.from(restored.data, "base64")).toEqual(bytes);
+		expect(readFileSync(join(directory, "0123456789abcdef.png"))).toEqual(bytes);
+	});
+
 	it("reads child images while a writer is live and verifies hash, size and root ownership without touching the journals", async () => {
 		const value = setup();
 		const data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=";

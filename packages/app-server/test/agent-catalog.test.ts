@@ -1,11 +1,20 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { SessionSummary } from "@metis/app-protocol";
 import { AgentStore, SessionManager } from "@metis/coding-agent/host";
-import { afterEach, describe, expect, it } from "vitest";
-import { listAgentCatalog, readAgentCatalogItems } from "../src/agent-catalog.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentCatalog, readAgentCatalogItems } from "../src/agent-catalog.ts";
 import { AppServerError, type SessionRef } from "../src/session-runtime-host.ts";
 
 const ROOT_ID = "00000000-0000-4000-8000-000000000010";
@@ -27,6 +36,7 @@ const FOREIGN_AGENT_ID = "00000000-0000-4000-8000-000000000302";
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+	vi.restoreAllMocks();
 	for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
@@ -195,6 +205,74 @@ function appendChatHistory(path: string): { readonly userId: string; readonly as
 }
 
 describe("agent catalog", () => {
+	it("validates header versions and legacy identities without migrating anything on disk", () => {
+		const fixture = createFixture();
+		const ref = rootRef(fixture);
+		const header = fixture.manager.getHeader()!;
+		fixture.manager.close();
+		const catalog = new AgentCatalog(fixture.agentDir);
+		writeFileSync(ref.path, `${JSON.stringify({ ...header, version: 999 })}\n`);
+		expect(() => catalog.list(ref, { sessionId: ROOT_ID })).toThrow(/version/i);
+		writeFileSync(ref.path, `${JSON.stringify({ ...header, timestamp: "invalid" })}\n`);
+		expect(() => catalog.list(ref, { sessionId: ROOT_ID })).toThrow(/timestamp/i);
+		const legacy = `${JSON.stringify({ type: "session", version: 5, id: ROOT_ID, timestamp: header.timestamp, cwd: header.cwd })}\n`;
+		writeFileSync(ref.path, legacy);
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents).toEqual([]);
+		expect(readFileSync(ref.path, "utf8")).toBe(legacy);
+	});
+
+	it("invalidates a summary when a child journal is replaced at the same path", () => {
+		const fixture = createFixture();
+		const child = createAgent(fixture.store, fixture.projectDir, {
+			id: CHAT_AGENT_ID,
+			name: "Worker",
+			taskId: CHAT_TASK_ID,
+		});
+		const ref = rootRef(fixture);
+		const catalog = new AgentCatalog(fixture.agentDir);
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents[0]?.name).toBe("Worker");
+		const replacement = `${child.path}.replacement`;
+		writeFileSync(replacement, readFileSync(child.path, "utf8").replace('"name":"Worker"', '"name":"Renamed"'));
+		renameSync(replacement, child.path);
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents[0]?.name).toBe("Renamed");
+		fixture.manager.close();
+	});
+	it("lists empty roots without opening their transcript", () => {
+		const fixture = createFixture();
+		fixture.manager.appendMessage({ role: "user", content: "x".repeat(1024 * 1024), timestamp: Date.now() });
+		const ref = rootRef(fixture);
+		const open = vi.spyOn(SessionManager, "openReadOnly");
+		expect(new AgentCatalog(fixture.agentDir).list(ref, { sessionId: ROOT_ID }).agents).toEqual([]);
+		expect(open).not.toHaveBeenCalled();
+		fixture.manager.close();
+	});
+
+	it("reuses unchanged child summaries and observes changed, archived, corrupt and deleted journals", () => {
+		const fixture = createFixture();
+		const child = createAgent(fixture.store, fixture.projectDir, {
+			id: CHAT_AGENT_ID,
+			name: "Worker",
+			taskId: CHAT_TASK_ID,
+		});
+		const ref = rootRef(fixture);
+		const catalog = new AgentCatalog(fixture.agentDir);
+		const open = vi.spyOn(SessionManager, "openReadOnly");
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents[0]?.status).toBe("queued");
+		expect(open.mock.calls.map(([path]) => path)).toEqual([child.path]);
+		open.mockClear();
+		catalog.list(ref, { sessionId: ROOT_ID });
+		expect(open).not.toHaveBeenCalled();
+		fixture.store.appendTaskState(CHAT_AGENT_ID, { taskId: CHAT_TASK_ID, status: "done" });
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents[0]?.status).toBe("done");
+		fixture.store.setArchived(CHAT_AGENT_ID, true);
+		expect(catalog.list(ref, { sessionId: ROOT_ID }).agents).toEqual([]);
+		expect(catalog.list(ref, { sessionId: ROOT_ID, includeArchived: true }).agents[0]?.archived).toBe(true);
+		writeFileSync(child.path, "broken\n");
+		expect(catalog.list(ref, { sessionId: ROOT_ID })).toMatchObject({ agents: [], unreadableAgentCount: 1 });
+		rmSync(child.path);
+		expect(catalog.list(ref, { sessionId: ROOT_ID })).toEqual({ agents: [], nextAfterAgentId: null });
+		fixture.manager.close();
+	});
 	it("reports a corrupt child without hiding readable siblings or mutating the broken journal", () => {
 		const fixture = createFixture();
 		const valid = createAgent(fixture.store, fixture.projectDir, {
@@ -207,7 +285,7 @@ describe("agent catalog", () => {
 		const ref = rootRef(fixture);
 		fixture.manager.close();
 		const before = digestTree(fixture.root);
-		const result = listAgentCatalog(ref, fixture.agentDir, { sessionId: ROOT_ID });
+		const result = new AgentCatalog(fixture.agentDir).list(ref, { sessionId: ROOT_ID });
 		expect(result.agents.map((agent) => agent.agentId)).toEqual([CHAT_AGENT_ID]);
 		expect(result.unreadableAgentCount).toBe(1);
 		expect(() =>
@@ -241,7 +319,7 @@ describe("agent catalog", () => {
 		const before = digestTree(fixture.root);
 		expect(leaseArtifacts(fixture.root)).toEqual([]);
 
-		const listed = listAgentCatalog(ref, fixture.agentDir, {
+		const listed = new AgentCatalog(fixture.agentDir).list(ref, {
 			sessionId: ROOT_ID,
 			includeArchived: true,
 			limit: 100,
@@ -308,7 +386,7 @@ describe("agent catalog", () => {
 		const holder = SessionManager.open(chat.path);
 		try {
 			expect(existsSync(`${chat.path}.lease`)).toBe(true);
-			const heldList = listAgentCatalog(ref, fixture.agentDir, {
+			const heldList = new AgentCatalog(fixture.agentDir).list(ref, {
 				sessionId: ROOT_ID,
 				includeArchived: true,
 				limit: 100,
@@ -346,7 +424,7 @@ describe("agent catalog", () => {
 		const ref = rootRef(fixture);
 		fixture.manager.close();
 
-		const fullActive = listAgentCatalog(ref, fixture.agentDir, {
+		const fullActive = new AgentCatalog(fixture.agentDir).list(ref, {
 			sessionId: ROOT_ID,
 			includeArchived: false,
 			limit: 100,
@@ -356,7 +434,7 @@ describe("agent catalog", () => {
 		const pages: string[][] = [];
 		let cursor: string | null = null;
 		for (;;) {
-			const page = listAgentCatalog(ref, fixture.agentDir, {
+			const page = new AgentCatalog(fixture.agentDir).list(ref, {
 				sessionId: ROOT_ID,
 				includeArchived: false,
 				...(cursor === null ? {} : { afterAgentId: cursor }),
@@ -371,7 +449,7 @@ describe("agent catalog", () => {
 		expect(pages.map((page) => page.length)).toEqual([2, 2]);
 		expect(pages.flat()).toEqual(activeIds);
 
-		const all = listAgentCatalog(ref, fixture.agentDir, {
+		const all = new AgentCatalog(fixture.agentDir).list(ref, {
 			sessionId: ROOT_ID,
 			includeArchived: true,
 			limit: 100,
@@ -382,7 +460,7 @@ describe("agent catalog", () => {
 
 		expectAppError(
 			() =>
-				listAgentCatalog(ref, fixture.agentDir, {
+				new AgentCatalog(fixture.agentDir).list(ref, {
 					sessionId: ROOT_ID,
 					includeArchived: true,
 					afterAgentId: "00000000-0000-4000-8000-000000000999",
@@ -392,7 +470,7 @@ describe("agent catalog", () => {
 		);
 		expectAppError(
 			() =>
-				listAgentCatalog(ref, fixture.agentDir, {
+				new AgentCatalog(fixture.agentDir).list(ref, {
 					sessionId: ROOT_ID,
 					includeArchived: false,
 					afterAgentId: ARCHIVED_AGENT_ID,
@@ -433,11 +511,13 @@ describe("agent catalog", () => {
 		otherManager.close();
 
 		expect(
-			listAgentCatalog(otherRef, fixture.agentDir, {
-				sessionId: OTHER_ROOT_ID,
-				includeArchived: true,
-				limit: 10,
-			}).agents.map((agent) => agent.agentId),
+			new AgentCatalog(fixture.agentDir)
+				.list(otherRef, {
+					sessionId: OTHER_ROOT_ID,
+					includeArchived: true,
+					limit: 10,
+				})
+				.agents.map((agent) => agent.agentId),
 		).toEqual([FOREIGN_AGENT_ID]);
 		expectAppError(
 			() =>
@@ -463,7 +543,7 @@ describe("agent catalog", () => {
 		};
 		expectAppError(
 			() =>
-				listAgentCatalog(mismatchedRef, fixture.agentDir, {
+				new AgentCatalog(fixture.agentDir).list(mismatchedRef, {
 					sessionId: ROOT_ID,
 					includeArchived: true,
 					limit: 10,

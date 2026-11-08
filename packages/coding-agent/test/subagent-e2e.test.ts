@@ -302,13 +302,27 @@ describe("agent system e2e", () => {
 			timedOut: false,
 			agents: [{ agentId: receipt.agentId, status: "done" }],
 		});
-		const inspected = await run("inspect_agents", { agentId: receipt.agentId });
+		const inspected = await run("inspect_agents", { agentId: receipt.agentId, view: "activity" });
 		const safeTrace = inspected.content.find((block) => block.type === "text")?.text ?? "";
 		expect(safeTrace).toContain("[Tool success] read");
 		expect(safeTrace).toContain("[Final]");
 		expect(safeTrace).not.toContain(secretPath);
 		expect(safeTrace).not.toContain("TOP SECRET TOOL OUTPUT");
 		expect(safeTrace).not.toContain("hidden child reasoning");
+		const history = await run("inspect_agents", { agentId: receipt.agentId });
+		expect(history.details).toMatchObject({ kind: "conversation", order: "newest_first" });
+		const exported = await run("inspect_agents", {
+			agentId: receipt.agentId,
+			taskId: receipt.taskId,
+			output: "file",
+		});
+		const file = (exported.details as { fullOutputPath: string }).fullOutputPath;
+		const readback = await run("read", { path: file });
+		const savedText = readback.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+		expect(savedText).toContain("first child handoff");
+		expect(savedText).toContain("Return a concise verified handoff");
+		expect(savedText).not.toContain("TOP SECRET TOOL OUTPUT");
+		expect(savedText).not.toContain("hidden child reasoning");
 
 		const followed = await run("followup_task", {
 			agentId: receipt.agentId,

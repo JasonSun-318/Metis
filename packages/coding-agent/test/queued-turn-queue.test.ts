@@ -48,15 +48,14 @@ describe("QueuedTurnQueue", () => {
 	});
 
 	it("reuses its reduced journal projection until the journal changes", () => {
-		const internal = queue as unknown as { journalProjection?: object };
 		queue.list();
-		const first = internal.journalProjection;
+		const first = manager.getRuntimeRecovery();
 		queue.list();
-		expect(internal.journalProjection).toBe(first);
+		expect(manager.getRuntimeRecovery()).toBe(first);
 
 		manager.appendMessage({ role: "user", content: "changed", timestamp: 1 });
 		queue.list();
-		expect(internal.journalProjection).not.toBe(first);
+		expect(manager.getRuntimeRecovery()).not.toBe(first);
 	});
 
 	it("claims once, pauses without reordering, and blocks behind a paused head", () => {

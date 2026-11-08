@@ -30,6 +30,42 @@ function read(journal: FileEntry[]) {
 }
 
 describe("agent conversation provenance", () => {
+	it.each(["done", "failed", "stopped"] as const)("projects a named %s report without a status prefix", (status) => {
+		const entry = {
+			type: "agent_mailbox_event",
+			id: "journal-report",
+			parentId: null,
+			timestamp: time,
+			event: {
+				type: "terminal",
+				eventId: "report-1",
+				taskId: "task-1",
+				agentId: child,
+				parentSessionId: root,
+				name: "Layout",
+				status,
+				completedAt: time,
+				...(status === "failed" ? { error: "Report body" } : { finalMessage: "Report body" }),
+			},
+		} satisfies Extract<FileEntry, { type: "agent_mailbox_event" }>;
+		const report = projectAgentMailboxItem(entry, root, time);
+		expect(report).toMatchObject({
+			itemId: "report-1",
+			role: "system",
+			origin: { kind: "system", eventId: "report-1" },
+			agentTargetId: child,
+			agentReport: { name: "Layout", status },
+			content: [{ type: "text", text: "Report body" }],
+		});
+		expect(read([entry])).toEqual([{ ...report, sessionId: child }]);
+		const empty = projectAgentMailboxItem(
+			{ ...entry, event: { ...entry.event, finalMessage: " ", error: undefined } },
+			root,
+			time,
+		);
+		expect(empty.agentReport).toBeUndefined();
+		expect(entry.event.name).toBe("Layout");
+	});
 	it("removes a cancelled human draft without hiding an already persisted message", () => {
 		const queued = { ...input("draft", "queued", { kind: "user" }), delivery: "queue" as const };
 		const cancelled = { ...queued, id: "draft-cancelled", state: "cancelled" as const };

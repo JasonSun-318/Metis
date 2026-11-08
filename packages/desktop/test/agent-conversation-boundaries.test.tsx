@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
 import { ConversationScopeContext } from "../src/renderer/components/ConversationScope.tsx";
+import { MessageOrigin } from "../src/renderer/components/MessageOrigin.tsx";
 import { previewCacheKey } from "../src/renderer/components/preview/preview-bytes-cache.ts";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
@@ -35,6 +36,123 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 describe("agent conversation boundaries", () => {
+	it.each(["chat", "code"])("shows %s incoming reports with a source marker before the parent reply", async (mode) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const openAgent = vi.fn();
+		const report: ItemView = {
+			...notice,
+			itemId: "report",
+			agentReport: { name: "Layout", status: "done" },
+			content: [{ type: "text", text: "Found **three files**." }],
+		};
+		const reply: ItemView = {
+			...notice,
+			itemId: "parent-reply",
+			role: "assistant",
+			origin: undefined,
+			content: [{ type: "text", text: "I will review those files." }],
+		};
+		await act(async () =>
+			root.render(
+				<ConversationScopeContext.Provider value={{ rootSessionId: ROOT, openAgent }}>
+					{mode === "chat" ? (
+						<TranscriptTurn items={[notice, report, reply]} />
+					) : (
+						<CodeTranscriptTurn items={[notice, report, reply]} />
+					)}
+				</ConversationScopeContext.Provider>,
+			),
+		);
+		const card = container.querySelector(".agent-report-message")!;
+		expect(card?.textContent).toContain("From subagent");
+		expect(card?.querySelector("strong")?.textContent).toBe("three files");
+		const bubble = card.querySelector(mode === "chat" ? ".message-user" : ".code-turn-user-bubble")!;
+		const heading = card.querySelector(".message-origin")!;
+		expect(bubble).not.toBeNull();
+		expect(heading.parentElement).toBe(bubble.parentElement);
+		expect(heading.nextElementSibling).toBe(bubble);
+		expect(bubble.textContent).not.toContain("From subagent");
+		expect(container.textContent).not.toContain("User corrected the image task");
+		expect(container.querySelectorAll("[data-user-message]")).toHaveLength(0);
+		expect(container.textContent!.indexOf("Found")).toBeLessThan(container.textContent!.indexOf("I will review"));
+		await act(async () => (card.querySelector("button") as HTMLButtonElement).click());
+		expect(openAgent).toHaveBeenCalledWith({ sessionId: ROOT, agentId: CHILD, name: "Layout" });
+	});
+	it.each(["chat", "code"])("uses the same %s source marker for parent instructions", async (mode) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const openParent = vi.fn();
+		const instruction: ItemView = {
+			...notice,
+			role: "user",
+			origin: { kind: "agent", sessionId: ROOT },
+			content: [{ type: "text", text: "Inspect the directory" }],
+		};
+		await act(async () =>
+			root.render(
+				<ConversationScopeContext.Provider value={{ openParent }}>
+					{mode === "chat" ? (
+						<TranscriptTurn items={[instruction]} />
+					) : (
+						<CodeTranscriptTurn items={[instruction]} />
+					)}
+				</ConversationScopeContext.Provider>,
+			),
+		);
+		const heading = container.querySelector(".message-origin")!;
+		const button = heading.querySelector<HTMLButtonElement>(".message-origin-source")!;
+		expect(button?.textContent).toBe("From parent agent");
+		expect(button.title).toBe("Open parent conversation");
+		expect(heading.textContent).toContain("Waiting to be read");
+		expect(heading.querySelectorAll("button")).toHaveLength(1);
+		await act(async () => button.click());
+		expect(openParent).toHaveBeenCalledOnce();
+	});
+	it.each([
+		["queued", "Queued"],
+		["accepted", "Waiting to be read"],
+		["failed", "Message delivery failed"],
+		["cancelled", "Message cancelled"],
+	] as const)("retains %s delivery status and the child conversation link", async (deliveryState, label) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const openAgent = vi.fn();
+		await act(async () =>
+			root.render(
+				<ConversationScopeContext.Provider value={{ rootSessionId: ROOT, openAgent }}>
+					<MessageOrigin item={{ ...notice, role: "user", origin: { kind: "user" }, deliveryState }} />
+				</ConversationScopeContext.Provider>,
+			),
+		);
+		expect(container.textContent).toContain(label);
+		expect(container.textContent).not.toContain("Agent coordination");
+		await act(async () => container.querySelector<HTMLButtonElement>("button")!.click());
+		expect(openAgent).toHaveBeenCalledWith({ sessionId: ROOT, agentId: CHILD, name: "Agent conversation" });
+	});
+	it.each([
+		["done", undefined],
+		["failed", "Subagent failed"],
+		["stopped", "Subagent stopped"],
+	] as const)("retains a non-clickable %s report marker without delivery receipts", async (status, label) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		await act(async () =>
+			root.render(<MessageOrigin item={{ ...notice, agentReport: { name: "Layout", status } }} />),
+		);
+		expect(container.querySelector(".message-origin-source")?.textContent).toBe("From subagentLayout");
+		expect(container.querySelector("button")).toBeNull();
+		expect(container.textContent).not.toContain("Waiting to be read");
+		if (label) expect(container.textContent).toContain(label);
+	});
 	it.each(["chat", "code"])("keeps %s internal coordination out of the parent transcript", async (mode) => {
 		const container = document.createElement("div");
 		document.body.append(container);

@@ -45,6 +45,7 @@ const roots: Root[] = [];
 beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	localStorage.clear();
+	localStorage.setItem("metis.work-mode.v1", "code");
 	localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "status" }));
 	await setLocale("en");
 });
@@ -112,7 +113,7 @@ it("keeps parent activity and status grouping aligned while rows move, without c
 	let parent = host.querySelector<HTMLButtonElement>('.session-button[aria-label="Parent task"]')!;
 	expect(parent.getAttribute("aria-busy")).toBe("true");
 	expect(parent.querySelector("i.running")).not.toBeNull();
-	expect(parent.closest("section")?.getAttribute("data-sidebar-motion-key")).toBe("code:status:running");
+	expect(parent.closest("section")?.getAttribute("data-sidebar-motion-key")).toBe("unified:status:running");
 	expect(api.listAgents).toHaveBeenCalledTimes(1);
 	expect(store.getSnapshot().sessionsById.get("root")?.state).toBe("idle");
 	expect(store.getSnapshot().activeTurnId).toBeNull();
@@ -135,7 +136,7 @@ it("keeps parent activity and status grouping aligned while rows move, without c
 	parent = host.querySelector<HTMLButtonElement>('.session-button[aria-label="Parent task"]')!;
 	expect(parent.hasAttribute("aria-busy")).toBe(false);
 	expect(parent.querySelector("i.completed")).not.toBeNull();
-	expect(parent.closest("section")?.getAttribute("data-sidebar-motion-key")).toBe("code:status:completed");
+	expect(parent.closest("section")?.getAttribute("data-sidebar-motion-key")).toBe("unified:status:completed");
 	expect(api.listAgents).toHaveBeenCalledTimes(1);
 	await act(async () => root.unmount());
 	roots.pop();

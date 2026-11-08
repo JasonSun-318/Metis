@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ThinkingLevel } from "@metis/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@metis/ai/compat";
 import type { AgentSession } from "../agent-session.ts";
@@ -21,9 +22,11 @@ import type {
 	AgentRunControlEntry,
 	AgentStateReason,
 } from "../session-control.ts";
+import type { ResolvedSessionDeliveredArtifact } from "../session-delivered-artifacts.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
 import { captureAgentRoleSnapshot, loadAgentTypeDefinitions, resolveAgentRoleSnapshot } from "./agent-type-registry.ts";
+import { readAgentConversation } from "./conversation-history.ts";
 import { decideAgentDelivery, validateAgentSubmission } from "./message-admission.ts";
 import { effectiveAgentToolNames, MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
 import {
@@ -154,6 +157,7 @@ export interface SubagentManagerApi {
 	interrupt(actorId: string, agentId: string): Promise<InterruptAgentResult>;
 	waitAgents(actorId: string, input: WaitAgentsInput, signal?: AbortSignal): Promise<WaitAgentsResult>;
 	setArchived(actorId: string, agentId: string, archived: boolean): Promise<AgentSummary>;
+	renameAgent(actorId: string, agentId: string, name: string): Promise<AgentSummary>;
 	deleteAgent(actorId: string, agentId: string): Promise<DeleteAgentResult>;
 	listSummaries(actorId: string, includeArchived?: boolean): readonly AgentSummary[];
 	listTasks(agentId: string): readonly AgentTaskSummary[];
@@ -264,6 +268,11 @@ function presetForSettings(settings: PermissionSettings): PermissionPreset {
 
 function samePermissionSettings(left: PermissionSettings, right: PermissionSettings): boolean {
 	return left.sandboxPolicy === right.sandboxPolicy && left.approvalPolicy === right.approvalPolicy;
+}
+
+/** The first durable input owns the task, even after human steering. Older journals have no input provenance. */
+function reportsToParent(record: AgentDiskRecord, taskId: string): boolean {
+	return record.inputs.find((input) => input.taskId === taskId)?.origin.kind !== "user";
 }
 
 function terminalMailboxEvent(record: AgentDiskRecord, task: AgentTaskSummary): AgentMailboxTerminalEvent {
@@ -518,6 +527,24 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	async inspect(actorId: string, input: InspectAgentsInput): Promise<InspectAgentsResult> {
+		const activity = input.view === "activity" || input.beforeEventId !== undefined;
+		if (input.textOffset !== undefined && (input.view || input.output || input.cursor))
+			throw new AgentError("INVALID_INPUT", "Legacy textOffset reads cannot combine history options");
+		if ((input.cursor || input.output || input.view || input.messageId) && !input.agentId)
+			throw new AgentError("INVALID_INPUT", "History queries require agentId");
+		if (input.view === "conversation" && input.beforeEventId !== undefined)
+			throw new AgentError("INVALID_INPUT", "Conversation history uses cursor, not beforeEventId");
+		if (activity && (input.cursor || input.output || input.messageId))
+			throw new AgentError("INVALID_INPUT", "Activity queries cannot combine conversation or message options");
+		if (input.agentId && !activity && input.textOffset === undefined) {
+			const record = this.assertDescendant(actorId, input.agentId);
+			if (input.taskId && !record.tasks.some((task) => task.taskId === input.taskId))
+				throw new AgentError("UNKNOWN_TASK", "Unknown task in selected conversation");
+			const outputDir =
+				this.requireActor(actorId).sessionManager.getToolOutputDir() ??
+				join(tmpdir(), "metis-tool-results", actorId);
+			return readAgentConversation(this.store.readJournal(input.agentId, record), input.agentId, input, outputDir);
+		}
 		if (input.messageId) {
 			if (!input.agentId || input.taskId || input.beforeEventId)
 				throw new AgentError(
@@ -1107,6 +1134,22 @@ export class SubagentManager implements SubagentManagerApi {
 		return this.hot.size > 0 || this.starting.size > 0 || this.scheduledRuns.size > 0 || this.activeTasks.size > 0;
 	}
 
+	canEvictWhenIdle(): boolean {
+		return (
+			!this.hasActiveWork() &&
+			this.writers.size === 0 &&
+			this.deleting.size === 0 &&
+			this.actors.size <= 1 &&
+			this.waiters.size === 0 &&
+			this.approvalRequests.size === 0 &&
+			this.tails.size === 0 &&
+			this.mailboxContinuations.size === 0 &&
+			this.mailboxRetries.size === 0 &&
+			this.suppressedTasks.size === 0 &&
+			this.attemptedMailboxBatches.size === 0
+		);
+	}
+
 	private trackTask(agentId: string, taskId: string, status: AgentTaskSummary["status"]): void {
 		if (status === "queued" || status === "running") {
 			let tasks = this.activeTasks.get(agentId);
@@ -1266,6 +1309,16 @@ export class SubagentManager implements SubagentManagerApi {
 		});
 	}
 
+	renameAgent(actorId: string, agentId: string, name: string): Promise<AgentSummary> {
+		this.assertDescendant(actorId, agentId);
+		return this.serialize(agentId, async () => {
+			const record = this.assertDescendant(actorId, agentId);
+			if (this.deleting.has(agentId)) throw new AgentError("INVALID_STATE", `Agent is deleting: ${agentId}`);
+			const renamed = this.withWriter(agentId, (writer) => this.store.setName(agentId, name, writer), record);
+			return this.emitUpdate(this.buildSummary(renamed));
+		});
+	}
+
 	setArchived(actorId: string, agentId: string, archived: boolean): Promise<AgentSummary> {
 		this.assertDescendant(actorId, agentId);
 		return this.serialize(agentId, async () => {
@@ -1300,6 +1353,16 @@ export class SubagentManager implements SubagentManagerApi {
 	async readJournal(actorId: string, agentId: string): Promise<readonly FileEntry[]> {
 		const record = this.assertDescendant(actorId, agentId);
 		return this.store.readJournal(agentId, record);
+	}
+
+	/** Resolve a currently running child's authorized outputs before its final tool result is journaled. */
+	resolveDeliveredArtifact(
+		actorId: string,
+		agentId: string,
+		fileId: string,
+	): ResolvedSessionDeliveredArtifact | undefined {
+		this.assertDescendant(actorId, agentId);
+		return this.hot.get(agentId)?.runtime.session.deliveredArtifacts?.resolve(fileId);
 	}
 
 	listSummaries(actorId: string, includeArchived = false): readonly AgentSummary[] {
@@ -1663,7 +1726,12 @@ export class SubagentManager implements SubagentManagerApi {
 				if (event.type === "auto_retry_start" || event.type === "auto_retry_end") {
 					this.emitUpdate(this.buildSummary(this.store.load(agentId)));
 				}
-				if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+				if (
+					event.type === "message_start" ||
+					event.type === "message_update" ||
+					event.type === "message_end" ||
+					(event.type === "tool_execution_update" && event.toolName === "image_generate")
+				) {
 					this.emitEvent({ type: "activity", agentId, taskId, event });
 				}
 				if (event.type === "agent_settled") {
@@ -1687,7 +1755,7 @@ export class SubagentManager implements SubagentManagerApi {
 				status: "running",
 			});
 			this.emitUpdate(this.buildSummary(this.store.load(agentId)));
-			const text = taskText(runtime.session.sessionManager.getDurableJournalSnapshot(), taskId);
+			const text = taskText(runtime.session.sessionManager.getJournalMetadata(), taskId);
 			const baselineStats = runtime.session.getSessionStats();
 			const admitted = this.inputs(agentId).find(
 				(entry) =>
@@ -1734,7 +1802,7 @@ export class SubagentManager implements SubagentManagerApi {
 					? { cost: Math.max(0, stats.cost - baselineStats.cost) }
 					: {}),
 			};
-			const assistant = taskAssistant(runtime.session.sessionManager.getDurableJournalSnapshot(), taskId);
+			const assistant = taskAssistant(runtime.session.sessionManager.getJournalMetadata(), taskId);
 			const status =
 				outcome === "timeout"
 					? "failed"
@@ -1820,7 +1888,7 @@ export class SubagentManager implements SubagentManagerApi {
 			readonly usage?: AgentUsage;
 		},
 	): string {
-		const journal = runtime.session.sessionManager.getDurableJournalSnapshot();
+		const journal = runtime.session.sessionManager.getJournalMetadata();
 		const prior = [...journal]
 			.reverse()
 			.find((entry) => entry.type === "agent_task" && entry.taskId === input.taskId);
@@ -1861,7 +1929,7 @@ export class SubagentManager implements SubagentManagerApi {
 		this.withWriter(
 			agentId,
 			(writer) => {
-				const journal = writer.getDurableJournalSnapshot();
+				const journal = writer.getJournalMetadata();
 				const prior = [...journal]
 					.reverse()
 					.find((entry) => entry.type === "agent_task" && entry.taskId === input.taskId);
@@ -2072,7 +2140,7 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private recordCeiling(manager: SessionManager, agentId: string, preset: PermissionPreset): void {
-		const latest = [...manager.getDurableJournalSnapshot()]
+		const latest = [...manager.getJournalMetadata()]
 			.reverse()
 			.find((entry) => entry.type === "agent_permission_ceiling" && entry.agentId === agentId);
 		if (latest?.type === "agent_permission_ceiling" && latest.permissionPreset === preset) return;
@@ -2216,7 +2284,7 @@ export class SubagentManager implements SubagentManagerApi {
 	private publishTerminal(record: AgentDiskRecord, task: AgentTaskSummary): AgentSummary {
 		const summary = this.emitUpdate(this.buildSummary(record));
 		if (!isTerminalTaskStatus(task.status) || this.unloaded) return summary;
-		this.publishMailbox(terminalMailboxEvent(record, task));
+		if (reportsToParent(record, task.taskId)) this.publishMailbox(terminalMailboxEvent(record, task));
 		resolveWaiters(this.waiters, record.agentId);
 		return summary;
 	}
@@ -2242,7 +2310,7 @@ export class SubagentManager implements SubagentManagerApi {
 		for (const record of this.store.listTree().agents) {
 			if (record.config.parentSessionId === parentId)
 				for (const task of record.tasks) {
-					if (!isTerminalTaskStatus(task.status)) continue;
+					if (!isTerminalTaskStatus(task.status) || !reportsToParent(record, task.taskId)) continue;
 					const event = terminalMailboxEvent(record, task);
 					if (!session.hasAgentMailboxEvent(event.eventId)) this.publishMailbox(event, false);
 				}
@@ -2269,11 +2337,10 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private journal(agentId: string, record?: AgentDiskRecord): readonly FileEntry[] {
-		if (agentId === this.rootSessionId) return this.parentSessionManager.getDurableJournalSnapshot();
+		if (agentId === this.rootSessionId) return this.parentSessionManager.getJournalMetadata();
 		return (
-			(
-				this.hot.get(agentId)?.runtime.session.sessionManager ?? this.writers.get(agentId)
-			)?.getDurableJournalSnapshot() ?? this.store.readJournal(agentId, record)
+			(this.hot.get(agentId)?.runtime.session.sessionManager ?? this.writers.get(agentId))?.getJournalMetadata() ??
+			this.store.readJournal(agentId, record)
 		);
 	}
 
@@ -2334,9 +2401,7 @@ export class SubagentManager implements SubagentManagerApi {
 
 	private inputsForRecord(record: AgentDiskRecord): AgentInputEntry[] {
 		const owner = this.hot.get(record.agentId)?.runtime.session.sessionManager ?? this.writers.get(record.agentId);
-		return this.inputsFromJournal(
-			owner?.getDurableJournalSnapshot() ?? this.store.readJournal(record.agentId, record),
-		);
+		return this.inputsFromJournal(owner?.getJournalMetadata() ?? this.store.readJournal(record.agentId, record));
 	}
 
 	private inputsFromJournal(journal: readonly FileEntry[]): AgentInputEntry[] {
@@ -2387,7 +2452,7 @@ export class SubagentManager implements SubagentManagerApi {
 		wake = true,
 		onlyParent?: string,
 	): void {
-		if (input.origin.kind !== "user") return;
+		if (input.origin.kind !== "user" || !reportsToParent(this.store.reload(record), input.taskId)) return;
 		for (const parentSessionId of new Set([record.config.parentSessionId, this.rootSessionId])) {
 			if (onlyParent && parentSessionId !== onlyParent) continue;
 			this.publishMailbox(
@@ -2445,7 +2510,7 @@ export class SubagentManager implements SubagentManagerApi {
 			let accepted = parent?.enqueueAgentMailboxEvent(event) ?? false;
 			if (!parent)
 				this.withWriter(parentId, (manager) => {
-					const journal = manager.getDurableJournalSnapshot();
+					const journal = manager.getJournalMetadata();
 					if (
 						journal.some((entry) => entry.type === "agent_mailbox_event" && entry.event.eventId === event.eventId)
 					)

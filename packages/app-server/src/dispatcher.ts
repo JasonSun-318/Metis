@@ -904,10 +904,12 @@ export class Dispatcher {
 			}
 			case "session/openDeliveredFile": {
 				if (request.params.rootSessionId && request.params.rootSessionId !== request.params.sessionId) {
-					return await openAgentDeliveredFile(
-						this.runtimeRef(request.params.rootSessionId),
-						this.catalog.agentDir,
-						request.params,
+					const rootRef = this.runtimeRef(request.params.rootSessionId);
+					const live = await this.registry.withOpenRuntime(request.params.rootSessionId, async (runtime) =>
+						runtime.resolveAgentDeliveredFile?.(request.params.sessionId, request.params.fileId),
+					);
+					return await openAgentDeliveredFile(rootRef, this.catalog.agentDir, request.params, undefined, () =>
+						live.open ? live.result : undefined,
 					);
 				}
 				const ref = this.runtimeRef(request.params.sessionId);
@@ -915,10 +917,12 @@ export class Dispatcher {
 			}
 			case "session/readDeliveredFile": {
 				if (request.params.rootSessionId && request.params.rootSessionId !== request.params.sessionId) {
-					return await readAgentDeliveredFile(
-						this.runtimeRef(request.params.rootSessionId),
-						this.catalog.agentDir,
-						request.params,
+					const rootRef = this.runtimeRef(request.params.rootSessionId);
+					const live = await this.registry.withOpenRuntime(request.params.rootSessionId, async (runtime) =>
+						runtime.resolveAgentDeliveredFile?.(request.params.sessionId, request.params.fileId),
+					);
+					return await readAgentDeliveredFile(rootRef, this.catalog.agentDir, request.params, () =>
+						live.open ? live.result : undefined,
 					);
 				}
 				const ref = this.runtimeRef(request.params.sessionId);

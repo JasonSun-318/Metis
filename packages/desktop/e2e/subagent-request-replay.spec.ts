@@ -17,6 +17,7 @@ import { createReplayFixture, REPEAT_TASK, REPLAY_WORKER } from "./subagent-requ
 
 type Globals = { metis: MetisDesktopApi };
 for (const mode of ["chat", "code"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: reuses an old child after process restart, deduplicates replay and aligns progress`, async ({}, testInfo) => {
 		test.setTimeout(120_000);
 		const fixture = await createReplayFixture();

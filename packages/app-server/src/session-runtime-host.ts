@@ -10,6 +10,7 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
+import type { ResolvedSessionDeliveredArtifact } from "@metis/coding-agent/host";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 
 export interface SessionRef {
@@ -64,6 +65,8 @@ export interface OpenedSessionRuntime {
 	readDeliveredFile(
 		input: ClientParams<"session/readDeliveredFile">,
 	): Promise<ClientResult<"session/readDeliveredFile">>;
+	/** Optional live-child lookup; immutable asset access still validates root/descendant ownership. */
+	resolveAgentDeliveredFile?(agentId: string, fileId: string): ResolvedSessionDeliveredArtifact | undefined;
 	getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">>;
 	compact(input: ClientParams<"session/compact">): Promise<ClientResult<"session/compact">>;
 	getGoal(input: ClientParams<"session/goal/get">): Promise<ClientResult<"session/goal/get">>;
@@ -78,6 +81,7 @@ export interface OpenedSessionRuntime {
 	controlAgent(input: ClientParams<"agent/control">): Promise<ClientResult<"agent/control">>;
 	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
 	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;
+	renameAgent(input: ClientParams<"agent/rename">): Promise<ClientResult<"agent/rename">>;
 	deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">>;
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,

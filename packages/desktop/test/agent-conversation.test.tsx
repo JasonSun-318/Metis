@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import type { AgentSummaryView, ItemView, QueuedTurnView } from "@metis/app-protocol";
-import { act, type ComponentProps } from "react";
+import { act, type ComponentProps, useContext } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentConversation } from "../src/renderer/components/AgentConversation.tsx";
 import type { Composer } from "../src/renderer/components/Composer.tsx";
+import { ImageGenerationContext } from "../src/renderer/components/ImageGenerationContext.tsx";
 import type { SessionChatViewContext } from "../src/renderer/components/SessionChatView.tsx";
 import type { Transcript } from "../src/renderer/components/Transcript.tsx";
 import { mergeAgentItems, refreshAgentItems } from "../src/renderer/hooks/use-agent-history.ts";
@@ -31,10 +32,27 @@ vi.mock("../src/renderer/components/Composer.tsx", () => ({
 }));
 vi.mock("../src/renderer/components/Transcript.tsx", () => ({
 	Transcript: (props: ComponentProps<typeof Transcript>) => {
+		const imageActions = useContext(ImageGenerationContext);
 		mock.transcripts.push(props);
 		const { itemIds, itemsById } = props;
 		return (
 			<div data-transcript>
+				{imageActions?.onEdit ? (
+					<button
+						type="button"
+						onClick={() =>
+							imageActions.onEdit?.(CHILD, {
+								fileId: "0123456789abcdef",
+								name: "poster.png",
+								byteLength: 100,
+								deliveredAt: DATE,
+								availability: "available",
+							})
+						}
+					>
+						Edit fixture image
+					</button>
+				) : null}
 				{itemIds.map((id) => (
 					<p key={id}>
 						{itemsById
@@ -161,6 +179,55 @@ afterEach(async () => {
 });
 
 describe("AgentConversation", () => {
+	it("follows global presentation for child replies and composer without reloading the conversation", async () => {
+		const { api, render, context, container } = setup();
+		await render();
+		const calls = api.readAgentItems.mock.calls.length;
+		expect(mock.transcripts.at(-1)?.appearance).toBe("chat");
+		Object.assign(context, { appearance: "code" });
+		await render();
+		expect(container.querySelector(".conversation-column")?.getAttribute("data-mode")).toBe("code");
+		expect(mock.transcripts.at(-1)?.appearance).toBe("code");
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.appearance).toBe("code");
+		expect(api.readAgentItems).toHaveBeenCalledTimes(calls);
+		Object.assign(context, { appearance: "chat" });
+		await render();
+		expect(mock.transcripts.at(-1)?.appearance).toBe("chat");
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.appearance).toBe("chat");
+		expect(api.sendAgentMessage).not.toHaveBeenCalled();
+	});
+
+	it("prefills image edits with the stable child image reference without sending a message", async () => {
+		const { api, container, render } = setup();
+		await render();
+		const edit = () =>
+			Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+				(button) => button.textContent === "Edit fixture image",
+			)!;
+		await act(async () => edit().click());
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.prefillRequest).toEqual({
+			id: 1,
+			text: "Please continue editing poster.png (metis-image:0123456789abcdef):",
+		});
+		await act(async () => edit().click());
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.prefillRequest?.id).toBe(2);
+		expect(api.sendAgentMessage).not.toHaveBeenCalled();
+		const other = "55555555-5555-4555-8555-555555555555";
+		await render(other);
+		expect(mock.composers.get(`agent-composer-${other}`)?.prefillRequest).toBeUndefined();
+	});
+
+	it("keeps archived child image history read-only by withholding the edit action", async () => {
+		const { api, container, render } = setup();
+		api.listAgents.mockResolvedValue({ agents: [{ ...agent(), archived: true }], nextAfterAgentId: null });
+		await render();
+		expect(container.querySelector("[data-transcript]")?.textContent).toContain("original assignment");
+		expect(container.textContent).not.toContain("Edit fixture image");
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.disabled).toBe(true);
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.prefillRequest).toBeUndefined();
+		expect(api.sendAgentMessage).not.toHaveBeenCalled();
+	});
+
 	it("routes only this child's questions and approvals into its transcript", async () => {
 		const { store, render } = setup();
 		const own = { ...composerInteraction("ask_user"), actorSessionId: CHILD, toolCallId: "child-question" };

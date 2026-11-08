@@ -1,0 +1,3 @@
+.agent-sidebar-row > .session-actions { position: static; flex: 0 0 24px; align-self: center; }
+.agent-sidebar-row:hover > .session-actions > button, .agent-sidebar-row:focus-within > .session-actions > button { opacity: 1; transform: none; }
+.agent-sidebar-row > .session-actions > button:focus-visible { outline: 1px solid var(--text); outline-offset: -1px; }

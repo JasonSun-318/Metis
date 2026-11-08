@@ -63,8 +63,26 @@ const Spawn = Type.Object(
 
 const Inspect = Type.Object(
 	{
+		view: Type.Optional(
+			Type.Union([Type.Literal("conversation"), Type.Literal("activity")], {
+				description:
+					"Defaults to conversation history across tasks. activity selects the legacy task activity summary.",
+			}),
+		),
+		output: Type.Optional(
+			Type.Union([Type.Literal("inline"), Type.Literal("file")], {
+				description:
+					"Defaults to inline. file exports the full selected visible history for read/grep; omit cursor and limit.",
+			}),
+		),
+		cursor: Type.Optional(
+			Type.String({
+				minLength: 1,
+				description: "Pass nextCursor to read older messages. Omit for the latest page.",
+			}),
+		),
 		messageId: Type.Optional(
-			Type.String({ description: "Read a specific input from an intervention notification, with trusted origin." }),
+			Type.String({ description: "Read a specific visible message by ID, including its trusted origin." }),
 		),
 		textOffset: Type.Optional(
 			Type.Integer({ minimum: 0, description: "Continue message text using nextTextOffset from the prior read." }),
@@ -158,7 +176,7 @@ function agentSummary(value: unknown): string | undefined {
 }
 
 function inspectText(inspected: InspectAgentsResult): string {
-	if (inspected.kind === "message") return JSON.stringify(inspected);
+	if (inspected.kind === "message" || inspected.kind === "conversation") return JSON.stringify(inspected);
 	if (inspected.kind === "list") {
 		if (inspected.agents.length === 0) return "No agent sessions.";
 		return inspected.agents
@@ -208,7 +226,7 @@ function inspectText(inspected: InspectAgentsResult): string {
 }
 
 function inspectDetails(inspected: InspectAgentsResult): unknown {
-	if (inspected.kind === "message") return inspected;
+	if (inspected.kind === "message" || inspected.kind === "conversation") return inspected;
 	if (inspected.kind === "trace") {
 		const task = inspected.agent.tasks.find((candidate) => candidate.taskId === inspected.taskId);
 		return {
@@ -380,13 +398,16 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			name: "inspect_agents",
 			label: "Inspect agents",
 			description:
-				"List owned child agents or inspect one child's recent durable activity. Use messageId from an intervention notification to read its input and trusted origin. Use it to verify handoffs or inspect state; do not poll running agents.",
+				"List owned children, or read a child conversation newest first (default 20 records, maximum 100). Omit cursor for the latest page; pass nextCursor for older messages; no nextCursor means history is exhausted. Filter by taskId or read messageId. Use output=file to export complete visible history, then read/grep fullOutputPath. Long messages include complete saved text. view=activity keeps task activity summaries. Reads never resume an agent; do not poll running agents.",
 			parameters: Inspect,
 			permission: permissionDescriptor(() => permissionClaim()),
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				const inspected = await manager().inspect(actorId(host.getSession()), {
 					agentId: params.agentId,
+					view: params.view,
+					output: params.output,
+					cursor: params.cursor,
 					messageId: params.messageId,
 					textOffset: params.textOffset,
 					taskId: params.taskId,

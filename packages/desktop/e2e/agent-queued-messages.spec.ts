@@ -351,7 +351,9 @@ for (const kind of ["ask_user", "session_permission_approval"] as const) {
 		await expect(pane(page, "b").locator(".composer")).not.toHaveClass(/is-awaiting-interaction/);
 		await expect(composer(page, "a")).toHaveAttribute(
 			"data-placeholder",
-			kind === "ask_user" ? "Answer the questions above to continue." : "Approve or reject the action above to continue.",
+			kind === "ask_user"
+				? "Answer the questions above to continue."
+				: "Approve or reject the action above to continue.",
 		);
 		await composer(page, "a").press("Enter");
 		await rows(page, "a")

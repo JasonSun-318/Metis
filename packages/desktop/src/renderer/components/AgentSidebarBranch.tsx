@@ -3,11 +3,14 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { isAgentRunning } from "../agent-activity.ts";
+import { type AgentTreeNode, buildAgentTree } from "../agent-tree.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
 import { useAgentCatalog } from "../hooks/use-agent-catalog.ts";
 import { CaretDown, CaretRight, WarningCircle } from "../icons.tsx";
+import { shouldReuseMutationRequest } from "../rpc-error.ts";
+import { ConversationActions } from "./SessionActions.tsx";
+import "../styles/agent-sidebar-actions.css";
 import { agentIndicator, type SessionIndicator } from "../session-view-utils.ts";
-import { type AgentTreeNode, buildAgentTree } from "./AgentTreePanel.tsx";
 import { SessionStatusIndicator } from "./SessionStatusIndicator.tsx";
 
 export interface AgentSidebarNavigation {
@@ -17,6 +20,8 @@ export interface AgentSidebarNavigation {
 	/** Entry identities live with the sidebar so reparenting does not replay admission. */
 	readonly motionSeen?: Set<string>;
 	readonly onOpen: (target: AgentConversationTarget) => void;
+	readonly onRemoved?: (rootSessionId: string, agentIds: readonly string[]) => void;
+	readonly onRenamed?: (rootSessionId: string, agentId: string, name: string) => void;
 }
 
 function readPreference(key: string): string | null {
@@ -84,6 +89,8 @@ export function AgentSidebarBranch({
 }) {
 	const { t } = useTranslation();
 	const { agents, error, loading, reload, unreadableAgentCount } = useAgentCatalog(navigation.api, sessionId);
+	const branch = useRef<HTMLDivElement>(null);
+	const mutationRequests = useRef(new Map<string, string>());
 	const storageKey = `metis.agent-tree.${sessionId}`;
 	const localMotionSeen = useRef(new Set<string>());
 	const motionSeen = navigation.motionSeen ?? localMotionSeen.current;
@@ -186,6 +193,35 @@ export function AgentSidebarBranch({
 			buttons.current.get(id)?.focus();
 		}
 	};
+	const mutateAgent = async (agent: AgentSummaryView, action: "rename" | "archive" | "delete", name?: string) => {
+		const key = JSON.stringify([sessionId, agent.agentId, action, name]);
+		const requestId = mutationRequests.current.get(key) ?? crypto.randomUUID();
+		mutationRequests.current.set(key, requestId);
+		const input = { sessionId, agentId: agent.agentId, requestId };
+		const affectedIds = agents
+			.filter((candidate) => candidate.agentPath.includes(agent.agentId))
+			.map((candidate) => candidate.agentId);
+		try {
+			if (action === "rename") {
+				const result = await navigation.api.renameAgent({ ...input, name: name! });
+				navigation.onRenamed?.(sessionId, agent.agentId, result.agent.name);
+			} else {
+				if (action === "archive") await navigation.api.archiveAgent({ ...input, archived: true });
+				else await navigation.api.deleteAgent(input);
+				navigation.onRemoved?.(sessionId, affectedIds);
+				const remaining = visibleAgents.filter((candidate) => !affectedIds.includes(candidate.agentId));
+				queueMicrotask(() => {
+					if (remaining[0]) focus(remaining[0].agentId);
+					else branch.current?.querySelector<HTMLButtonElement>(".session-row > .session-button")?.focus();
+				});
+			}
+			mutationRequests.current.delete(key);
+			reload();
+		} catch (cause) {
+			if (!shouldReuseMutationRequest(cause)) mutationRequests.current.delete(key);
+			throw cause;
+		}
+	};
 	const renderNode = (node: AgentTreeNode): ReactNode => {
 		const { agent } = node;
 		const expanded = !collapsed.has(agent.agentId);
@@ -242,6 +278,20 @@ export function AgentSidebarBranch({
 								<span>{agent.name}</span>
 							</span>
 						</button>
+						<ConversationActions
+							kind="agent"
+							displayName={agent.name}
+							disabled={false}
+							deleteDisabled={false}
+							archiveDisabled={agents.some(
+								(candidate) =>
+									candidate.agentPath.includes(agent.agentId) &&
+									(candidate.status === "running" || candidate.status === "queued"),
+							)}
+							onRename={(name) => mutateAgent(agent, "rename", name)}
+							onArchive={() => mutateAgent(agent, "archive")}
+							onDelete={() => mutateAgent(agent, "delete")}
+						/>
 						{node.children.length > 0 && (
 							<button
 								className="agent-sidebar-toggle"
@@ -269,7 +319,7 @@ export function AgentSidebarBranch({
 		);
 	};
 	return (
-		<div className="session-agent-group" data-has-agents={agents.length > 0 || undefined}>
+		<div ref={branch} className="session-agent-group" data-has-agents={agents.length > 0 || undefined}>
 			{children(
 				agents.length > 0 ? (
 					<button

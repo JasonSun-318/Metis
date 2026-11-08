@@ -4,10 +4,11 @@ import type { AgentSession, AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionPreset } from "../permissions/settings.ts";
 import type { DurablePromptInput } from "../runtime-recovery.ts";
 import type { AgentRoleSnapshot } from "./agent-type-registry.ts";
+import type { ConversationHistoryResult } from "./conversation-history.ts";
 
 export type AgentVisibleActivity = Extract<
 	AgentSessionEvent,
-	{ type: "message_start" | "message_update" | "message_end" }
+	{ type: "message_start" | "message_update" | "message_end" | "tool_execution_update" }
 >;
 
 export const AGENT_TOOL_NAMES = [
@@ -169,6 +170,9 @@ export interface AgentUsageTotals {
 }
 
 export interface InspectAgentsInput {
+	readonly view?: "conversation" | "activity";
+	readonly output?: "inline" | "file";
+	readonly cursor?: string;
 	readonly messageId?: string;
 	readonly textOffset?: number;
 	readonly agentId?: string;
@@ -178,6 +182,7 @@ export interface InspectAgentsInput {
 }
 
 export type InspectAgentsResult =
+	| ConversationHistoryResult
 	| {
 			readonly kind: "message";
 			readonly agentId: string;

@@ -34,6 +34,10 @@ export class AgentLiveProjector {
 	private itemId(agentId: string, turnId: string | undefined, message: object): string {
 		const state = this.state(agentId);
 		const role = (message as Record<string, unknown>).role;
+		const record = message as Record<string, unknown>;
+		if (role === "toolResult" && record.toolName === "image_generate") {
+			return opaqueId(`image-generation:${agentId}:${turnId ?? "none"}:${String(record.toolCallId)}`, "item");
+		}
 		if (role === "assistant" && state.assistantItemId) return state.assistantItemId;
 		const existing = state.itemIds.get(message);
 		if (existing) return existing;
@@ -51,6 +55,22 @@ export class AgentLiveProjector {
 	}
 
 	apply(agentId: string, turnId: string | undefined, event: AgentVisibleActivity): void {
+		if (event.type === "tool_execution_update") {
+			if (event.toolName !== "image_generate") return;
+			this.apply(agentId, turnId, {
+				type: "message_start",
+				message: {
+					role: "toolResult",
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					content: event.partialResult.content,
+					details: event.partialResult.details,
+					isError: false,
+					timestamp: Date.now(),
+				},
+			});
+			return;
+		}
 		const role = event.message.role;
 		if (role !== "user" && role !== "assistant" && role !== "toolResult") return;
 		const itemId = this.itemId(agentId, turnId, event.message);

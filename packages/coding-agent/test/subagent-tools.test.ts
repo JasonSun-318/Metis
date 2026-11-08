@@ -70,6 +70,34 @@ function setup() {
 
 describe("agent control tools", () => {
 	beforeAll(() => initTheme("dark"));
+	it("exposes newest-first history, older cursors, and full file exports to the model", async () => {
+		const { manager, tools } = setup();
+		const tool = tools.find((candidate) => candidate.name === "inspect_agents")!;
+		expect(tool.description).toContain("newest first");
+		expect(tool.description).toContain("nextCursor for older messages");
+		expect(Value.Check(tool.parameters, { agentId: "child", output: "file", taskId: "task" })).toBe(true);
+		vi.mocked(manager.inspect).mockResolvedValueOnce({
+			kind: "conversation",
+			agentId: "child",
+			order: "newest_first",
+			records: [],
+			fullOutputPath: "/session/tool-results/report.txt",
+			recordCount: 50,
+		});
+		const exported = await execute(tool, { agentId: "child", output: "file", taskId: "task" });
+		expect(manager.inspect).toHaveBeenCalledWith(
+			ACTOR_ID,
+			expect.objectContaining({ agentId: "child", output: "file", taskId: "task" }),
+		);
+		expect(exported.content).toEqual([
+			{ type: "text", text: expect.stringContaining("/session/tool-results/report.txt") },
+		]);
+		await execute(tool, { agentId: "child", cursor: "older", limit: 10 });
+		expect(manager.inspect).toHaveBeenLastCalledWith(
+			ACTOR_ID,
+			expect.objectContaining({ cursor: "older", limit: 10 }),
+		);
+	});
 
 	it("installs exactly the six asynchronous orchestration tools", () => {
 		const { tools } = setup();

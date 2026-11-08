@@ -50,12 +50,17 @@ export function projectAgentMailboxItem(
 	const event = entry.event;
 	const createdAt = timestamp(entry.timestamp, fallbackTimestamp);
 	const receipt = event.type === "intervention" ? inputs?.get(event.messageId) : undefined;
+	const reportText = event.type === "terminal" ? (event.finalMessage ?? event.error) : undefined;
+	const agentReport =
+		event.type === "terminal" && reportText?.trim() ? { name: event.name, status: event.status } : undefined;
 	const text =
 		event.type === "intervention"
 			? `You sent a message to ${event.name}:\n${event.text}${event.imageCount ? `\n(${event.imageCount} attached images)` : ""}`
 			: event.type === "run_control"
 				? `You ${event.action === "stop" ? "stopped" : "resumed"} ${event.name}${event.scope === "subtree" ? " and its agents" : ""}.`
-				: `${event.name}: ${event.status}\n${event.finalMessage ?? event.error ?? ""}`;
+				: agentReport
+					? reportText!
+					: `${event.name}: ${event.status}\n${reportText ?? ""}`;
 	return {
 		itemId: opaqueId(event.eventId, "agent-event"),
 		sessionId,
@@ -64,6 +69,7 @@ export function projectAgentMailboxItem(
 		origin: { kind: "system", eventId: opaqueId(event.eventId, "agent-event") },
 		agentTargetId: event.agentId,
 		agentTaskId: opaqueId(event.taskId, "agent-task"),
+		...(agentReport ? { agentReport } : {}),
 		...(event.type === "intervention"
 			? {
 					agentMessageId: opaqueId(event.messageId, "agent-message"),

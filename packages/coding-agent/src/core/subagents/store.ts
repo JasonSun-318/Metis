@@ -1,5 +1,15 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import {
+	createReadStream,
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	type Stats,
+} from "node:fs";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import type { AgentMessage } from "@metis/agent-core";
 import { createFileAtomicallySync, ensureDirectoryDurablySync, syncDirectorySync } from "../durable-file.ts";
 import { type PermissionPreset, type PermissionSettings, settingsForPreset } from "../permissions/settings.ts";
@@ -22,7 +32,7 @@ import type {
 	AgentTombstone,
 	AgentUsage,
 } from "./types.ts";
-import { MAX_AGENT_QUEUED_TASKS, MAX_AGENT_TASKS } from "./types.ts";
+import { AgentError, MAX_AGENT_QUEUED_TASKS, MAX_AGENT_TASKS } from "./types.ts";
 
 export interface AgentDiskRecord {
 	readonly agentId: string;
@@ -35,6 +45,44 @@ export interface AgentDiskRecord {
 	readonly tasks: readonly AgentTaskSummary[];
 	readonly inputs: readonly AgentInputEntry[];
 	readonly header: NonNullable<SessionHeader["agent"]>;
+}
+
+export interface AgentCatalogMetadata {
+	readonly agentId: string;
+	readonly name: string;
+	readonly agentPath: readonly string[];
+	readonly archived: boolean;
+	readonly updatedAt: string;
+}
+
+/** Stream legacy journals without constructing a conversation or hydrating its image/tool bodies. */
+async function readCatalogMetadata(path: string, rootSessionId: string): Promise<AgentCatalogMetadata> {
+	const header = SessionManager.readHeaderReadOnly(path);
+	if (!header?.agent || header.id !== header.agent.agentId) throw new Error("Invalid child session header");
+	validateAgentRelation(header.agent, rootSessionId);
+	let name = header.agent.name;
+	let archived = false;
+	let updatedAt = header.timestamp;
+	const input = createReadStream(path, { encoding: "utf8" });
+	const lines = createInterface({ input, crlfDelay: Infinity });
+	try {
+		for await (const line of lines) {
+			// Display metadata is append-only. Unrelated records are never materialized.
+			if (!/"type"\s*:\s*"(?:session_info|agent_archived|agent_task)"/u.test(line)) continue;
+			const entry = JSON.parse(line) as Record<string, unknown>;
+			if (entry.type === "session_info" && typeof entry.name === "string") name = entry.name;
+			else if (entry.agentId !== header.id) continue;
+			else if (entry.type === "agent_archived" && typeof entry.archived === "boolean") archived = entry.archived;
+			else if (entry.type !== "agent_task") continue;
+			if (typeof entry.timestamp === "string" && Number.isFinite(Date.parse(entry.timestamp))) {
+				updatedAt = entry.timestamp > updatedAt ? entry.timestamp : updatedAt;
+			}
+		}
+	} finally {
+		lines.close();
+		input.destroy();
+	}
+	return { agentId: header.id, name, agentPath: header.agent.agentPath, archived, updatedAt };
 }
 
 export interface AgentStoreApi {
@@ -76,6 +124,7 @@ export interface AgentStoreApi {
 	listTombstones(): readonly AgentTombstone[];
 	readJournal(agentId: string, record?: AgentDiskRecord): readonly FileEntry[];
 	setArchived(agentId: string, archived: boolean): AgentDiskRecord;
+	setName(agentId: string, name: string, writer?: SessionManager): AgentDiskRecord;
 	beginDeleteGroup(rootAgentId: string, tombstones: readonly AgentTombstone[]): void;
 	finishDeleteGroup(rootAgentId: string): Promise<{
 		readonly status: "deleted" | "delete_failed";
@@ -228,13 +277,14 @@ function reduceRecord(path: string, rootSessionId: string): AgentDiskRecord {
 	const config = headerToConfig(
 		{
 			...header.agent,
+			name: manager.getSessionName() ?? header.agent.name,
 			...(savedRole?.type === "agent_role_snapshot" ? { roleSnapshot: savedRole.roleSnapshot } : {}),
 		},
 		header.mode ?? "code",
 	);
 	return {
 		agentId: header.id,
-		name: header.agent.name,
+		name: config.name,
 		path,
 		config,
 		...(savedCeiling?.type === "agent_permission_ceiling"
@@ -348,8 +398,14 @@ export class AgentStore implements AgentStoreApi {
 		return createSessionId();
 	}
 
-	listTree(): { agents: AgentDiskRecord[]; diagnostics: string[] } {
-		const agents: AgentDiskRecord[] = [];
+	listTree(): { agents: AgentDiskRecord[]; diagnostics: string[] };
+	listTree<T extends { readonly agentId: string }>(
+		read: (path: string, stat: Stats, load: () => AgentDiskRecord) => T,
+	): { agents: T[]; diagnostics: string[] };
+	listTree<T extends { readonly agentId: string }>(
+		read?: (path: string, stat: Stats, load: () => AgentDiskRecord) => T,
+	): { agents: (T | AgentDiskRecord)[]; diagnostics: string[] } {
+		const agents: (T | AgentDiskRecord)[] = [];
 		const diagnostics: string[] = [];
 		if (!existsSync(this.directory)) return { agents, diagnostics };
 		for (const entry of readdirSync(this.directory, { withFileTypes: true })) {
@@ -358,12 +414,37 @@ export class AgentStore implements AgentStoreApi {
 			try {
 				const stat = lstatSync(path);
 				if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) continue;
-				agents.push(reduceRecord(path, this.rootSessionId));
+				// Catalog readers can reuse a validated summary without retaining transcript bodies.
+				agents.push(
+					read
+						? read(path, stat, () => reduceRecord(path, this.rootSessionId))
+						: reduceRecord(path, this.rootSessionId),
+				);
 			} catch (error) {
 				diagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-		agents.sort((left, right) => left.config.agentId.localeCompare(right.config.agentId));
+		agents.sort((left, right) => left.agentId.localeCompare(right.agentId));
+		return { agents, diagnostics };
+	}
+
+	async listMetadata(
+		read: (path: string, stat: Stats, load: () => Promise<AgentCatalogMetadata>) => Promise<AgentCatalogMetadata> = (
+			_path,
+			_stat,
+			load,
+		) => load(),
+	): Promise<{ agents: AgentCatalogMetadata[]; diagnostics: string[] }> {
+		const files = this.listTree((path, stat) => ({ agentId: path, path, stat }));
+		const agents: AgentCatalogMetadata[] = [];
+		const diagnostics = [...files.diagnostics];
+		for (const { path, stat } of files.agents) {
+			try {
+				agents.push(await read(path, stat, () => readCatalogMetadata(path, this.rootSessionId)));
+			} catch (error) {
+				diagnostics.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		return { agents, diagnostics };
 	}
 
@@ -436,6 +517,17 @@ export class AgentStore implements AgentStoreApi {
 		const match = this.listTree().agents.find((agent) => agent.agentId === agentId);
 		if (!match) throw new Error(`Unknown agent: ${agentId}`);
 		return match;
+	}
+
+	/** Locate a child using headers only; unrelated transcripts must not be materialized. */
+	findJournal(agentId: string): { path: string; stat: Stats } | undefined {
+		const { agents } = this.listTree((path, stat) => {
+			const header = SessionManager.readHeaderReadOnly(path);
+			if (!header?.agent || header.id !== header.agent.agentId) throw new Error("Invalid child session header");
+			validateAgentRelation(header.agent, this.rootSessionId);
+			return { agentId: header.id, path, stat };
+		});
+		return agents.find((agent) => agent.agentId === agentId);
 	}
 
 	reload(record: AgentDiskRecord): AgentDiskRecord {
@@ -557,6 +649,36 @@ export class AgentStore implements AgentStoreApi {
 			manager.appendAgentControl({ type: "agent_archived", agentId, archived });
 		} finally {
 			manager.close();
+		}
+		return this.load(agentId);
+	}
+
+	/** Reuse session display-name entries while preserving the immutable agent identity and task journal. */
+	setName(agentId: string, name: string, writer?: SessionManager): AgentDiskRecord {
+		if (!name || name.trim() !== name || name.length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(name)) {
+			throw new AgentError(
+				"INVALID_INPUT",
+				"Agent name must be 1-128 trimmed characters with no control characters",
+			);
+		}
+		const record = this.load(agentId);
+		if (record.name === name) return record;
+		const tree = this.listTree();
+		if (tree.diagnostics.length > 0)
+			throw new AgentError("INVALID_STATE", "Cannot rename while an existing child session is unreadable");
+		if (
+			tree.agents.some((agent) => agent.agentId !== agentId && agent.name === name) ||
+			this.listTombstones().some((tombstone) => tombstone.name === name)
+		) {
+			throw new AgentError("INVALID_INPUT", `Agent name has already been used: ${name}`);
+		}
+		if (writer && writer.getSessionId() !== agentId)
+			throw new AgentError("INVALID_INPUT", "Agent writer belongs to another session");
+		const manager = writer ?? SessionManager.open(record.path);
+		try {
+			manager.appendSessionInfo(name);
+		} finally {
+			if (!writer) manager.close();
 		}
 		return this.load(agentId);
 	}

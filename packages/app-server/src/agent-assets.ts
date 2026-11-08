@@ -2,6 +2,8 @@ import { type ClientParams, type ClientResult, MAX_READ_IMAGE_DATA_UTF8_BYTES } 
 import {
 	AgentStore,
 	parseDeliverFileDetails,
+	parseImageGenerationDetails,
+	type ResolvedSessionDeliveredArtifact,
 	resolveSessionDeliveredArtifact,
 	SessionManager,
 } from "@metis/coding-agent/host";
@@ -52,22 +54,31 @@ export async function readAgentImage(
 	}
 }
 
-function resolveAgentDelivery(ref: SessionRef, agentDir: string, input: ClientParams<"session/readDeliveredFile">) {
+type ResolveLiveDelivery = () => ResolvedSessionDeliveredArtifact | undefined;
+
+function resolveAgentDelivery(
+	ref: SessionRef,
+	agentDir: string,
+	input: ClientParams<"session/readDeliveredFile">,
+	resolveLive?: ResolveLiveDelivery,
+) {
 	const child = childSnapshot(ref, agentDir, input);
 	for (const entry of [...child.getBranch()].reverse()) {
-		if (
-			entry.type !== "message" ||
-			entry.message.role !== "toolResult" ||
-			entry.message.toolName !== "deliver_file" ||
-			entry.message.isError !== false
-		)
-			continue;
-		const details = parseDeliverFileDetails(entry.message.details);
+		if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.isError !== false) continue;
+		const details =
+			entry.message.toolName === "image_generate"
+				? parseImageGenerationDetails(entry.message.details)?.images.find((image) => image.fileId === input.fileId)
+				: entry.message.toolName === "deliver_file"
+					? parseDeliverFileDetails(entry.message.details)
+					: undefined;
 		if (!details || details.fileId !== input.fileId) continue;
 		const resolved = resolveSessionDeliveredArtifact(agentDir, input.sessionId, details);
 		if (resolved) return resolved;
 		break;
 	}
+	// The immutable root/descendant check above also applies to not-yet-journaled outputs.
+	const live = resolveLive?.();
+	if (live?.artifact.fileId === input.fileId) return live;
 	throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
 }
 
@@ -75,8 +86,9 @@ export async function readAgentDeliveredFile(
 	ref: SessionRef,
 	agentDir: string,
 	input: ClientParams<"session/readDeliveredFile">,
+	resolveLive?: ResolveLiveDelivery,
 ): Promise<ClientResult<"session/readDeliveredFile">> {
-	const resolved = resolveAgentDelivery(ref, agentDir, input);
+	const resolved = resolveAgentDelivery(ref, agentDir, input, resolveLive);
 	try {
 		return await readDeliveredFile(resolved, input.metadataOnly);
 	} catch {
@@ -89,8 +101,9 @@ export async function openAgentDeliveredFile(
 	agentDir: string,
 	input: ClientParams<"session/openDeliveredFile">,
 	open = openDeliveredFile,
+	resolveLive?: ResolveLiveDelivery,
 ): Promise<ClientResult<"session/openDeliveredFile">> {
-	const resolved = resolveAgentDelivery(ref, agentDir, input);
+	const resolved = resolveAgentDelivery(ref, agentDir, input, resolveLive);
 	try {
 		await open({ path: resolved.path, action: input.action });
 		return {};

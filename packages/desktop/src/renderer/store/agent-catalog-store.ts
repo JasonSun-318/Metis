@@ -1,5 +1,6 @@
 import type { AgentSummaryView } from "@metis/app-protocol";
 import type { DesktopApiEvent, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { subscribeAgentCatalogEvents } from "./agent-catalog-events.ts";
 
 export interface AgentCatalogSnapshot {
 	readonly version: number;
@@ -26,8 +27,9 @@ export function mergeAgentCatalog(
 		const previous = agents.get(agent.agentId);
 		if (!previous || previous.updatedAt <= agent.updatedAt) agents.set(agent.agentId, agent);
 	}
+	const archivedIds = new Set([...agents.values()].filter((agent) => agent.archived).map((agent) => agent.agentId));
 	return [...agents.values()]
-		.filter((agent) => !agent.archived)
+		.filter((agent) => !agent.agentPath.some((id) => archivedIds.has(id)))
 		.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.agentId.localeCompare(b.agentId));
 }
 
@@ -42,6 +44,7 @@ function sameAgents(left: readonly AgentSummaryView[], right: readonly AgentSumm
 class SharedAgentCatalogStore implements AgentCatalogStore {
 	private readonly snapshotListeners = new Map<() => void, number>();
 	private agents: readonly AgentSummaryView[] = [];
+	private readonly archivedAgentIds = new Map<string, string>();
 	private loading = true;
 	private error: unknown;
 	private unreadableAgentCount = 0;
@@ -106,7 +109,7 @@ class SharedAgentCatalogStore implements AgentCatalogStore {
 	private start(): void {
 		if (this.disposed || this.started || this.snapshotListeners.size === 0) return;
 		this.started = true;
-		this.unsubscribe = this.api.subscribe((event) => this.handleEvent(event));
+		this.unsubscribe = subscribeAgentCatalogEvents(this.api, this.sessionId, (event) => this.handleEvent(event));
 		this.request();
 	}
 
@@ -158,8 +161,18 @@ class SharedAgentCatalogStore implements AgentCatalogStore {
 		for (const change of batch.events) {
 			if (!("sessionId" in change) || change.sessionId !== this.sessionId) continue;
 			if (change.type === "agent/updated") {
+				const previousUpdate =
+					this.agents.find((agent) => agent.agentId === change.agent.agentId)?.updatedAt ??
+					this.archivedAgentIds.get(change.agent.agentId);
+				if (previousUpdate && previousUpdate > change.agent.updatedAt) continue;
+				if (change.agent.archived) this.archivedAgentIds.set(change.agent.agentId, change.agent.updatedAt);
+				else if (this.archivedAgentIds.delete(change.agent.agentId)) this.request();
 				this.activeLiveUpdates?.set(change.agent.agentId, change.agent);
-				this.applyAgents(mergeAgentCatalog(this.agents, [change.agent]));
+				this.applyAgents(
+					mergeAgentCatalog(this.agents, [change.agent]).filter(
+						(agent) => !agent.agentPath.some((id) => this.archivedAgentIds.has(id)),
+					),
+				);
 			} else if (change.type === "agent/deleted") {
 				for (const id of change.deletedAgentIds) {
 					this.deleted.add(id);
@@ -215,9 +228,14 @@ class SharedAgentCatalogStore implements AgentCatalogStore {
 						if (afterAgentId) cursors.add(afterAgentId);
 					} while (afterAgentId);
 					this.activeLiveUpdates = undefined;
+					// A fresh visible catalog also reconciles archives changed while disconnected.
+					for (const agent of collected) {
+						if (!liveUpdates.get(agent.agentId)?.archived) this.archivedAgentIds.delete(agent.agentId);
+					}
 					const readable = unreadableAgentCount > 0 ? mergeAgentCatalog(this.agents, collected) : collected;
 					this.agents = mergeAgentCatalog(readable, [...liveUpdates.values()]).filter(
-						(agent) => !this.deleted.has(agent.agentId),
+						(agent) =>
+							!this.deleted.has(agent.agentId) && !agent.agentPath.some((id) => this.archivedAgentIds.has(id)),
 					);
 					this.unreadableAgentCount = unreadableAgentCount;
 					this.error = undefined;

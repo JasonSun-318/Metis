@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@metis/agent-core";
@@ -13,6 +13,8 @@ import {
 	PERMISSION_PRESETS,
 	settingsForPreset,
 } from "../src/core/permissions/settings.ts";
+import { writeSessionDeliveredFile } from "../src/core/session-attachments.ts";
+import { SessionDeliveredArtifacts } from "../src/core/session-delivered-artifacts.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type ChildRuntimeFactoryInput, SubagentManager } from "../src/core/subagents/manager.ts";
 import { SubagentScheduler } from "../src/core/subagents/scheduler.ts";
@@ -44,6 +46,7 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 }
 
 class FakeChildSession {
+	deliveredArtifacts?: SessionDeliveredArtifacts;
 	readonly messages: unknown[] = [];
 	readonly model = getModel("anthropic", "claude-sonnet-4-5")!;
 	readonly sessionManager: SessionManager;
@@ -344,6 +347,126 @@ async function reopenHarness(harness: Harness): Promise<Harness> {
 }
 
 describe("SubagentManager", () => {
+	it("keeps human-started turns local, including mailbox recovery", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, { name: "Worker", task: "Delegated work" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await finishTask(harness, child.agentId, child.taskId, "Delegated result");
+		const human = await harness.manager.submitMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "direct-user",
+				input: { text: "Hi privately" },
+			},
+		);
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, child.agentId, human.taskId, "Hello user");
+		const recovered = await reopenHarness(harness);
+		const events = recovered.parentManager
+			.getJournalMetadata()
+			.filter((entry) => entry.type === "agent_mailbox_event");
+		expect(
+			events.some(
+				(entry) =>
+					entry.type === "agent_mailbox_event" &&
+					entry.event.taskId === child.taskId &&
+					entry.event.type === "terminal",
+			),
+		).toBe(true);
+		expect(events.some((entry) => entry.type === "agent_mailbox_event" && entry.event.taskId === human.taskId)).toBe(
+			false,
+		);
+	});
+	it("exports complete task output and defaults to conversation history without starting a runtime", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, { name: "Reporter", task: "Write report" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const report = "Report line\n".repeat(6000);
+		await finishTask(harness, child.agentId, child.taskId, report);
+		const before = harness.manager.listTasks(child.agentId);
+		const inspected = await harness.manager.inspect(ROOT_ID, { agentId: child.agentId });
+		expect(inspected.kind).toBe("conversation");
+		if (inspected.kind !== "conversation") throw new Error("Expected conversation");
+		const answer = inspected.records.find((record) => record.role === "assistant")!;
+		expect(answer.truncated).toBe(true);
+		expect(readFileSync(answer.fullOutputPath!, "utf8")).toBe(report);
+		const exported = await harness.manager.inspect(ROOT_ID, {
+			agentId: child.agentId,
+			taskId: child.taskId,
+			output: "file",
+		});
+		if (exported.kind !== "conversation") throw new Error("Expected conversation export");
+		expect(readFileSync(exported.fullOutputPath!, "utf8")).toContain(report);
+		expect(exported.fullOutputPath!.startsWith(harness.parentManager.getToolOutputDir()!)).toBe(true);
+		await expect(harness.manager.inspect("unauthorized", { agentId: child.agentId })).rejects.toThrow();
+		expect(harness.manager.listTasks(child.agentId)).toEqual(before);
+		expect(harness.runtimes).toHaveLength(1);
+	});
+
+	it("keeps a queued human task local while reporting the delegated task it follows", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, { name: "Worker", task: "Delegated work" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const human = await harness.manager.submitMessage(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				requestId: "queued-human",
+				delivery: "queue",
+				input: { text: "Separate question" },
+			},
+		);
+		expect(human.taskId).not.toBe(child.taskId);
+		await finishTask(harness, child.agentId, child.taskId);
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, child.agentId, human.taskId);
+		const events = harness.parentManager.getJournalMetadata().filter((entry) => entry.type === "agent_mailbox_event");
+		expect(events.some((entry) => entry.type === "agent_mailbox_event" && entry.event.taskId === human.taskId)).toBe(
+			false,
+		);
+		expect(
+			events.some(
+				(entry) =>
+					entry.type === "agent_mailbox_event" &&
+					entry.event.taskId === child.taskId &&
+					entry.event.type === "terminal",
+			),
+		).toBe(true);
+	});
+
+	it("resolves pending child images only for an authorized ancestor without starting cold runtimes", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Image worker",
+			task: "Generate image",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const runtime = harness.runtimes[0]!;
+		const agentDir = join(harness.root, "agent");
+		const artifacts = new SessionDeliveredArtifacts(agentDir, runtime.session.sessionManager);
+		runtime.session.deliveredArtifacts = artifacts;
+		const image = {
+			fileId: "0123456789abcdef",
+			name: "generated.png",
+			byteLength: 3,
+			deliveredAt: new Date().toISOString(),
+			mediaType: "image/png" as const,
+		};
+		writeSessionDeliveredFile(agentDir, child.agentId, image.fileId, image.name, new Uint8Array([1, 2, 3]));
+		artifacts.stageGeneratedImage("generation", image);
+		expect(harness.manager.resolveDeliveredArtifact(ROOT_ID, child.agentId, image.fileId)?.artifact.fileId).toBe(
+			image.fileId,
+		);
+		expect(harness.manager.resolveDeliveredArtifact(ROOT_ID, child.agentId, "ffffffffffffffff")).toBeUndefined();
+		expect(() => harness.manager.resolveDeliveredArtifact("unrelated-root", child.agentId, image.fileId)).toThrow();
+		expect(() => harness.manager.resolveDeliveredArtifact(ROOT_ID, "unknown-child", image.fileId)).toThrow();
+		await finishTask(harness, child.agentId, child.taskId);
+		expect(harness.manager.resolveDeliveredArtifact(ROOT_ID, child.agentId, image.fileId)).toBeUndefined();
+		expect(harness.runtimes).toHaveLength(1);
+	});
+
 	it("waits for a settled child's disposal without interrupting its closing runtime", async () => {
 		const harness = setup();
 		const child = await harness.manager.spawn(ROOT_ID, {
@@ -543,7 +666,12 @@ describe("SubagentManager", () => {
 			{ agentId: child.agentId, action: "stop", scope: "self", requestId: "persist-human-pause" },
 		);
 		const journalBefore = await harness.manager.readJournal(ROOT_ID, child.agentId);
-		const latest = await harness.manager.inspect(ROOT_ID, { agentId: child.agentId, taskId: child.taskId, limit: 1 });
+		const latest = await harness.manager.inspect(ROOT_ID, {
+			agentId: child.agentId,
+			taskId: child.taskId,
+			view: "activity",
+			limit: 1,
+		});
 		if (latest.kind !== "trace") throw new Error("Expected task activity");
 		expect(latest.events).toMatchObject([{ kind: "final", text: acknowledgment }]);
 		expect(latest.nextBeforeEventId).toBeDefined();
@@ -1864,6 +1992,47 @@ describe("SubagentManager", () => {
 		expect(harness.runtimes.at(-1)!.prompts).toEqual(["Then check the edge case"]);
 	});
 
+	it("renames hot and cold agents without restarting their runtime or changing tasks", async () => {
+		const harness = setup();
+		const created = await harness.manager.spawn(ROOT_ID, {
+			name: "rename worker",
+			task: "Keep working",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await vi.waitFor(() => expect(harness.manager.listTasks(created.agentId)[0]?.status).toBe("running"));
+		const before = harness.manager.listTasks(created.agentId);
+		const updates: AgentManagerEvent[] = [];
+		const unsubscribe = harness.manager.subscribe((event) => updates.push(event));
+		const renamed = await harness.manager.renameAgent(ROOT_ID, created.agentId, "Renamed while running");
+		expect(renamed).toMatchObject({ agentId: created.agentId, name: "Renamed while running", status: "running" });
+		expect(harness.manager.listTasks(created.agentId)).toEqual(before);
+		expect(harness.runtimes).toHaveLength(1);
+		expect(harness.runtimes[0]!.session.sessionManager.getSessionName()).toBe("Renamed while running");
+		expect(updates).toContainEqual(
+			expect.objectContaining({
+				type: "updated",
+				summary: expect.objectContaining({ name: "Renamed while running" }),
+			}),
+		);
+		unsubscribe();
+		await finishTask(harness, created.agentId, created.taskId);
+		const reopened = await reopenHarness(harness);
+		try {
+			const tasks = reopened.manager.listTasks(created.agentId);
+			expect((await reopened.manager.renameAgent(ROOT_ID, created.agentId, "Renamed after restart")).name).toBe(
+				"Renamed after restart",
+			);
+			expect(reopened.manager.listTasks(created.agentId)).toEqual(tasks);
+			expect(reopened.factoryInputs).toHaveLength(0);
+			expect(() => reopened.manager.renameAgent(created.agentId, created.agentId, "self")).toThrow(
+				"cannot target itself",
+			);
+		} finally {
+			await reopened.manager.unload("parent_unloaded");
+		}
+	});
+
 	it("deletes an agent after draining its runtime", async () => {
 		const harness = setup();
 		const created = await harness.manager.spawn(ROOT_ID, {
@@ -1923,7 +2092,7 @@ describe("SubagentManager", () => {
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
 		await finishTask(harness, created.agentId, created.taskId, "done handoff");
-		const inspected = await harness.manager.inspect(ROOT_ID, { agentId: created.agentId });
+		const inspected = await harness.manager.inspect(ROOT_ID, { agentId: created.agentId, view: "activity" });
 		expect(inspected.kind).toBe("trace");
 		if (inspected.kind !== "trace") return;
 		expect(inspected.events.length).toBeGreaterThan(0);

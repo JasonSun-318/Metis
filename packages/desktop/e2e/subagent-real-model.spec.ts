@@ -1,5 +1,6 @@
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { waitForServerReady } from "./packaged-app-harness.ts";
 import {
 	type AgentRecord,
 	closeSubagentApp,
@@ -14,15 +15,14 @@ import {
 	readSessionItems,
 	readSubagentItems,
 	removeSubagentEnvironment,
+	type SubagentMode,
 	saveSubagentEvidence,
 	sendParentPrompt,
 	sendSubagentCorrection,
 	sessionModel,
-	type SubagentMode,
 	upsertSubagentRole,
 	waitForModelRequest,
 } from "./subagent-conversations.fixture.ts";
-import { waitForServerReady } from "./packaged-app-harness.ts";
 
 const REAL_START = "SUBAGENT_REAL_START";
 const REAL_FINAL = "SUBAGENT_REAL_FINAL";
@@ -51,7 +51,9 @@ async function waitForAgents(
 		if (last.length === 0) {
 			const items = await readSessionItems(page, sessionId);
 			if (items.filter((item) => item.role === "assistant").at(-1)?.state === "failed")
-				throw new Error("Configured real model failed before creating child conversations; inspect the saved request evidence and provider status.");
+				throw new Error(
+					"Configured real model failed before creating child conversations; inspect the saved request evidence and provider status.",
+				);
 		}
 		await new Promise((resolve) => setTimeout(resolve, 500));
 	}
@@ -64,8 +66,13 @@ function isTerminal(agent: AgentRecord): boolean {
 	return agent.status === "done" || agent.status === "failed" || agent.status === "stopped";
 }
 
-function itemText(item: { readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }> }): string {
-	return item.content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("\n");
+function itemText(item: {
+	readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+}): string {
+	return item.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text ?? "")
+		.join("\n");
 }
 
 async function waitForParentFinal(page: Page, sessionId: string, marker: string, timeoutMs: number): Promise<void> {
@@ -75,7 +82,9 @@ async function waitForParentFinal(page: Page, sessionId: string, marker: string,
 		const items = await readSessionItems(page, sessionId);
 		const latestAssistant = items.filter((item) => item.role === "assistant").at(-1);
 		if (latestAssistant?.state === "failed")
-			throw new Error("Configured real model failed before its final handoff; inspect the saved request evidence and provider status.");
+			throw new Error(
+				"Configured real model failed before its final handoff; inspect the saved request evidence and provider status.",
+			);
 		const assistants = items.filter((item) => item.role === "assistant" && item.state === "completed");
 		const latest = assistants.at(-1);
 		last = latest ? itemText(latest) : "";
@@ -86,6 +95,7 @@ async function waitForParentFinal(page: Page, sessionId: string, marker: string,
 }
 
 for (const mode of ["chat", "code"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: configured deepseek-v4.1-flash autonomously creates and reconciles audited children`, async ({}, testInfo) => {
 		test.skip(
 			process.env.METIS_SUBAGENT_REAL_MODEL_TEST !== "1",
@@ -140,12 +150,7 @@ Each child must actually read the workspace before reporting. A trusted human ma
 When both children are complete, integrate their results and finish with exactly ${REAL_FINAL} followed by a short summary. Do not use web search, external networks, or modify user files.`;
 			await sendParentPrompt(page, prompt);
 
-			selectedAgents = await waitForAgents(
-				page,
-				parentId,
-				(agents) => agents.length >= 2,
-				300_000,
-			);
+			selectedAgents = await waitForAgents(page, parentId, (agents) => agents.length >= 2, 300_000);
 			const directAgents = selectedAgents.filter((agent) => agent.parentSessionId === parentId);
 			expect(directAgents.length, "the model must create at least two direct children").toBeGreaterThanOrEqual(2);
 			expect(directAgents.every((agent) => agent.model?.provider === real.providerId)).toBe(true);
@@ -159,7 +164,7 @@ When both children are complete, integrate their results and finish with exactly
 				"the model must choose a narrower role than default when one fits",
 			).toBe(true);
 
-			const parentIndependent = await waitForModelRequest(
+			await waitForModelRequest(
 				proxy,
 				(request) =>
 					!request.isChild && request.spawnNames.includes("spawn_agent") && request.mailboxEvents.length === 0,
@@ -180,12 +185,9 @@ When both children are complete, integrate their results and finish with exactly
 			const runningChild = await waitForAgents(
 				page,
 				parentId,
-				(agents) =>
-					agents.some((agent) => agent.parentSessionId === parentId && agent.status === "running"),
+				(agents) => agents.some((agent) => agent.parentSessionId === parentId && agent.status === "running"),
 				180_000,
-			).then((agents) =>
-				agents.find((agent) => agent.parentSessionId === parentId && agent.status === "running"),
-			);
+			).then((agents) => agents.find((agent) => agent.parentSessionId === parentId && agent.status === "running"));
 			expect(runningChild, "a running child is required for the user correction").toBeTruthy();
 			correctionToken = `REAL-CORRECTION-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 			const receipt = await sendSubagentCorrection(
@@ -227,9 +229,8 @@ When both children are complete, integrate their results and finish with exactly
 					async () => {
 						const items = await readSubagentItems(page, parentId, runningChild!.agentId);
 						return (
-							items.find(
-								(item) => item.role === "user" && itemText(item).includes(correctionToken),
-							)?.instructionRevision ?? 0
+							items.find((item) => item.role === "user" && itemText(item).includes(correctionToken))
+								?.instructionRevision ?? 0
 						);
 					},
 					{ timeout: 60_000 },
@@ -245,13 +246,15 @@ When both children are complete, integrate their results and finish with exactly
 			expect(correctionItem?.origin).toMatchObject({ kind: "user" });
 			expect(correctionItem?.agentMessageId).toBe(receipt.messageId);
 			userCorrectionReachedSelectedChild =
-				correctionItem !== undefined &&
-				(correctionItem.instructionRevision ?? 0) >= receipt.instructionRevision;
+				correctionItem !== undefined && (correctionItem.instructionRevision ?? 0) >= receipt.instructionRevision;
 			expect(userCorrectionReachedSelectedChild).toBe(true);
 
 			await waitForParentFinal(page, parentId, REAL_FINAL, 900_000);
 			const finished = await waitForAgents(page, parentId, (agents) => agents.every(isTerminal), 120_000);
-			expect(finished.every((agent) => agent.status === "done"), "both audits must finish successfully, including any same-child retries").toBe(true);
+			expect(
+				finished.every((agent) => agent.status === "done"),
+				"both audits must finish successfully, including any same-child retries",
+			).toBe(true);
 			const finishedTarget = finished.find((agent) => agent.agentId === runningChild!.agentId);
 			const targetTask = finishedTarget?.tasks.find((task) => task.taskId === receipt.taskId);
 			expect(targetTask?.consumedInstructionRevision).toBeGreaterThanOrEqual(receipt.instructionRevision);
@@ -273,9 +276,7 @@ When both children are complete, integrate their results and finish with exactly
 			for (const role of ["default", "explorer", "worker", "reviewer", REAL_ROLE.id])
 				expect(parentStart?.system).toContain(`${role}:`);
 			for (const agent of directAgents) {
-				const childRequest = proxy.requests.find(
-					(request) => request.isChild && request.agentId === agent.agentId,
-				);
+				const childRequest = proxy.requests.find((request) => request.isChild && request.agentId === agent.agentId);
 				expect(childRequest, `missing child model request for ${agent.name}`).toBeTruthy();
 				expect(childRequest?.system).toContain("<agent_contract>");
 				expect(childRequest?.system).toContain(`"name":"${agent.agentType}"`);
@@ -290,9 +291,17 @@ When both children are complete, integrate their results and finish with exactly
 				expect(childRequest?.toolNames).toEqual(expect.arrayContaining([...(agent.tools ?? [])]));
 				if (agent.writePolicy === "deny") expect(agent.tools).not.toContain("write");
 				expect(childRequest?.userTexts.join("\n")).toMatch(/README\.md/u);
-				expect(proxy.requests.filter((request) => request.isChild && request.agentId === agent.agentId)
-					.some((request) => request.messages.some((message) => message.role === "tool" && JSON.stringify(message.content).includes("fixture-beta"))),
-					`child ${agent.name} must actually read fixture evidence through a tool`).toBe(true);
+				expect(
+					proxy.requests
+						.filter((request) => request.isChild && request.agentId === agent.agentId)
+						.some((request) =>
+							request.messages.some(
+								(message) =>
+									message.role === "tool" && JSON.stringify(message.content).includes("fixture-beta"),
+							),
+						),
+					`child ${agent.name} must actually read fixture evidence through a tool`,
+				).toBe(true);
 			}
 			const substantiveRequests = proxy.requests.filter(
 				(request) =>
@@ -303,7 +312,10 @@ When both children are complete, integrate their results and finish with exactly
 			expect(substantiveRequests.length).toBeGreaterThan(0);
 			for (const request of substantiveRequests) {
 				expect(request.model).toBe(real.modelId);
-				expect(JSON.stringify(request.messages), "real model must receive working packaged native tools").not.toContain("Incomplete Metis installation");
+				expect(
+					JSON.stringify(request.messages),
+					"real model must receive working packaged native tools",
+				).not.toContain("Incomplete Metis installation");
 			}
 
 			await page.waitForTimeout(2_000);
@@ -320,7 +332,10 @@ When both children are complete, integrate their results and finish with exactly
 			await page.waitForTimeout(2_000);
 			modelCallsFromHistoryNavigation = proxy.requests.length - beforeColdRead;
 			expect(modelCallsFromHistoryNavigation, "cold history navigation must not call the model").toBe(0);
-			await expect(page.locator(`#agent-composer-${runningChild!.agentId}`), "cold reads and a late mode switch must preserve the selected child").toBeVisible();
+			await expect(
+				page.locator(`#agent-composer-${runningChild!.agentId}`),
+				"cold reads and a late mode switch must preserve the selected child",
+			).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`subagent-real-${mode}.png`) });
 
 			await saveSubagentEvidence(testInfo, `subagent-real-${mode}-evidence.json`, {

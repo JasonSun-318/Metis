@@ -77,7 +77,7 @@ import {
 	storePluginMcpCredential,
 	upsertCustomAgentType,
 } from "@metis/coding-agent/host";
-import { listAgentCatalog, projectAgentItems } from "./agent-catalog.ts";
+import { AgentCatalog, projectAgentItems } from "./agent-catalog.ts";
 import {
 	type AgentInputDelivery,
 	latestAgentInputs,
@@ -1714,6 +1714,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	resolveAgentDeliveredFile(agentId: string, fileId: string) {
+		try {
+			return this.runtime.subagentManager?.resolveDeliveredArtifact(this.sessionId, agentId, fileId);
+		} catch {
+			throw new AppServerError("NOT_FOUND", { sessionId: agentId });
+		}
+	}
+
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		const stats = this.session.getSessionStats();
 		const context = stats.contextUsage;
@@ -1805,7 +1813,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-		return listAgentCatalog(this.ref, this.agentDir, input);
+		return this.agentCatalog.list(this.ref, input);
 	}
 
 	async readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
@@ -1989,6 +1997,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			throw new AppServerError("OPERATION_FAILED", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		return { agentId: input.agentId, status: "deleted" };
+	}
+
+	async renameAgent(input: ClientParams<"agent/rename">): Promise<ClientResult<"agent/rename">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
+		try {
+			return { agent: agentSummaryView(await manager.renameAgent(this.sessionId, input.agentId, input.name)) };
+		} catch (error) {
+			throwAgentError(error, input);
+		}
 	}
 
 	async setThinkingSelection(
@@ -2775,6 +2793,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
+	async renameAgent(): Promise<ClientResult<"agent/rename">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
 	async deleteAgent(): Promise<ClientResult<"agent/delete">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
@@ -2867,6 +2889,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	constructor(options: AgentSessionRuntimeHostOptions) {
 		this.options = options;
 		this.agentDir = options.agentDir;
+		this.agentCatalog = new AgentCatalog(options.agentDir);
 		this.trustStore = new ProjectTrustStore(options.agentDir);
 		this.authStorage = options.credentials?.createView() ?? AuthStorage.create(join(options.agentDir, "auth.json"));
 		this.mcpConfigurationCoordinator = new McpConfigurationCoordinator({ authStorage: this.authStorage });

@@ -38,6 +38,11 @@ async function mount(
 			unreadableAgentCount,
 		}),
 		subscribe: vi.fn(() => () => undefined),
+		renameAgent: vi.fn().mockImplementation(async ({ agentId, name }) => ({
+			agent: { ...agents.find((value) => value.agentId === agentId), name },
+		})),
+		archiveAgent: vi.fn().mockResolvedValue({}),
+		deleteAgent: vi.fn().mockResolvedValue({}),
 	} as unknown as MetisDesktopApi;
 	const container = document.createElement("div");
 	document.body.append(container);
@@ -45,6 +50,8 @@ async function mount(
 	roots.push(root);
 	const onOpen = vi.fn();
 	const onOpenRoot = vi.fn();
+	const onRemoved = vi.fn();
+	const onRenamed = vi.fn();
 	const render = async (active = activeAgentId, attention = attentionAgentIds) =>
 		act(async () =>
 			root.render(
@@ -55,6 +62,8 @@ async function mount(
 						active: active ? { sessionId: "root", agentId: active, name: active } : null,
 						attentionAgentIds: attention,
 						onOpen,
+						onRemoved,
+						onRenamed,
 					}}
 				>
 					{(toggle) => (
@@ -72,7 +81,7 @@ async function mount(
 			),
 		);
 	await render();
-	return { container, api, onOpen, onOpenRoot, render };
+	return { container, api, onOpen, onOpenRoot, onRemoved, onRenamed, render };
 }
 function expectDrawer(element: Element, open: boolean): HTMLElement {
 	const drawer = element.closest<HTMLElement>(".agent-sidebar-drawer");
@@ -307,4 +316,113 @@ describe("AgentSidebarBranch", () => {
 		expect(container.textContent).toContain("3 agents");
 		expect(localStorage.getItem("metis.agent-tree.root")).toBe("closed");
 	});
+});
+
+async function openActions(container: HTMLElement, name = "child") {
+	await act(async () =>
+		container.querySelector<HTMLButtonElement>(`button[aria-label="Actions for ${name}"]`)!.click(),
+	);
+}
+async function clickMenu(label: string) {
+	const button = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+		(node) => node.textContent?.trim() === label,
+	);
+	if (!button) throw new Error(`Missing menu item ${label}`);
+	await act(async () => button.click());
+}
+
+describe("agent sidebar actions", () => {
+	it("renames the owning agent and updates open conversation titles", async () => {
+		const { container, api, onRenamed } = await mount();
+		await openActions(container);
+		await clickMenu("Rename");
+		const input = document.querySelector<HTMLInputElement>("#session-rename-input")!;
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Research team");
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		await act(async () =>
+			input.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+		);
+		expect(api.renameAgent).toHaveBeenCalledWith({
+			sessionId: "root",
+			agentId: "child",
+			requestId: expect.any(String),
+			name: "Research team",
+		});
+		expect(onRenamed).toHaveBeenCalledWith("root", "child", "Research team");
+		expect(document.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.activeElement?.getAttribute("aria-label")).toBe("Actions for child");
+	});
+	it("archives a terminal subtree and reports every affected open conversation", async () => {
+		const { container, api, onRemoved } = await mount();
+		await openActions(container);
+		await clickMenu("Archive conversation");
+		expect(api.archiveAgent).toHaveBeenCalledWith({
+			sessionId: "root",
+			agentId: "child",
+			requestId: expect.any(String),
+			archived: true,
+		});
+		expect(onRemoved).toHaveBeenCalledWith("root", ["child", "grandchild"]);
+	});
+	it("requires deletion confirmation and includes descendants in cleanup", async () => {
+		const { container, api, onRemoved } = await mount();
+		await openActions(container);
+		await clickMenu("Delete");
+		expect(api.deleteAgent).not.toHaveBeenCalled();
+		expect(document.querySelector('[role="dialog"]')?.textContent).toContain("all its subtasks");
+		const confirm = document.querySelector<HTMLButtonElement>(".project-delete-confirm")!;
+		await act(async () => confirm.click());
+		expect(api.deleteAgent).toHaveBeenCalledWith({
+			sessionId: "root",
+			agentId: "child",
+			requestId: expect.any(String),
+		});
+		expect(onRemoved).toHaveBeenCalledWith("root", ["child", "grandchild"]);
+	});
+	it("disables archive while a descendant runs and preserves the menu after an error", async () => {
+		const { container, api, onRemoved } = await mount(undefined, undefined, undefined, [
+			agent("child"),
+			{ ...agent("grandchild", "child"), status: "running" },
+		]);
+		await openActions(container);
+		const archive = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+			(node) => node.textContent === "Archive conversation",
+		)!;
+		expect(archive.disabled).toBe(true);
+		expect(archive.title).toContain("Stop this agent");
+		vi.mocked(api.deleteAgent).mockRejectedValue(new Error("Deletion failed"));
+		await clickMenu("Delete");
+		await act(async () => document.querySelector<HTMLButtonElement>(".project-delete-confirm")!.click());
+		expect(document.querySelector('[role="alert"]')?.textContent).toBe("Deletion failed");
+		expect(onRemoved).not.toHaveBeenCalled();
+	});
+});
+
+it("keeps pending archive actions locked and exposes a failed result for retry", async () => {
+	const { container, api, onRemoved } = await mount();
+	let reject!: (error: Error) => void;
+	vi.mocked(api.archiveAgent).mockReturnValue(
+		new Promise((_resolve, rejectPromise) => {
+			reject = rejectPromise;
+		}),
+	);
+	await openActions(container);
+	await clickMenu("Archive conversation");
+	expect(
+		[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].every((button) => button.disabled),
+	).toBe(true);
+	expect(document.querySelector('[role="menu"]')?.textContent).toContain("Archiving conversation…");
+	await act(async () => {
+		document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+	});
+	expect(document.querySelector('[role="menu"]')).not.toBeNull();
+	await act(async () => reject(new Error("Archive failed")));
+	expect(document.querySelector('[role="alert"]')?.textContent).toBe("Archive failed");
+	expect(onRemoved).not.toHaveBeenCalled();
+	expect(
+		[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].every((button) => !button.disabled),
+	).toBe(true);
 });

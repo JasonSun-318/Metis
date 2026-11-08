@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { waitForServerReady } from "./packaged-app-harness.ts";
 import {
 	type AgentRecord,
 	closeSubagentApp,
@@ -14,15 +15,13 @@ import {
 	readSessionItems,
 	readSubagentItems,
 	removeSubagentEnvironment,
-	saveSubagentEvidence,
-	sendParentPrompt,
 	SUBAGENT_CUSTOM_ROLE,
 	SUBAGENT_FIXTURE,
-	type SubagentMode,
+	saveSubagentEvidence,
+	sendParentPrompt,
 	upsertFixtureRole,
 	waitForModelRequest,
 } from "./subagent-conversations.fixture.ts";
-import { waitForServerReady } from "./packaged-app-harness.ts";
 
 const PROVIDER_ID = "subagentFixture";
 const MODEL_ID = "subagent-fixture";
@@ -51,11 +50,21 @@ function agentByName(agents: readonly AgentRecord[], name: string): AgentRecord 
 	return found;
 }
 
-function itemText(item: { readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }> }): string {
-	return item.content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("\n");
+function itemText(item: {
+	readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+}): string {
+	return item.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text ?? "")
+		.join("\n");
 }
 
-async function verifyRunningSidebar(page: Page, parentName: string, child: AgentRecord, testInfo: TestInfo): Promise<void> {
+async function verifyRunningSidebar(
+	page: Page,
+	parentName: string,
+	child: AgentRecord,
+	testInfo: TestInfo,
+): Promise<void> {
 	const childComposer = page.locator(`#agent-composer-${child.agentId}`);
 	const childRow = page.getByRole("treeitem", { name: child.name, exact: true });
 	const light = childRow.locator(".session-button-title > i.running");
@@ -63,19 +72,32 @@ async function verifyRunningSidebar(page: Page, parentName: string, child: Agent
 	await expect(childRow.locator(".agent-sidebar-status, .agent-sidebar-unread, .is-spinning")).toHaveCount(0);
 	const color = await light.evaluate((element) => {
 		const hex = getComputedStyle(element).getPropertyValue("--run-running").trim();
-		return { actual: getComputedStyle(element).backgroundColor,
-			expected: `rgb(${[1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(", ")})` };
+		return {
+			actual: getComputedStyle(element).backgroundColor,
+			expected: `rgb(${[1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(", ")})`,
+		};
 	});
 	expect(color.actual).toBe(color.expected);
 	const originalMotion = await page.evaluate(() => document.documentElement.dataset.motion);
 	try {
-		await page.evaluate(() => { document.documentElement.dataset.motion = "full"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.motion = "full";
+		});
 		await expect(light).toHaveCSS("animation-name", "session-running-pulse");
 		await expect(light).toHaveCSS("animation-duration", "1.4s");
 		const initialOpacity = await light.evaluate((element) => Number(getComputedStyle(element).opacity));
-		await expect.poll(async () => Math.abs(await light.evaluate((element) => Number(getComputedStyle(element).opacity)) - initialOpacity),
-			{ timeout: 3_000, intervals: [80] }).toBeGreaterThan(0.08);
-		await page.evaluate(() => { document.documentElement.dataset.motion = "reduced"; });
+		await expect
+			.poll(
+				async () =>
+					Math.abs(
+						(await light.evaluate((element) => Number(getComputedStyle(element).opacity))) - initialOpacity,
+					),
+				{ timeout: 3_000, intervals: [80] },
+			)
+			.toBeGreaterThan(0.08);
+		await page.evaluate(() => {
+			document.documentElement.dataset.motion = "reduced";
+		});
 		await expect(light).toHaveCSS("animation-name", "none");
 	} finally {
 		await page.evaluate((motion) => {
@@ -89,19 +111,29 @@ async function verifyRunningSidebar(page: Page, parentName: string, child: Agent
 	const more = rootRow.locator(":scope > .session-actions > button");
 	await rootRow.hover();
 	await expect(more).toHaveCSS("opacity", "1");
-	await expect.poll(() => more.evaluate((element) => {
-		const transform = getComputedStyle(element).transform;
-		return transform === "none" || new DOMMatrixReadOnly(transform).isIdentity;
-	})).toBe(true);
+	await expect
+		.poll(() =>
+			more.evaluate((element) => {
+				const transform = getComputedStyle(element).transform;
+				return transform === "none" || new DOMMatrixReadOnly(transform).isIdentity;
+			}),
+		)
+		.toBe(true);
 	const geometry = await rootRow.evaluate((row) => {
 		const rect = (selector: string) => {
 			const bounds = row.querySelector(selector)!.getBoundingClientRect();
 			return { x: bounds.x, right: bounds.right, y: bounds.y, height: bounds.height, width: bounds.width };
 		};
-		return { toggle: rect(":scope > .agent-root-toggle"), more: rect(":scope > .session-actions > button"), glyph: rect(".agent-root-toggle svg") };
+		return {
+			toggle: rect(":scope > .agent-root-toggle"),
+			more: rect(":scope > .session-actions > button"),
+			glyph: rect(".agent-root-toggle svg"),
+		};
 	});
 	expect(geometry.more.right).toBeLessThanOrEqual(geometry.toggle.x + 0.5);
-	expect(Math.abs(geometry.toggle.y + geometry.toggle.height / 2 - geometry.more.y - geometry.more.height / 2)).toBeLessThan(1);
+	expect(
+		Math.abs(geometry.toggle.y + geometry.toggle.height / 2 - geometry.more.y - geometry.more.height / 2),
+	).toBeLessThan(1);
 	expect(geometry.toggle).toMatchObject({ width: 24, height: 24 });
 	expect(geometry.glyph.width).toBe(10);
 	await toggle.click();
@@ -139,31 +171,54 @@ async function verifyAgentControls(page: Page, child: AgentRecord): Promise<void
 	await childComposerProbe.fill("");
 }
 
-async function verifyNativeWindowLayout(app: Awaited<ReturnType<typeof launchSubagentApp>>, testInfo: TestInfo): Promise<void> {
+async function verifyNativeWindowLayout(
+	app: Awaited<ReturnType<typeof launchSubagentApp>>,
+	testInfo: TestInfo,
+): Promise<void> {
 	const page = app.page;
 	const settleSidebar = async () => {
-		await expect.poll(() => page.locator(".session-sidebar").evaluate((element) => {
-			const transform = getComputedStyle(element).transform;
-			return (transform === "none" || new DOMMatrixReadOnly(transform).isIdentity) &&
-				element.getBoundingClientRect().left >= 0;
-		})).toBe(true);
+		await expect
+			.poll(() =>
+				page.locator(".session-sidebar").evaluate((element) => {
+					const transform = getComputedStyle(element).transform;
+					return (
+						(transform === "none" || new DOMMatrixReadOnly(transform).isIdentity) &&
+						element.getBoundingClientRect().left >= 0
+					);
+				}),
+			)
+			.toBe(true);
 		return page.evaluate(() => ({
 			scrollX: window.scrollX,
 			documentScrollLeft: document.scrollingElement?.scrollLeft,
 			sidebarLeft: document.querySelector(".session-sidebar")!.getBoundingClientRect().left,
 		}));
 	};
-	const bounds = process.platform === "darwin" && process.env.METIS_NATIVE_WINDOW_TEST === "1" ? await nativeWindowBounds(app) : undefined;
+	const bounds =
+		process.platform === "darwin" && process.env.METIS_NATIVE_WINDOW_TEST === "1"
+			? await nativeWindowBounds(app)
+			: undefined;
 	const geometry: unknown[] = [];
 	try {
-		for (const size of bounds ? [{ width: 1060, height: 720 }, { width: 1360, height: 900 }, { width: 1100, height: 760 }] : []) {
+		for (const size of bounds
+			? [
+					{ width: 1060, height: 720 },
+					{ width: 1360, height: 900 },
+					{ width: 1100, height: 760 },
+				]
+			: []) {
 			await nativeWindowBounds(app, size);
 			await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(size.width);
 			const measured = await page.evaluate(() => {
 				const shell = document.querySelector<HTMLElement>(".app-shell")!;
 				const rect = shell.getBoundingClientRect();
-				return { width: window.innerWidth, height: window.innerHeight, shellWidth: rect.width, shellBottom: rect.bottom,
-					sidebarWidth: getComputedStyle(shell).getPropertyValue("--sidebar-width").trim() };
+				return {
+					width: window.innerWidth,
+					height: window.innerHeight,
+					shellWidth: rect.width,
+					shellBottom: rect.bottom,
+					sidebarWidth: getComputedStyle(shell).getPropertyValue("--sidebar-width").trim(),
+				};
 			});
 			expect(Math.abs(measured.shellWidth - measured.width)).toBeLessThan(2);
 			expect(Math.abs(measured.shellBottom - measured.height)).toBeLessThan(2);
@@ -194,7 +249,9 @@ async function verifyNativeWindowLayout(app: Awaited<ReturnType<typeof launchSub
 async function verifyConversationMotion(page: Page, agents: readonly AgentRecord[], testInfo: TestInfo): Promise<void> {
 	const original = await page.evaluate(() => document.documentElement.dataset.motion);
 	try {
-		await page.evaluate(() => { document.documentElement.dataset.motion = "full"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.motion = "full";
+		});
 		const sampling = page.evaluate(async () => {
 			const frames: number[] = [];
 			const layouts = new Set<string>();
@@ -204,8 +261,9 @@ async function verifyConversationMotion(page: Page, agents: readonly AgentRecord
 				const tick = (now: number) => {
 					frames.push(now - previous);
 					previous = now;
-					const panel = Array.from(document.querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])"))
-						.find((element) => element.getBoundingClientRect().width > 0);
+					const panel = Array.from(document.querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])")).find(
+						(element) => element.getBoundingClientRect().width > 0,
+					);
 					if (panel) {
 						const rect = panel.getBoundingClientRect();
 						layouts.add([rect.x, rect.y, rect.width, rect.height].map(Math.round).join(","));
@@ -226,17 +284,29 @@ async function verifyConversationMotion(page: Page, agents: readonly AgentRecord
 		const active = page.locator(`#agent-composer-${agents[0]!.agentId}`);
 		const full = await active.evaluate((element) => {
 			const style = getComputedStyle(element.closest(".workspace-panel")!);
-			return { name: style.animationName, duration: style.animationDuration, transform: style.transform,
-				stationary: style.transform === "none" || new DOMMatrixReadOnly(style.transform).isIdentity };
+			return {
+				name: style.animationName,
+				duration: style.animationDuration,
+				transform: style.transform,
+				stationary: style.transform === "none" || new DOMMatrixReadOnly(style.transform).isIdentity,
+			};
 		});
 		expect(full).toMatchObject({ name: "tool-panel-in", duration: "0.14s", stationary: true });
-		await page.evaluate(() => { document.documentElement.dataset.motion = "reduced"; });
+		await page.evaluate(() => {
+			document.documentElement.dataset.motion = "reduced";
+		});
 		await openAgentConversation(page, agents[1]!.name);
 		await expect(page.locator(`#agent-composer-${agents[1]!.agentId}`)).toBeVisible();
-		const reduced = await page.locator(`#agent-composer-${agents[1]!.agentId}`).evaluate((element) =>
-			getComputedStyle(element.closest(".workspace-panel")!).animationName);
+		const reduced = await page
+			.locator(`#agent-composer-${agents[1]!.agentId}`)
+			.evaluate((element) => getComputedStyle(element.closest(".workspace-panel")!).animationName);
 		expect(reduced).toBe("none");
-		await saveSubagentEvidence(testInfo, "subagent-motion-qa.json", { ...samples, full, reduced, renderer: "isolated Electron with software rendering" });
+		await saveSubagentEvidence(testInfo, "subagent-motion-qa.json", {
+			...samples,
+			full,
+			reduced,
+			renderer: "isolated Electron with software rendering",
+		});
 	} finally {
 		await page.evaluate((value) => {
 			if (value === undefined) delete document.documentElement.dataset.motion;
@@ -246,6 +316,7 @@ async function verifyConversationMotion(page: Page, agents: readonly AgentRecord
 }
 
 for (const mode of ["chat", "code"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: creates two persistent children, keeps parent work parallel, and applies a user correction`, async ({}, testInfo) => {
 		test.setTimeout(240_000);
 		const model = await createSubagentModelServer();
@@ -275,7 +346,8 @@ for (const mode of ["chat", "code"] as const) {
 			const running = await waitForAgents(
 				page,
 				parentId,
-				(agents) => agents.length === 2 && agents.some((agent) => agent.status === "running" || agent.status === "queued"),
+				(agents) =>
+					agents.length === 2 && agents.some((agent) => agent.status === "running" || agent.status === "queued"),
 			);
 			expect(
 				running.some((agent) => agent.status === "running" || agent.status === "queued"),
@@ -342,8 +414,7 @@ for (const mode of ["chat", "code"] as const) {
 			await waitForAgents(
 				page,
 				parentId,
-				(agents) =>
-					agents.some((agent) => agent.agentId === alpha.agentId && agent.status === "running"),
+				(agents) => agents.some((agent) => agent.agentId === alpha.agentId && agent.status === "running"),
 				20_000,
 			);
 
@@ -357,8 +428,11 @@ for (const mode of ["chat", "code"] as const) {
 			await childComposer.fill(SUBAGENT_FIXTURE.correction);
 			await expect(childConversation.getByRole("button", { name: "Stop agent", exact: true })).toBeEnabled();
 			await childConversation.getByRole("button", { name: "Queue message", exact: true }).click();
-			await childConversation.locator(".queued-turn-row").filter({ hasText: SUBAGENT_FIXTURE.correction })
-				.getByRole("button", { name: "Guide with queued message", exact: true }).click();
+			await childConversation
+				.locator(".queued-turn-row")
+				.filter({ hasText: SUBAGENT_FIXTURE.correction })
+				.getByRole("button", { name: "Guide with queued message", exact: true })
+				.click();
 
 			const intervention = await waitForModelRequest(
 				model,
@@ -416,9 +490,7 @@ for (const mode of ["chat", "code"] as const) {
 				.toBe(true);
 
 			const items = await readSubagentItems(page, parentId, alpha.agentId);
-			const initialItem = items.find(
-				(item) => item.role === "user" && itemText(item).includes("ALPHA_TASK"),
-			);
+			const initialItem = items.find((item) => item.role === "user" && itemText(item).includes("ALPHA_TASK"));
 			expect(initialItem?.origin).toMatchObject({ kind: "agent", sessionId: parentId });
 			const correctionItem = items.find(
 				(item) => item.role === "user" && itemText(item).includes("CORRECTION-ALPHA"),
@@ -430,7 +502,10 @@ for (const mode of ["chat", "code"] as const) {
 			expect(correctionItem?.deliveryState).toBe("delivered");
 
 			for (const request of model.requests) {
-				expect(JSON.stringify(request.messages), "packaged native tools must not fail their integrity checks").not.toContain("Incomplete Metis installation");
+				expect(
+					JSON.stringify(request.messages),
+					"packaged native tools must not fail their integrity checks",
+				).not.toContain("Incomplete Metis installation");
 				const eventIds = request.mailboxEvents.map((event) => event.eventId);
 				expect(new Set(eventIds).size, "one prompt must not inject the same mailbox event twice").toBe(
 					eventIds.length,
@@ -444,8 +519,13 @@ for (const mode of ["chat", "code"] as const) {
 			const parentComposer = page.locator("#composer-input");
 			await expect(parentComposer).toBeVisible();
 			const parentItems = await readSessionItems(page, parentId);
-			const internal = parentItems.filter((item) => item.role === "system" && item.origin?.kind === "system" && item.agentTargetId);
-			expect(internal.length, "durable parent history must retain intervention and both terminal notices").toBeGreaterThanOrEqual(3);
+			const internal = parentItems.filter(
+				(item) => item.role === "system" && item.origin?.kind === "system" && item.agentTargetId,
+			);
+			expect(
+				internal.length,
+				"durable parent history must retain intervention and both terminal notices",
+			).toBeGreaterThanOrEqual(3);
 			expect(internal.some((item) => item.agentMessageId === interventionEvent?.messageId)).toBe(true);
 			expect(internal.some((item) => itemText(item).includes("child-final alpha"))).toBe(true);
 			expect(internal.some((item) => itemText(item).includes("child-final beta"))).toBe(true);
@@ -453,9 +533,15 @@ for (const mode of ["chat", "code"] as const) {
 			await expect(parentTranscript).toContainText("parent-saw-intervention");
 			await expect(parentTranscript.locator(".agent-coordination-message")).toHaveCount(0);
 			await expect(parentTranscript).not.toContainText("You sent a message to");
-			await expect(parentTranscript).not.toContainText("child-final alpha");
-			await expect(parentTranscript).not.toContainText("child-final beta");
-			const betaLight = page.getByRole("treeitem", { name: beta.name, exact: true }).locator(".session-button-title > i");
+			await expect(
+				parentTranscript.locator(".agent-report-message").filter({ hasText: "child-final alpha" }),
+			).toContainText(alpha.name);
+			await expect(
+				parentTranscript.locator(".agent-report-message").filter({ hasText: "child-final beta" }),
+			).toContainText(beta.name);
+			const betaLight = page
+				.getByRole("treeitem", { name: beta.name, exact: true })
+				.locator(".session-button-title > i");
 			await expect(betaLight).toHaveClass("completed");
 			await parentComposer.fill(parentDraft);
 			await openAgentConversation(page, alpha.name);
@@ -485,12 +571,19 @@ for (const mode of ["chat", "code"] as const) {
 			await expect(page.locator(`[data-agent-id="${alpha.agentId}"]`)).toBeVisible();
 			await expect(page.locator(`#agent-composer-${alpha.agentId}`)).toBeVisible();
 			await page.waitForTimeout(1_500);
-			expect(model.requests.length, "opening cold child history must not start a model request").toBe(beforeColdRead);
-			await expect(page.locator(`#agent-composer-${alpha.agentId}`), "cold navigation must retain the selected child").toBeVisible();
+			expect(model.requests.length, "opening cold child history must not start a model request").toBe(
+				beforeColdRead,
+			);
+			await expect(
+				page.locator(`#agent-composer-${alpha.agentId}`),
+				"cold navigation must retain the selected child",
+			).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`subagent-${mode}-child-cold-history.png`) });
 			if (mode === "chat") {
 				await verifyConversationMotion(page, [alpha, agentByName(completed, SUBAGENT_FIXTURE.betaName)], testInfo);
-				expect(model.requests.length, "switching children and motion preferences must not call a model").toBe(beforeColdRead);
+				expect(model.requests.length, "switching children and motion preferences must not call a model").toBe(
+					beforeColdRead,
+				);
 				await verifyNativeWindowLayout(app, testInfo);
 				expect(model.requests.length, "layout and theme changes must not call a model").toBe(beforeColdRead);
 			}
@@ -517,6 +610,7 @@ for (const mode of ["chat", "code"] as const) {
 }
 
 for (const target of ["child", "root"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`stop from ${target} conversation prevents automatic model turns`, async ({}, testInfo) => {
 		test.setTimeout(120_000);
 		const model = await createSubagentModelServer();
@@ -553,8 +647,7 @@ for (const target of ["child", "root"] as const) {
 				await expect(stop).toBeEnabled();
 				await stop.click();
 				await expect(draft).toHaveText("Keep this unsent draft when the task stops");
-			}
-			else await controlSubagent(page, parentId, parentId, "stop", "subtree");
+			} else await controlSubagent(page, parentId, parentId, "stop", "subtree");
 
 			const stopped = await waitForAgents(
 				page,
@@ -566,10 +659,9 @@ for (const target of ["child", "root"] as const) {
 			await page.waitForTimeout(500);
 			const requestsAfterStop = model.requests.length;
 			await page.waitForTimeout(4_000);
-			expect(
-				model.requests.length,
-				"a user stop must not trigger an automatic parent or child model turn",
-			).toBe(requestsAfterStop);
+			expect(model.requests.length, "a user stop must not trigger an automatic parent or child model turn").toBe(
+				requestsAfterStop,
+			);
 
 			if (target === "root") {
 				await expect(controlSubagent(page, parentId, child.agentId, "resume", "self")).rejects.toThrow();
@@ -595,10 +687,10 @@ for (const target of ["child", "root"] as const) {
 			await removeSubagentEnvironment(environment);
 		}
 	});
-
 }
 
 for (const mode of ["chat", "code"] as const) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: displays a provider failure and retains the safe notice after recovery and reload`, async ({}, testInfo) => {
 		test.setTimeout(90_000);
 		const model = await createSubagentModelServer();
@@ -608,29 +700,51 @@ for (const mode of ["chat", "code"] as const) {
 			baseUrl: `http://127.0.0.1:${model.port}/v1`,
 			apiKey: "subagent-fixture-key",
 		});
-		const noticeText = "The model provider could not complete the request. Try again or choose another configured model.";
+		const noticeText =
+			"The model provider could not complete the request. Try again or choose another configured model.";
 		let app: Awaited<ReturnType<typeof launchSubagentApp>> | undefined;
 		try {
 			app = await launchSubagentApp(environment);
 			const page = app.page;
 			const sessionId = await createSubagentSession(page, environment, mode, `${mode} provider failure`);
 			await sendParentPrompt(page, SUBAGENT_FIXTURE.providerFailure);
-			await waitForModelRequest(model, (request) =>
-				!request.isChild && !request.system.includes("conversation title generator") &&
-				request.userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure) === true, 15_000);
-			await expect.poll(async () => (await readSessionItems(page, sessionId)).some((item) =>
-				item.role === "assistant" && item.state === "interrupted" &&
-				item.content.some((block) => block.type === "notice" && block.level === "error" && block.text === noticeText)),
-				{ timeout: 20_000 }).toBe(true);
+			await waitForModelRequest(
+				model,
+				(request) =>
+					!request.isChild &&
+					!request.system.includes("conversation title generator") &&
+					request.userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure) === true,
+				15_000,
+			);
+			await expect
+				.poll(
+					async () =>
+						(await readSessionItems(page, sessionId)).some(
+							(item) =>
+								item.role === "assistant" &&
+								item.state === "interrupted" &&
+								item.content.some(
+									(block) => block.type === "notice" && block.level === "error" && block.text === noticeText,
+								),
+						),
+					{ timeout: 20_000 },
+				)
+				.toBe(true);
 			const failure = (await readSessionItems(page, sessionId)).find((item) =>
-				item.content.some((block) => block.type === "notice" && block.text === noticeText))!;
+				item.content.some((block) => block.type === "notice" && block.text === noticeText),
+			)!;
 			const transcript = page.locator(".transcript:visible");
 			await expect(transcript.locator(".notice-error")).toHaveText(noticeText);
 			await expect(transcript.locator("[data-transcript-answer]")).toHaveCount(0);
 			await expect(transcript).not.toContainText("Fixture provider unavailable");
-			expect(model.requests.filter((request) => !request.isChild &&
-				!request.system.includes("conversation title generator") &&
-				request.userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure))).toHaveLength(1);
+			expect(
+				model.requests.filter(
+					(request) =>
+						!request.isChild &&
+						!request.system.includes("conversation title generator") &&
+						request.userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure),
+				),
+			).toHaveLength(1);
 
 			await sendParentPrompt(page, SUBAGENT_FIXTURE.providerRecovery);
 			await expect(transcript.locator("[data-transcript-answer]")).toHaveText("provider-recovery-complete");
@@ -641,8 +755,9 @@ for (const mode of ["chat", "code"] as const) {
 			await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
 			await expect(transcript.locator(".notice-error")).toHaveText(noticeText);
 			await expect(transcript.locator("[data-transcript-answer]")).toHaveText("provider-recovery-complete");
-			expect((await readSessionItems(page, sessionId)).find((item) => item.itemId === failure.itemId)?.content)
-				.toContainEqual({ type: "notice", level: "error", text: noticeText });
+			expect(
+				(await readSessionItems(page, sessionId)).find((item) => item.itemId === failure.itemId)?.content,
+			).toContainEqual({ type: "notice", level: "error", text: noticeText });
 			await saveSubagentEvidence(testInfo, `provider-failure-${mode}-model.json`, modelRequestSummary(model));
 			await page.screenshot({ path: testInfo.outputPath(`provider-failure-${mode}.png`) });
 		} finally {

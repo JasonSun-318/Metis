@@ -1,6 +1,7 @@
 import type { ClientParams, ClientResult, ItemView } from "@metis/app-protocol";
 import {
 	AgentStore,
+	type AgentSummary,
 	agentSummaryFromRecord,
 	agentTaskWindow,
 	type FileEntry,
@@ -22,38 +23,68 @@ import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
 
 /** Catalog reads do not acquire a writer lease, recover tasks, or construct a model runtime. */
 function withStore<T>(ref: SessionRef, agentDir: string, read: (store: AgentStore) => T): T {
-	const root = SessionManager.openReadOnly(ref.path);
-	const header = root.getHeader();
+	const header = SessionManager.readHeaderReadOnly(ref.path);
 	if (!header || header.id !== ref.summary.sessionId || header.agent || header.scheduled) {
 		throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
 	}
-	return read(new AgentStore(root, agentDir));
+	return read(new AgentStore({ getSessionId: () => header.id, getSessionFile: () => ref.path }, agentDir));
 }
 
-export function listAgentCatalog(
-	ref: SessionRef,
-	agentDir: string,
-	input: ClientParams<"agent/list">,
-): ClientResult<"agent/list"> {
-	return withStore(ref, agentDir, (store) => {
-		const tree = store.listTree();
-		const archivedIds = new Set(tree.agents.filter((record) => record.archived).map((record) => record.agentId));
-		const summaries = tree.agents
-			.filter((record) => input.includeArchived || !record.config.agentPath.some((id) => archivedIds.has(id)))
-			.map((record) => agentSummaryFromRecord(record))
-			.sort(
-				(left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.agentId.localeCompare(left.agentId),
-			);
-		const cursor = input.afterAgentId ? summaries.findIndex((agent) => agent.agentId === input.afterAgentId) : -1;
-		if (input.afterAgentId && cursor < 0) throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
-		const start = cursor + 1;
-		const agents = boundedAgentSummaryViews(summaries.slice(start), input.limit ?? 20);
-		return {
-			agents,
-			nextAfterAgentId: start + agents.length < summaries.length ? (agents.at(-1)?.agentId ?? null) : null,
-			...(tree.diagnostics.length ? { unreadableAgentCount: tree.diagnostics.length } : {}),
-		};
-	});
+const MAX_CATALOG_CACHE_BYTES = 8 * 1024 * 1024;
+
+/** Host-owned, bounded cache of derived facts; journals remain authoritative. */
+export class AgentCatalog {
+	private readonly agentDir: string;
+	private readonly summaries = new Map<string, { fingerprint: string; summary: AgentSummary; bytes: number }>();
+	private bytes = 0;
+
+	constructor(agentDir: string) {
+		this.agentDir = agentDir;
+	}
+
+	list(ref: SessionRef, input: ClientParams<"agent/list">): ClientResult<"agent/list"> {
+		return withStore(ref, this.agentDir, (store) => {
+			const tree = store.listTree((path, stat, load) => {
+				const fingerprint = `${ref.summary.sessionId}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+				const cached = this.summaries.get(path);
+				if (cached) {
+					this.summaries.delete(path);
+					this.bytes -= cached.bytes;
+				}
+				const summary = cached?.fingerprint === fingerprint ? cached.summary : agentSummaryFromRecord(load());
+				const bytes =
+					cached?.fingerprint === fingerprint ? cached.bytes : Buffer.byteLength(JSON.stringify(summary), "utf8");
+				if (bytes <= MAX_CATALOG_CACHE_BYTES) {
+					while (this.bytes + bytes > MAX_CATALOG_CACHE_BYTES) {
+						const oldest = this.summaries.entries().next().value;
+						if (!oldest) break;
+						this.summaries.delete(oldest[0]);
+						this.bytes -= oldest[1].bytes;
+					}
+					this.summaries.set(path, { fingerprint, summary, bytes });
+					this.bytes += bytes;
+				}
+				return summary;
+			});
+			const archivedIds = new Set(tree.agents.filter((agent) => agent.archived).map((agent) => agent.agentId));
+			const summaries = tree.agents
+				.filter((agent) => input.includeArchived || !agent.agentPath.some((id) => archivedIds.has(id)))
+				.sort(
+					(left, right) =>
+						right.updatedAt.localeCompare(left.updatedAt) || right.agentId.localeCompare(left.agentId),
+				);
+			const cursor = input.afterAgentId ? summaries.findIndex((agent) => agent.agentId === input.afterAgentId) : -1;
+			if (input.afterAgentId && cursor < 0)
+				throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
+			const start = cursor + 1;
+			const agents = boundedAgentSummaryViews(summaries.slice(start), input.limit ?? 20);
+			return {
+				agents,
+				nextAfterAgentId: start + agents.length < summaries.length ? (agents.at(-1)?.agentId ?? null) : null,
+				...(tree.diagnostics.length ? { unreadableAgentCount: tree.diagnostics.length } : {}),
+			};
+		});
+	}
 }
 
 export function projectAgentItems(

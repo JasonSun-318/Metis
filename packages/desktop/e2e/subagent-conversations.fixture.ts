@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { expect, type Browser, type Page, type TestInfo } from "@playwright/test";
+import { type Browser, expect, type Page, type TestInfo } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	closeServer,
@@ -83,7 +83,13 @@ export interface AgentItemRecord {
 	readonly sessionId: string;
 	readonly role: "user" | "assistant" | "tool" | "system";
 	readonly state: string;
-	readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string; readonly level?: string; readonly toolCallId?: string; readonly name?: string }>;
+	readonly content: ReadonlyArray<{
+		readonly type: string;
+		readonly text?: string;
+		readonly level?: string;
+		readonly toolCallId?: string;
+		readonly name?: string;
+	}>;
 	readonly origin?: { readonly kind: string; readonly sessionId?: string };
 	readonly agentMessageId?: string;
 	readonly agentTaskId?: string;
@@ -168,7 +174,9 @@ export interface SubagentModelMessagePayload {
 	readonly model?: string;
 	readonly messages?: readonly SubagentModelMessage[];
 	readonly instructions?: string;
-	readonly input?: ReadonlyArray<SubagentModelMessage & { readonly type?: string; readonly name?: string; readonly output?: string }>;
+	readonly input?: ReadonlyArray<
+		SubagentModelMessage & { readonly type?: string; readonly name?: string; readonly output?: string }
+	>;
 	readonly tools?: ReadonlyArray<{ readonly name?: string; readonly function?: { readonly name?: string } }>;
 }
 
@@ -323,7 +331,11 @@ async function writeProviderConfig(
 		),
 		writeFile(
 			path.join(agentDir, "settings.json"),
-			JSON.stringify({ defaultProvider: input.providerId, defaultModel: input.modelId, retry: { enabled: false } }, null, 2),
+			JSON.stringify(
+				{ defaultProvider: input.providerId, defaultModel: input.modelId, retry: { enabled: false } },
+				null,
+				2,
+			),
 			{ mode: 0o600 },
 		),
 	]);
@@ -359,9 +371,13 @@ export async function createSubagentEnvironment(input: {
 	);
 	await writeProviderConfig(environment.agentDir, input);
 	if (input.credential !== undefined)
-		await writeFile(path.join(environment.agentDir, "auth.json"), JSON.stringify({ [input.providerId]: input.credential }), {
-			mode: 0o600,
-		});
+		await writeFile(
+			path.join(environment.agentDir, "auth.json"),
+			JSON.stringify({ [input.providerId]: input.credential }),
+			{
+				mode: 0o600,
+			},
+		);
 	return environment;
 }
 
@@ -403,14 +419,21 @@ export async function nativeWindowBounds(app: RunningSubagentApp, bounds?: { wid
 	if (!pid || !Number.isInteger(pid)) throw new Error("Missing isolated app PID");
 	if (bounds && (!Number.isInteger(bounds.width) || !Number.isInteger(bounds.height)))
 		throw new Error("Expected integer native window dimensions");
-	const { stdout } = await promisify(execFile)("osascript", ["-e", `
+	const { stdout } = await promisify(execFile)(
+		"osascript",
+		[
+			"-e",
+			`
 		tell application "System Events"
 			tell first application process whose unix id is ${pid}
 				${bounds ? `set size of front window to {${bounds.width}, ${bounds.height}}` : ""}
 				get size of front window
 			end tell
 		end tell
-	`], { timeout: 10_000 });
+	`,
+		],
+		{ timeout: 10_000 },
+	);
 	const [width, height] = stdout.trim().split(",").map(Number);
 	if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error(`Invalid native window size: ${stdout}`);
 	return { width: width!, height: height! };
@@ -448,7 +471,10 @@ export async function upsertSubagentRole(
 ): Promise<void> {
 	await page.evaluate(async (type) => {
 		const api = (globalThis as unknown as DesktopGlobals).metis;
-		await api.upsertAgentType({ requestId: crypto.randomUUID(), type: { ...type, allowedTools: [...type.allowedTools] } });
+		await api.upsertAgentType({
+			requestId: crypto.randomUUID(),
+			type: { ...type, allowedTools: [...type.allowedTools] },
+		});
 	}, role);
 }
 
@@ -492,7 +518,8 @@ export async function createSubagentSession(
 	await page.reload({ waitUntil: "domcontentloaded", timeout: 20_000 });
 	await waitForServerReady(page);
 	const trust = page.getByRole("heading", { name: "Trust this project?", exact: true });
-	if (await trust.isVisible().catch(() => false)) await page.getByRole("button", { name: "Trust", exact: true }).click();
+	if (await trust.isVisible().catch(() => false))
+		await page.getByRole("button", { name: "Trust", exact: true }).click();
 	if (mode === "code") await page.getByRole("button", { name: "Code", exact: true }).click();
 	await expect(page.locator(`[data-active-session-id="${created}"]`)).toBeVisible();
 	return created;
@@ -638,15 +665,15 @@ export async function createSubagentModelServer(): Promise<SubagentModelServer> 
 				modelText(response, record.model, "Subagent fixture task");
 				return;
 			}
-				if (!isChild && userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure)) {
-					response.writeHead(503, { "content-type": "application/json" });
-					response.end(JSON.stringify({ error: { message: "Fixture provider unavailable (no sensitive data)." } }));
-					return;
-				}
-				if (!isChild && userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerRecovery)) {
-					modelText(response, record.model, "provider-recovery-complete");
-					return;
-				}
+			if (!isChild && userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerFailure)) {
+				response.writeHead(503, { "content-type": "application/json" });
+				response.end(JSON.stringify({ error: { message: "Fixture provider unavailable (no sensitive data)." } }));
+				return;
+			}
+			if (!isChild && userTexts.at(-1)?.includes(SUBAGENT_FIXTURE.providerRecovery)) {
+				modelText(response, record.model, "provider-recovery-complete");
+				return;
+			}
 			if (isChild) {
 				respondChild(record, userTexts, response);
 				return;
@@ -665,11 +692,7 @@ export async function createSubagentModelServer(): Promise<SubagentModelServer> 
 	};
 }
 
-function respondChild(
-	request: SubagentModelRequest,
-	userTexts: readonly string[],
-	response: ServerResponse,
-): void {
+function respondChild(request: SubagentModelRequest, userTexts: readonly string[], response: ServerResponse): void {
 	const model = request.model;
 	const correction = userTexts.find((text) => text.includes("CORRECTION-ALPHA"));
 	const hasAssistant = request.messages.some((message) => message.role === "assistant");
@@ -711,15 +734,13 @@ function respondChild(
 	modelText(
 		response,
 		model,
-		request.agentName === SUBAGENT_FIXTURE.alphaName ? "child-final alpha | no-correction" : "child-final beta | complete",
+		request.agentName === SUBAGENT_FIXTURE.alphaName
+			? "child-final alpha | no-correction"
+			: "child-final beta | complete",
 	);
 }
 
-function respondParent(
-	request: SubagentModelRequest,
-	userTexts: readonly string[],
-	response: ServerResponse,
-): void {
+function respondParent(request: SubagentModelRequest, userTexts: readonly string[], response: ServerResponse): void {
 	const model = request.model;
 	const start = userTexts.some((text) => text.includes(SUBAGENT_FIXTURE.start));
 	const stop = userTexts.some((text) => text.includes(SUBAGENT_FIXTURE.stop));
@@ -806,11 +827,7 @@ export function modelRequestSummary(server: Pick<SubagentModelServer, "requests"
 	}));
 }
 
-export async function saveSubagentEvidence(
-	testInfo: TestInfo,
-	name: string,
-	value: unknown,
-): Promise<void> {
+export async function saveSubagentEvidence(testInfo: TestInfo, name: string, value: unknown): Promise<void> {
 	await writeFile(testInfo.outputPath(name), JSON.stringify(value, null, 2));
 }
 

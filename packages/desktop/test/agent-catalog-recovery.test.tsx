@@ -144,6 +144,33 @@ afterEach(async () => {
 });
 
 describe("useAgentCatalog recovery", () => {
+	it("shares one API listener across roots, routes updates and releases it after the last consumer", async () => {
+		const { api, emit, listeners } = setup();
+		api.listAgents.mockImplementation(async ({ sessionId }) => ({
+			agents: [agent(CHILD, sessionId)],
+			nextAfterAgentId: null,
+		}));
+		const mounted = mount(api, [{ label: "first" }, { label: "second", sessionId: OTHER_ROOT }]);
+		await mounted.render();
+		await settle();
+		expect(api.subscribe).toHaveBeenCalledTimes(1);
+		expect(listeners.size).toBe(1);
+		await act(async () =>
+			emit(connection([{ type: "agent/updated", sessionId: OTHER_ROOT, agent: agent(CHILD, OTHER_ROOT, "done") }])),
+		);
+		expect(observed.get("first")?.agents[0]?.status).toBe("running");
+		expect(observed.get("second")?.agents[0]?.status).toBe("done");
+		api.listAgents.mockClear();
+		await act(async () => emit(connection([], "epoch-2")));
+		await settle();
+		expect(api.listAgents).toHaveBeenCalledTimes(2);
+		await mounted.render([{ label: "second", sessionId: OTHER_ROOT }]);
+		await settle();
+		expect(listeners.size).toBe(1);
+		await mounted.render([]);
+		await settle();
+		expect(listeners.size).toBe(0);
+	});
 	it("shares one catalog between consumers and converges both on reload", async () => {
 		const { api } = setup();
 		const mounted = await mount(api, [{ label: "body" }, { label: "sidebar" }]);
@@ -318,4 +345,47 @@ it("keeps known activity when a recovery catalog contains unreadable entries", a
 	await act(async () => observed.get("body")?.reload());
 	await settle();
 	expect(observed.get("body")?.agents[0]?.status).toBe("done");
+});
+
+it("removes a live archived branch and its descendants instead of promoting orphan rows", async () => {
+	const { api, emit } = setup();
+	const child = { ...agent(), status: "done" as const };
+	const grandchild = {
+		...agent("44444444-4444-4444-8444-444444444444"),
+		status: "done" as const,
+		parentSessionId: CHILD,
+		depth: 2,
+		agentPath: [CHILD, "44444444-4444-4444-8444-444444444444"],
+	};
+	api.listAgents.mockResolvedValue({ agents: [child, grandchild], nextAfterAgentId: null });
+	const mounted = mount(api);
+	await mounted.render();
+	await settle();
+	expect(observed.get("body")?.agents).toHaveLength(2);
+	await act(async () =>
+		emit(
+			connection([
+				{
+					type: "agent/updated",
+					sessionId: ROOT,
+					agent: { ...child, archived: true, updatedAt: "2026-10-27T00:00:00Z" },
+				},
+			]),
+		),
+	);
+	expect(observed.get("body")?.agents).toEqual([]);
+	await act(async () =>
+		emit(
+			connection([
+				{
+					type: "agent/updated",
+					sessionId: ROOT,
+					agent: { ...grandchild, name: "Late update", updatedAt: "2026-10-28T00:00:00Z" },
+				},
+			]),
+		),
+	);
+	expect(observed.get("body")?.agents).toEqual([]);
+	await act(async () => emit(connection([{ type: "agent/updated", sessionId: ROOT, agent: child }])));
+	expect(observed.get("body")?.agents).toEqual([]);
 });

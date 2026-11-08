@@ -1,13 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-	retryEvents,
-	retryFixture,
-	RETRY_CHILD,
-	RETRY_SUCCESS,
-	rootRetrySnapshot,
-	observeRetryEvents,
-	type RetryScenario,
-} from "./subagent-model-retry.fixture.ts";
+import { waitForServerReady } from "./packaged-app-harness.ts";
 import {
 	closeSubagentApp,
 	createSubagentSession,
@@ -19,7 +11,15 @@ import {
 	saveSubagentEvidence,
 	sendParentPrompt,
 } from "./subagent-conversations.fixture.ts";
-import { waitForServerReady } from "./packaged-app-harness.ts";
+import {
+	observeRetryEvents,
+	RETRY_CHILD,
+	RETRY_SUCCESS,
+	type RetryScenario,
+	retryEvents,
+	retryFixture,
+	rootRetrySnapshot,
+} from "./subagent-model-retry.fixture.ts";
 
 const cases: readonly ["chat" | "code", RetryScenario][] = [
 	["chat", "recover"],
@@ -31,7 +31,8 @@ const cases: readonly ["chat" | "code", RetryScenario][] = [
 	["chat", "timeout"],
 	["code", "child"],
 ];
-for (const [mode, scenario] of cases)
+for (const [mode, scenario] of cases) {
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructured fixture arguments even when no fixture is used.
 	test(`${mode}: model retry ${scenario}`, async ({}, testInfo) => {
 		test.setTimeout(90_000);
 		const fixture = await retryFixture(scenario);
@@ -47,10 +48,9 @@ for (const [mode, scenario] of cases)
 			if (scenario === "child") {
 				await expect.poll(async () => (await listSubagents(page, sessionId)).length).toBe(1);
 				await openAgentConversation(page, RETRY_CHILD);
-				await expect(page.locator(".agent-conversation:visible .turn-runtime-status .turn-runtime-activity")).toHaveAttribute(
-					"aria-label",
-					/Retrying \([12]\/5\)/,
-				);
+				await expect(
+					page.locator(".agent-conversation:visible .turn-runtime-status .turn-runtime-activity"),
+				).toHaveAttribute("aria-label", /Retrying \([12]\/5\)/);
 				await expect(page.locator(".agent-conversation:visible .notice-error")).toHaveCount(0);
 				await expect
 					.poll(async () => (await listSubagents(page, sessionId))[0]?.status, { timeout: 20_000 })
@@ -131,3 +131,4 @@ for (const [mode, scenario] of cases)
 			await removeSubagentEnvironment(fixture.environment);
 		}
 	});
+}

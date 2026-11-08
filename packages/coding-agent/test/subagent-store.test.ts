@@ -56,6 +56,44 @@ function config(
 }
 
 describe("AgentStore", () => {
+	it("persists a cold display rename without changing task, input, archive or identity data", () => {
+		const { root, agentDir, parent, store } = setup();
+		const { config: agentConfig, taskId } = config(root);
+		store.create(agentConfig, [], taskId);
+		store.appendTaskState(agentConfig.agentId, { taskId, status: "done", finalMessage: "complete" });
+		store.setArchived(agentConfig.agentId, true);
+		const before = store.load(agentConfig.agentId);
+		const renamed = store.setName(agentConfig.agentId, "已校验的工作者");
+		expect(renamed).toMatchObject({
+			name: "已校验的工作者",
+			config: { name: "已校验的工作者", agentId: agentConfig.agentId },
+			archived: true,
+			tasks: before.tasks,
+			inputs: before.inputs,
+			header: before.header,
+		});
+		const reopened = new AgentStore(parent, agentDir);
+		expect(reopened.load(agentConfig.agentId).name).toBe("已校验的工作者");
+		const entries = reopened.readJournal(agentConfig.agentId).length;
+		reopened.setName(agentConfig.agentId, "已校验的工作者");
+		expect(reopened.readJournal(agentConfig.agentId)).toHaveLength(entries);
+		parent.close();
+	});
+
+	it("rejects invalid and duplicate names without appending a rename", () => {
+		const { root, parent, store } = setup();
+		const first = config(root);
+		store.create(first.config, [], first.taskId);
+		const second = config(root, { agentId: "agent-2", name: "other" });
+		store.create(second.config, [], second.taskId);
+		for (const name of ["", " padded ", "line\nbreak", "x".repeat(129), "other"]) {
+			expect(() => store.setName(first.config.agentId, name)).toThrow();
+		}
+		expect(store.load(first.config.agentId).name).toBe(first.config.name);
+		expect(store.readJournal(first.config.agentId).some((entry) => entry.type === "session_info")).toBe(false);
+		parent.close();
+	});
+
 	it("preserves the legacy static agent ID factory", () => {
 		const first = AgentStore.createAgentId();
 		const second = AgentStore.createAgentId();
