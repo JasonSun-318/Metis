@@ -422,10 +422,10 @@ function typeReferenceSymbols(checker, node, visitSymbol) {
 // to delete. Public entrypoint exports and types reachable from their signatures are
 // protected. Categories describe the strongest remaining reference evidence. Computed
 // dynamic access is reported as coverage uncertainty rather than treated as unused.
-export function scanDeadExports(rootInput) {
+export function scanDeadExports(rootInput, context) {
 	const root = resolve(rootInput);
 	const diagnostics = [];
-	const workspace = workspaceProgram(root);
+	const workspace = context?.workspace ?? workspaceProgram(root);
 	const evidenceFiles = evidenceSourceFiles(root);
 	const rootNames = [...new Set([...workspace.files, ...evidenceFiles])].sort();
 	const options = { ...workspace.options, allowJs: true, checkJs: false, noEmit: true };

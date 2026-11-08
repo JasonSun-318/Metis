@@ -7,6 +7,11 @@ count; asynchronous `import()` calls do not. The baseline permits existing cycli
 edges to disappear, but rejects new cyclic edges, including inside an existing
 strongly connected component. It does not attempt to remove existing cycles.
 
+`npm run check:structure` runs this check, the public API surface check and the
+advisory dead-export report from one shared in-memory program, which avoids
+building the same TypeScript program three times. The standalone commands remain
+available for focused runs.
+
 `npm run check:public-api` checks non-private ESM packages' `main`, `types`, conditional
 export maps (including their resolution order), and value/type export names for
 each TypeScript entrypoint. Wildcard subpaths are expanded, and curated surfaces
@@ -32,6 +37,10 @@ repository root, then review and commit its diff together with that change:
 node scripts/check-runtime-cycles.mjs --update
 node scripts/check-public-api.mjs --update
 ```
+
+`node scripts/check-structure.mjs --update` refreshes the runtime-cycle, public
+API and dead-export baselines in one pass. Prefer the per-check commands when a
+change intentionally touches only one baseline.
 
 The initial baselines were captured from `694f3f17` before the helper extraction.
 

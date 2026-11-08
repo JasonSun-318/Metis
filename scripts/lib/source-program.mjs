@@ -85,3 +85,14 @@ export function emittedProgram(workspace, emitted) {
 	};
 	return ts.createProgram(workspace.files, { ...workspace.options, noEmit: true }, host);
 }
+
+// The structural checks (runtime cycles, public API surface, dead exports) each
+// need one or more in-memory programs. Building them once and sharing them in a
+// single process removes the repeated parse/emit work; standalone checker
+// invocations still build only the programs they consume.
+export function structurePrograms(root) {
+	const workspace = workspaceProgram(root);
+	const emitted = emitSources(workspace);
+	const runtime = emittedProgram(workspace, emitted);
+	return { workspace, emitted, runtime };
+}

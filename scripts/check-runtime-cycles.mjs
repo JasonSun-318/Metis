@@ -46,9 +46,9 @@ export function newCycleEdges(actual, baseline) {
 	return actual.filter((edge) => !allowed.has(JSON.stringify(edge)));
 }
 
-export function runtimeCycleSnapshot(root) {
-	const workspace = workspaceProgram(root);
-	const emitted = emitSources(workspace);
+export function runtimeCycleSnapshot(root, context) {
+	const workspace = context?.workspace ?? workspaceProgram(root);
+	const emitted = context?.emitted ?? emitSources(workspace);
 	const graph = new Map([...emitted.keys()].map((file) => [portablePath(workspace.root, file), new Set()]));
 	const cache = ts.createModuleResolutionCache(workspace.root, (path) => path, workspace.options);
 	for (const [file, text] of emitted) {

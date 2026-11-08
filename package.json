@@ -10,9 +10,10 @@
 	"scripts": {
 		"clean": "npm run clean --workspaces",
 		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build && cd ../app-protocol && npm run build && cd ../app-server && npm run build",
-		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:boundaries && npm run check:cycles && npm run check:public-api && npm run check:dup && npm run check:unused-deps && npm run check:dead-exports && npm run check:type-debt && npm run check:presentation-boundaries && npm run check:scripts && npm run check:generated --workspace @metis/app-protocol && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
+		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:boundaries && npm run check:structure && npm run check:dup && npm run check:unused-deps && npm run check:type-debt && npm run check:presentation-boundaries && npm run check:scripts && npm run check:generated --workspace @metis/app-protocol && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
 		"check:biome": "biome check --error-on-warnings .",
 		"check:fast": "node scripts/check-fast.mjs",
+		"check:structure": "node scripts/check-structure.mjs",
 		"check:types": "tsgo --noEmit",
 		"check:desktop": "npm run check:types --workspace @metis/desktop",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",

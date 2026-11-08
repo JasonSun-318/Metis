@@ -56,10 +56,10 @@ function surface(program, runtime, file) {
 	return { values, types };
 }
 
-export function publicApiSnapshot(root) {
-	const workspace = workspaceProgram(root);
-	const emitted = emitSources(workspace);
-	const runtime = emittedProgram(workspace, emitted);
+export function publicApiSnapshot(root, context) {
+	const workspace = context?.workspace ?? workspaceProgram(root);
+	const emitted = context?.emitted ?? emitSources(workspace);
+	const runtime = context?.runtime ?? emittedProgram(workspace, emitted);
 	const packages = {};
 	for (const pkg of workspace.packages.filter((pkg) => !pkg.manifest.private)) {
 		const { manifest, directory } = pkg;
