@@ -2,6 +2,7 @@ import type { ItemContentBlockView } from "@metis/app-protocol";
 import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GitFork, ImageSquare } from "../icons.tsx";
+import { AgentReportMessage } from "./AgentReportMessage.tsx";
 import { ChatExecutionChain } from "./ChatExecutionChain.tsx";
 import {
 	ConversationInteractionContext,
@@ -10,6 +11,7 @@ import {
 } from "./ConversationInteractionCards.tsx";
 import { CopyFeedbackIcon } from "./CopyFeedbackIcon.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
+import { GeneratedImageResult } from "./GeneratedImageResult.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
@@ -108,6 +110,16 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	return (
 		<>
 			{segments.map((segment, index) => {
+				if (segment.type === "image_generation")
+					return (
+						<GeneratedImageResult
+							key={segment.toolCallId}
+							call={segment.call}
+							result={segment.result}
+							sessionId={items[0]!.sessionId}
+							running={runtimeRunning}
+						/>
+					);
 				if (segment.type === "notice")
 					return (
 						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript notice segments are append-only, like the neighboring streamed content segments. */
@@ -115,6 +127,8 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							<StaticBlock block={segment.block} />
 						</div>
 					);
+				if (segment.type === "system" && segment.item.agentReport)
+					return <AgentReportMessage key={segment.item.itemId} item={segment.item} />;
 				if (segment.type === "system")
 					return (
 						<div className="turn-intermediate" data-quote-item={segment.item.itemId} key={segment.item.itemId}>

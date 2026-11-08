@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
 	DurableImageRefView,
+	ImageGenerationView,
 	ItemContentBlockView,
 	ItemUsageView,
 	ItemView,
@@ -13,6 +14,7 @@ import { AskUserAnswersSchema, type PermissionDecisionView, PermissionDecisionVi
 import {
 	formatSessionAttachmentDisplayText,
 	parseDeliverFileDetails,
+	parseImageGenerationDetails,
 	type StoredPlan,
 	splitSessionAttachmentPrompt,
 	type ThreadGoal,
@@ -423,6 +425,52 @@ export function projectDeliveredFileFromToolResult(
 	};
 }
 
+function projectImageGeneration(
+	message: Record<string, unknown>,
+	output: string,
+	deliveredFiles: ReadonlyMap<string, SessionDeliveredFileView> = new Map(),
+): ImageGenerationView | undefined {
+	if (message.toolName !== "image_generate") return undefined;
+	const details = parseImageGenerationDetails(message.details);
+	if (details) {
+		return {
+			status: details.status,
+			requestedCount: details.requestedCount,
+			images: details.images.map((image) => {
+				const current = deliveredFiles.get(image.fileId);
+				return {
+					fileId: image.fileId,
+					name: image.name,
+					byteLength: current?.byteLength ?? image.byteLength,
+					deliveredAt: image.deliveredAt,
+					availability: current?.availability ?? "available",
+					mediaType: image.mediaType,
+					...(image.width ? { width: image.width } : {}),
+					...(image.height ? { height: image.height } : {}),
+				};
+			}),
+			...(details.aspectRatio ? { aspectRatio: details.aspectRatio } : {}),
+			...(details.message
+				? { message: boundedText(details.message.replace(/^IMAGE_[A-Z_]+:\s*/, "").trim(), 2_000) }
+				: {}),
+		};
+	}
+	if (message.isError !== true) return undefined;
+	const errorCode = output.match(/\b(IMAGE_[A-Z_]+):/)?.[1];
+	return {
+		status:
+			errorCode === "IMAGE_MODEL_NOT_CONFIGURED"
+				? "unconfigured"
+				: errorCode === "IMAGE_GENERATION_CANCELLED"
+					? "cancelled"
+					: "failed",
+		requestedCount: 1,
+		images: [],
+		message: boundedText(output.replace(/^IMAGE_[A-Z_]+:\s*/, "").trim(), 2_000),
+		...(errorCode ? { errorCode } : {}),
+	};
+}
+
 export function projectPlanView(plan: StoredPlan): PlanView {
 	return {
 		planId: opaqueId(plan.planId, "plan"),
@@ -568,6 +616,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			message.toolName === "deliver_file" && message.isError !== true
 				? projectDeliveredFileFromToolResult(message, deliveredFiles)
 				: undefined;
+		const imageGeneration = projectImageGeneration(message, output, deliveredFiles);
 		return {
 			itemId,
 			sessionId,
@@ -583,6 +632,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 					output: boundedText(output, MAX_ITEM_TEXT_BYTES),
 					...(images.length > 0 ? { images } : {}),
 					...(deliveredFile ? { deliveredFile } : {}),
+					...(imageGeneration ? { imageGeneration } : {}),
 					...(codeChanges ? { codeChanges } : {}),
 					...(tasks === undefined ? {} : { tasks }),
 					...(userAnswers === undefined ? {} : { userAnswers }),

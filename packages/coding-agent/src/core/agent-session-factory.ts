@@ -23,7 +23,7 @@ import type { CreateAgentSessionOptions, CreateAgentSessionResult, PermissionReq
 import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
-import { SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
+import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import { getDefaultToolNames } from "./tools/index.ts";
 import { UNATTENDED_TOOL_NAMES } from "./unattended-execution.ts";
@@ -285,7 +285,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		const defaultActiveToolNames = getDefaultToolNames({
-			visionEnabled: settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID),
 			webSearchEnabled: settingsManager.getWebSearchSettings().enabled,
 			isSubagent: suppliedSessionManager?.getHeader()?.agent !== undefined,
 		});
@@ -310,12 +309,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				mcpManager ? restoredMcpToolNames(sessionManager, mcpManager) : [],
 			)
 			.filter((name) => !excludedToolNameSet?.has(name))
-			.filter((name) => name !== "web_search" || settingsManager.getWebSearchSettings().enabled)
-			.filter(
-				(name) =>
-					name !== "describe_image" ||
-					(settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID)),
-			);
+			.filter((name) => name !== "web_search" || settingsManager.getWebSearchSettings().enabled);
 
 		let agent: Agent;
 

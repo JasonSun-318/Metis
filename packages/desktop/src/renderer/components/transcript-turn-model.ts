@@ -41,7 +41,15 @@ const INTERNAL_TOOL_NAMES = new Set([
 const PREVIEW_LINES = 10;
 const PREVIEW_CHARS = 2_000;
 
+export interface ImageGenerationSegment {
+	readonly type: "image_generation";
+	readonly toolCallId: string;
+	readonly call?: ToolCallBlock;
+	readonly result?: ToolResultBlock;
+}
+
 export type CodeTranscriptSegment =
+	| ImageGenerationSegment
 	| { readonly type: "system"; readonly item: ItemView }
 	| {
 			readonly type: "user";
@@ -72,6 +80,7 @@ export interface CodeTurnPresentation {
 }
 
 export type ChatTranscriptSegment =
+	| ImageGenerationSegment
 	| { readonly type: "system"; readonly item: ItemView }
 	| {
 			readonly type: "notice";
@@ -109,9 +118,9 @@ function textBlocks(item: ItemView): TextBlock[] {
 	return item.content.filter((block): block is TextBlock => block.type === "text");
 }
 
-/** Mailbox events stay in history/model context, but are not conversation messages. */
+/** Receipts stay internal; named reports are visible messages from a subagent. */
 export function isInternalAgentCoordinationItem(item: ItemView): boolean {
-	return item.role === "system" && item.origin?.kind === "system" && Boolean(item.agentTargetId);
+	return item.role === "system" && item.origin?.kind === "system" && Boolean(item.agentTargetId) && !item.agentReport;
 }
 
 /** Visible markdown/plain text of a message, concatenated in block order. */
@@ -703,6 +712,19 @@ export function buildTurnPresentation(sourceItems: readonly ItemView[]): TurnPre
 		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		for (const block of item.content) {
+			if ((block.type === "tool_call" || block.type === "tool_result") && block.name === "image_generate") {
+				if (block.type === "tool_call" || !callIds.has(block.toolCallId)) {
+					flushPhase();
+					segments.push({
+						type: "image_generation",
+						toolCallId: block.toolCallId,
+						...(block.type === "tool_call"
+							? { call: block, result: results.get(block.toolCallId) }
+							: { result: block }),
+					});
+				}
+				continue;
+			}
 			if (block.type === "notice") {
 				if (itemIndex !== finalIndex) {
 					flushPhase();
@@ -812,10 +834,24 @@ export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): Cod
 			continue;
 		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
-		const hasToolCall = toolCalls(item).length > 0;
+		const hasToolCall = toolCalls(item).length > 0 && !toolCalls(item).some((call) => call.name === "image_generate");
 		const answer = itemIndex === finalIndex;
 		const markdown = item.role === "assistant";
 		for (const block of item.content) {
+			if ((block.type === "tool_call" || block.type === "tool_result") && block.name === "image_generate") {
+				if (block.type === "tool_call" || !callIds.has(block.toolCallId)) {
+					flushContent();
+					flushTools();
+					segments.push({
+						type: "image_generation",
+						toolCallId: block.toolCallId,
+						...(block.type === "tool_call"
+							? { call: block, result: results.get(block.toolCallId) }
+							: { result: block }),
+					});
+				}
+				continue;
+			}
 			if (block.type === "thinking" || block.type === "compaction" || block.type === "plan") continue;
 			if (block.type === "text" && hasToolCall) continue;
 			if (block.type === "tool_call") {

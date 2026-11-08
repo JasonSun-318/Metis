@@ -2,6 +2,7 @@ import type { CodeChangesView, ItemContentBlockView } from "@metis/app-protocol"
 import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretRight, CircleNotch, GitFork, ImageSquare } from "../icons.tsx";
+import { AgentReportMessage } from "./AgentReportMessage.tsx";
 import { CodeChangesNavigationContext } from "./CodeChangesNavigationContext.ts";
 import { CodeTurnChanges } from "./CodeTurnChanges.tsx";
 import {
@@ -18,6 +19,7 @@ import {
 	textCodeChanges,
 } from "./code-change-summary.ts";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
+import { GeneratedImageResult } from "./GeneratedImageResult.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
@@ -348,6 +350,18 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	return (
 		<>
 			{segments.map((segment, segmentIndex) => {
+				if (segment.type === "image_generation")
+					return (
+						<GeneratedImageResult
+							key={segment.toolCallId}
+							call={segment.call}
+							result={segment.result}
+							sessionId={items[0]!.sessionId}
+							running={running}
+						/>
+					);
+				if (segment.type === "system" && segment.item.agentReport)
+					return <AgentReportMessage key={segment.item.itemId} item={segment.item} appearance="code" />;
 				if (segment.type === "system")
 					return (
 						<div className="code-turn-status" data-quote-item={segment.item.itemId} key={segment.item.itemId}>

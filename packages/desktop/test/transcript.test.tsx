@@ -905,7 +905,7 @@ describe("Transcript", () => {
 						hasOlder={false}
 						itemIds={entries.map((entry) => entry.itemId)}
 						itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
-						latestLabel="Jump to latest"
+						activeTurnId={TURN_ID}
 						loadingOlder={false}
 						onLoadOlder={async () => undefined}
 					/>,
@@ -929,6 +929,53 @@ describe("Transcript", () => {
 				await act(async () => render([...internal, ...turnItems, { ...internal[0]!, itemId: "new-event" }]));
 				expect(container.querySelector(".transcript-latest")).toBeNull();
 				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["chat", "code"] as const)(
+		"retains named %s reports across history loading and live updates",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const report: ItemView = {
+				...item("child-report", "system", [{ type: "text", text: "Child report body" }]),
+				turnId: undefined,
+				origin: { kind: "system", eventId: "child-report" },
+				agentTargetId: "22222222-2222-4222-8222-222222222222",
+				agentReport: { name: "Inventory", status: "done" },
+			};
+			const render = (entries: readonly ItemView[]) =>
+				root.render(
+					<Transcript
+						appearance={appearance}
+						hasOlder={false}
+						loadingOlder={false}
+						itemIds={entries.map((entry) => entry.itemId)}
+						itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+						onLoadOlder={async () => undefined}
+					/>,
+				);
+			try {
+				await act(async () => render(turnItems));
+				await act(async () => render([report, ...turnItems]));
+				expect(container.querySelectorAll("[data-agent-report]")).toHaveLength(1);
+				expect(container.querySelectorAll("[data-user-message]")).toHaveLength(1);
+				await act(async () => render([{ ...report }, ...turnItems]));
+				expect(container.querySelectorAll("[data-agent-report]")).toHaveLength(1);
+				const live = {
+					...report,
+					itemId: "new-child-report",
+					content: [{ type: "text" as const, text: "New child report" }],
+				};
+				await act(async () => render([report, ...turnItems, live]));
+				expect(container.querySelectorAll("[data-agent-report]")).toHaveLength(2);
+				expect(container.textContent).toContain("Child report body");
+				expect(container.textContent).toContain("New child report");
+				expect(container.textContent).toContain("桌面上有 file.txt。");
 			} finally {
 				await act(async () => root.unmount());
 			}

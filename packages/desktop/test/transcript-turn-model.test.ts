@@ -594,3 +594,59 @@ describe("transcript turn presentation", () => {
 		expect(messageText(items[0]!)).toBe("");
 	});
 });
+
+describe("inline image generation chronology", () => {
+	const imageCall = call("image_generate", { prompt: "a garden", count: 2 }, "running");
+	const imageResult: ToolResultBlock = {
+		...result("image_generate", "Generated 2 images"),
+		imageGeneration: { status: "completed", requestedCount: 2, images: [] },
+	};
+	for (const [name, build] of [
+		["chat", buildTurnPresentation],
+		["code", buildCodeTurnPresentation],
+	] as const) {
+		it(`${name}: keeps pretext, image, and following text in call order without generic tool duplication`, () => {
+			const input = [
+				item("before", "assistant", [{ type: "text", text: "Making a garden." }, imageCall]),
+				item("generated", "tool", [imageResult]),
+				item("after", "assistant", [{ type: "text", text: "Here are the images." }]),
+			];
+			const view = build(input);
+			expect(view.segments.map((segment) => segment.type)).toEqual(
+				name === "chat"
+					? ["intermediate", "image_generation", "answer"]
+					: ["content", "image_generation", "content"],
+			);
+			expect(view.segments[1]).toMatchObject({
+				toolCallId: imageCall.toolCallId,
+				call: imageCall,
+				result: imageResult,
+			});
+			expect(view.deliveredFiles).toEqual([]);
+			expect(build(JSON.parse(JSON.stringify(input))).segments).toEqual(view.segments);
+		});
+		it(`${name}: shows the image position before any result and keeps consecutive calls distinct`, () => {
+			const second = { ...imageCall, toolCallId: "second" };
+			const view = build([item("call", "assistant", [imageCall, second])]);
+			expect(view.segments.map((segment) => segment.type)).toEqual(["image_generation", "image_generation"]);
+			expect(view.segments[0]).toMatchObject({ call: imageCall });
+			expect(view.segments[1]).toMatchObject({ call: second });
+		});
+		it(`${name}: retains pretext above a finished image even without a final assistant reply`, () => {
+			const view = build([
+				item("before", "assistant", [{ type: "text", text: "Making a garden." }, imageCall]),
+				item("generated", "tool", [imageResult]),
+			]);
+			expect(view.segments.map((segment) => segment.type)).toEqual(
+				name === "chat" ? ["intermediate", "image_generation"] : ["content", "image_generation"],
+			);
+			expect(view.final).toBeUndefined();
+		});
+		it(`${name}: displays an orphan historical image result once`, () => {
+			const view = build([item("orphan", "tool", [imageResult])]);
+			expect(view.segments).toEqual([
+				{ type: "image_generation", toolCallId: imageCall.toolCallId, result: imageResult },
+			]);
+		});
+	}
+});

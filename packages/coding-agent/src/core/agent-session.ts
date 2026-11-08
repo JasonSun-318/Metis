@@ -127,6 +127,7 @@ import {
 	writeThreadGoal,
 } from "./goal/index.ts";
 import type { ThreadGoal } from "./goal/types.ts";
+import { IMAGE_GENERATION_AUTH_KEY } from "./image-generation/config.ts";
 import {
 	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,
@@ -222,7 +223,7 @@ import { SessionDeliveredArtifacts } from "./session-delivered-artifacts.ts";
 import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionManager } from "./session-manager.ts";
-import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
+import type { SettingsManager } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -1296,7 +1297,7 @@ export class AgentSession {
 
 	private _permissionWorkspaceRoots(toolName: string, managedWorkDir?: string): readonly string[] {
 		const roots = [...this.sessionManager.getWorkspaceRoots()];
-		if (["read", "grep", "find", "ls", "describe_image"].includes(toolName)) {
+		if (["read", "grep", "find", "ls"].includes(toolName)) {
 			roots.push(...this.resourceLoader.getSkills().skills.map(({ baseDir }) => baseDir));
 		}
 		if (toolName === "bash" && managedWorkDir) roots.push(managedWorkDir);
@@ -1380,10 +1381,9 @@ export class AgentSession {
 							// The consumed grant already binds the exact write scope and command;
 							// re-describing the action here would re-run the tool adapter.
 							if (
-								this.sessionManager.getMode() === "code" &&
-								((entry.provenance === "builtin" && ["edit", "write", "bash"].includes(tool.name)) ||
-									grant.writeRoots.length > 0 ||
-									grant.command !== undefined)
+								(entry.provenance === "builtin" && ["edit", "write", "bash"].includes(tool.name)) ||
+								grant.writeRoots.length > 0 ||
+								grant.command !== undefined
 							) {
 								return await this._codeChanges.run(
 									this._durableTurn?.turnId ?? this._codeChangeTurnId,
@@ -1975,6 +1975,9 @@ export class AgentSession {
 	private _isMicrocompactionBuiltinTool(toolName: string): boolean {
 		if (this._baseToolDefinitionsOverride) return false;
 		const active = this._toolDefinitions.get(toolName)?.definition;
+		// The retired builtin can still appear in old transcripts. A registered
+		// replacement owns its results and must not inherit builtin compaction.
+		if (toolName === "describe_image") return active === undefined;
 		const builtin = this._baseToolDefinitions.get(toolName);
 		return active !== undefined && active === builtin;
 	}
@@ -2815,7 +2818,7 @@ export class AgentSession {
 		const deliveryMessage =
 			event.type === "message_end" &&
 			event.message.role === "toolResult" &&
-			event.message.toolName === "deliver_file"
+			(event.message.toolName === "deliver_file" || event.message.toolName === "image_generate")
 				? event.message
 				: undefined;
 		const durableDelivery = deliveryMessage?.isError === false;
@@ -2912,6 +2915,8 @@ export class AgentSession {
 					throw error;
 				}
 				if (durableDelivery) {
+					if (deliveryMessage?.toolName === "image_generate")
+						this.deliveredArtifacts?.finishGeneration(deliveryMessage.toolCallId);
 					this._emit(event);
 				}
 				if (
@@ -3573,33 +3578,11 @@ export class AgentSession {
 		return this._allowedToolNames ? this._allowedToolNames.has("web_search") : this._defaultBuiltinToolsEnabled;
 	}
 
-	private _canActivateDescribeImage(): boolean {
-		if (this._excludedToolNames?.has("describe_image")) return false;
-		return this._allowedToolNames ? this._allowedToolNames.has("describe_image") : this._defaultBuiltinToolsEnabled;
-	}
-
-	private _visionServiceReady(): boolean {
-		return (
-			this.settingsManager.getVisionSettings() !== undefined &&
-			this._modelRegistry.authStorage.has(VISION_PROVIDER_ID)
-		);
-	}
-
 	private _applyWebSearchEnabled(enabled: boolean): void {
 		const names = new Set(this.getConfiguredActiveToolNames());
 		if (enabled && this._canActivateWebSearch() && this._toolRegistry.has("web_search")) names.add("web_search");
 		else names.delete("web_search");
 		this.setActiveToolsByName([...names]);
-	}
-
-	private _rebuildImageToolDefinitions(): void {
-		if (this._baseToolDefinitionsOverride) return;
-		const describeImage = createDescribeImageToolDefinition(this._cwd, {
-			getSettings: () => this.settingsManager.getVisionSettings(),
-			getApiKey: () => this._modelRegistry.authStorage.getApiKey(VISION_PROVIDER_ID, { includeFallback: false }),
-			streamSimple: (model, context, options) => this._modelRegistry.streamSimple(model, context, options),
-		});
-		this._baseToolDefinitions.set("describe_image", describeImage as ToolDefinition);
 	}
 
 	setWebSearchEnabled(enabled: boolean): void {
@@ -3621,19 +3604,6 @@ export class AgentSession {
 		}
 	}
 
-	async refreshImageToolSettings(): Promise<void> {
-		await this.settingsManager.reload();
-		this._applyImageToolSettings();
-	}
-
-	private _applyImageToolSettings(): void {
-		this._rebuildImageToolDefinitions();
-		const names = new Set(this.getConfiguredActiveToolNames());
-		if (this._visionServiceReady() && this._canActivateDescribeImage()) names.add("describe_image");
-		else names.delete("describe_image");
-		this._refreshToolRegistry({ activeToolNames: [...names] });
-	}
-
 	async prepareModelServiceSettingsRefresh(): Promise<void> {
 		// No memory runtime remains to quiesce; retained for host lifecycle symmetry.
 	}
@@ -3642,6 +3612,7 @@ export class AgentSession {
 		const reviewerProfileBefore = reviewerProfileKey(this.settingsManager.getPermissionReviewerConfig());
 		try {
 			await this.settingsManager.reload();
+			this._modelRegistry.authStorage.reload();
 			this._modelRegistry.refresh();
 			this._refreshCurrentModelFromRegistry();
 			this._applyImageToolSettings();
@@ -6389,11 +6360,22 @@ export class AgentSession {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
 					},
-					describeImage: {
-						getSettings: () => this.settingsManager.getVisionSettings(),
-						getApiKey: () =>
-							this._modelRegistry.authStorage.getApiKey(VISION_PROVIDER_ID, { includeFallback: false }),
-						streamSimple: (model, context, options) => this._modelRegistry.streamSimple(model, context, options),
+					imageGeneration: {
+						getConfig: () => this.settingsManager.getImageGenerationConfig(),
+						getApiKey: (config) => {
+							const credential = this._modelRegistry.authStorage.get(
+								config.credentialProvider ?? IMAGE_GENERATION_AUTH_KEY,
+							);
+							return credential?.type === "api_key" ? credential.key : undefined;
+						},
+						getSession: () =>
+							this._agentDir && this.deliveredArtifacts
+								? {
+										agentDir: this._agentDir,
+										sessionId: this.sessionManager.getSessionId(),
+										artifacts: this.deliveredArtifacts,
+									}
+								: undefined,
 					},
 					goal: {
 						getSession: () => this.sessionManager,
@@ -6449,9 +6431,6 @@ export class AgentSession {
 		const globallyEnabledToolNames = baseActiveToolNames.filter((name) => {
 			if (name === "web_search") {
 				return this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch();
-			}
-			if (name === "describe_image") {
-				return this._visionServiceReady() && this._canActivateDescribeImage();
 			}
 			return true;
 		});
