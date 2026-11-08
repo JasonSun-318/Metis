@@ -27,6 +27,7 @@ profiles-*/
 *~
 
 # Package specific
+/.cache/
 .npm/
 coverage/
 .nyc_output/

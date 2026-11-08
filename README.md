@@ -55,7 +55,9 @@ npm run check        # full repository gate (pre-push hook and CI)
 `npm run check` includes architecture and native TypeScript import checks, regression
 tests for the check scripts, generated protocol schema validation, dependency
 lock checks, strict source/test type checks (including desktop TSX tests and browser fixtures), and
-a browser bundle smoke check. `check:fast` keeps the staged-file subset, the
+a browser bundle smoke check. The full gate runs the independent checks in parallel (up to four jobs) and
+caches successful results for an unchanged working tree under `.cache/checks/`;
+set `METIS_CHECK_CONCURRENCY` or `METIS_CHECK_NO_CACHE=1` to control that. `check:fast` keeps the staged-file subset, the
 path-scoped desktop type check and the check-script regressions; whole-repository
 analyses such as runtime cycles, public API surfaces, duplicate/dead-export
 reports and type debt run in the full gate only. Run `npm run check:scripts` for

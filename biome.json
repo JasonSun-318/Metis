@@ -28,6 +28,8 @@
 			"scripts/check-architecture-boundaries.mjs",
 			"scripts/check-fast.mjs",
 			"scripts/check-structure.mjs",
+			"scripts/run-checks.mjs",
+			"packages/desktop/scripts/check-types.mjs",
 			"scripts/check-runtime-cycles.mjs",
 			"scripts/check-public-api.mjs",
 			"scripts/check-duplicates.mjs",
