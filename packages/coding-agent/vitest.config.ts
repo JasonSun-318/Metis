@@ -13,6 +13,9 @@ export default defineConfig({
 		environment: "node",
 		globalSetup: "./test/global-setup.ts",
 		testTimeout: 30000,
+		// Module-loading hooks occasionally exceed the 10s default when the full
+		// suite runs with a large worker pool on a shared machine.
+		hookTimeout: 30000,
 		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 		silent: "passed-only",
 		server: {
