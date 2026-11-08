@@ -1,6 +1,6 @@
 {
 	"name": "@metis/desktop",
-	"version": "0.1.9",
+	"version": "0.1.10",
 	"description": "Secure Electron desktop shell for Metis",
 	"private": true,
 	"main": ".webpack/main",
