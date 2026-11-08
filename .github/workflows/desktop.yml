@@ -135,7 +135,7 @@ jobs:
 
       - name: Run packaged E2E smoke (quick tier)
         if: runner.os != 'Linux' && env.METIS_CI_E2E == 'smoke'
-        run: npm run test:e2e --workspace @metis/desktop -- session-stream.spec.ts permission-performance.spec.ts compaction-lifecycle.spec.ts
+        run: npm run test:e2e --workspace @metis/desktop -- session-stream.spec.ts permission-performance.spec.ts
 
       - name: Run packaged E2E (full tier)
         if: runner.os != 'Linux' && env.METIS_CI_E2E == 'full'
