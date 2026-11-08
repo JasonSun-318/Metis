@@ -9,6 +9,7 @@ import { dispatchModelRequest, isModelRequest } from "../src/dispatch/model.ts";
 import { dispatchPermissionRequest, isPermissionRequest } from "../src/dispatch/permission.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "../src/dispatch/personalization.ts";
 import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
+import { dispatchPluginsRequest, isPluginsRequest } from "../src/dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
@@ -18,6 +19,7 @@ import type { ModelSettingsService } from "../src/model-settings.ts";
 import type { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
 import type { PermissionRulesService } from "../src/permission-rules.ts";
 import type { PersonalizationService } from "../src/personalization.ts";
+import type { PluginService } from "../src/plugins.ts";
 import type { ProfileSummaryCache } from "../src/profile-summary.ts";
 import type { SessionRegistry } from "../src/session-registry.ts";
 import type { SessionRef } from "../src/session-runtime-host.ts";
@@ -230,6 +232,33 @@ function permissionContext() {
 	};
 }
 
+function pluginsContext() {
+	const installedPlugin = {
+		plugin: { id: "p1", activation: "not-running", runtimeErrors: [] },
+		activation: "not-running",
+		runtimeErrors: [],
+	};
+	const plugins = {
+		agentDir: "/nonexistent-metis-plugins-fixture",
+		listMarkets: vi.fn(() => ({ markets: [] })),
+		addMarket: vi.fn(async (input: unknown) => input),
+		selectMarket: vi.fn(async (input: unknown) => input),
+		removeMarket: vi.fn(async (input: unknown) => input),
+		refreshMarket: vi.fn(async () => ({})),
+		getCatalog: vi.fn(async () => ({ entries: [] })),
+		inspectPlugin: vi.fn(async () => ({ plugin: {} })),
+		install: vi.fn(async () => ({ plugin: installedPlugin })),
+		listInstalled: vi.fn(() => ({ plugins: [] })),
+		getInstalled: vi.fn(() => ({ plugin: installedPlugin })),
+		setEnabled: vi.fn(() => ({ plugin: installedPlugin })),
+		remove: vi.fn(() => ({ removed: true })),
+		inspectUpdate: vi.fn(async () => ({ update: null })),
+		update: vi.fn(async () => ({ plugin: installedPlugin })),
+	} as unknown as PluginService;
+	const registry = { pluginRuntimeStatuses: vi.fn(async () => []) } as unknown as SessionRegistry;
+	return { plugins, registry, context: { plugins, registry, ...replayTracker() } };
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -296,6 +325,12 @@ const DOMAINS = [
 		recognized: isPermissionRequest,
 		dispatch: dispatchPermissionRequest,
 		context: permissionContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("plugin/"),
+		recognized: isPluginsRequest,
+		dispatch: dispatchPluginsRequest,
+		context: pluginsContext,
 	},
 ] as const;
 
@@ -434,5 +469,15 @@ describe("dispatcher domain matrix", () => {
 		await dispatchPermissionRequest(request("permission/rules/clear", { sessionId: "s1" }), permission.context);
 		expect(permission.context.mutations).toEqual(["permission/auto/update", "permission/rules/clear"]);
 		expect(permission.registry.notifyOpenPermissionRulesChanged).toHaveBeenCalledOnce();
+	});
+	it("routes plugin mutations through replay and merges activation state", async () => {
+		const plugins = pluginsContext();
+		await dispatchPluginsRequest(request("plugin/market/add", { url: "https://example.test" }), plugins.context);
+		await dispatchPluginsRequest(request("plugin/install", { pluginId: "p1" }), plugins.context);
+		await dispatchPluginsRequest(request("plugin/list"), plugins.context);
+		expect(plugins.plugins.addMarket).toHaveBeenCalledWith({ url: "https://example.test" });
+		expect(plugins.plugins.install).toHaveBeenCalledWith({ pluginId: "p1" });
+		expect(plugins.plugins.listInstalled).toHaveBeenCalledOnce();
+		expect(plugins.context.mutations).toEqual(["plugin/market/add", "plugin/install"]);
 	});
 });

@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 import { type ClientParams, type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
 import {
 	type ModelRegistry,
-	type PluginSnapshot,
-	readPluginSnapshot,
 	resolveScheduleCreateTarget,
 	type ScheduleCreateTarget,
 	ScheduleError,
@@ -22,6 +20,7 @@ import { dispatchModelRequest, isModelRequest } from "./dispatch/model.ts";
 import { dispatchPermissionRequest, isPermissionRequest } from "./dispatch/permission.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./dispatch/personalization.ts";
 import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
+import { dispatchPluginsRequest, isPluginsRequest } from "./dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "./dispatch/skills.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "./dispatch/web-search.ts";
@@ -34,7 +33,7 @@ import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
-import type { PluginActivationStatus, PluginInstalledView, PluginService } from "./plugins.ts";
+import type { PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -104,27 +103,6 @@ function validatePersistedFork(
 		);
 	});
 	if (markers.length !== 1) throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
-}
-
-type PluginRuntimeError = { readonly componentId: string; readonly message: string };
-
-interface PluginActivationState {
-	readonly activation: PluginActivationStatus;
-	readonly runtimeErrors: PluginRuntimeError[];
-}
-
-function withPluginActivationState<T extends { plugin: PluginInstalledView; activation: PluginActivationStatus }>(
-	result: T,
-	state: PluginActivationState,
-): T {
-	const runtimeErrors = [
-		...state.runtimeErrors,
-		...result.plugin.runtimeErrors.filter(
-			(error) => !state.runtimeErrors.some((existing) => existing.componentId === error.componentId),
-		),
-	];
-	const activation = result.plugin.activation === "failed" ? "failed" : state.activation;
-	return { ...result, activation, plugin: { ...result.plugin, activation, runtimeErrors } };
 }
 
 export class Dispatcher {
@@ -499,44 +477,6 @@ export class Dispatcher {
 		}
 	}
 
-	private async getPluginActivationState(pluginId?: string): Promise<PluginActivationState> {
-		const statuses = await this.registry.pluginRuntimeStatuses();
-		let snapshot: PluginSnapshot;
-		try {
-			snapshot = readPluginSnapshot(this.plugins.agentDir);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			return {
-				activation: "failed",
-				runtimeErrors: [{ componentId: "snapshot", message }],
-			};
-		}
-		const runtimeErrors: PluginRuntimeError[] = [];
-		for (const s of statuses) {
-			if (s.error) {
-				runtimeErrors.push({ componentId: s.sessionId, message: s.error });
-			}
-		}
-		for (const diagnostic of snapshot.diagnostics ?? []) {
-			if (
-				(diagnostic.code !== "PACKAGE_MISSING" && diagnostic.code !== "PACKAGE_CORRUPTED") ||
-				(pluginId !== undefined && diagnostic.componentId !== pluginId)
-			)
-				continue;
-			runtimeErrors.push({ componentId: diagnostic.componentId, message: diagnostic.message });
-		}
-		const activation: PluginActivationStatus =
-			runtimeErrors.length > 0
-				? "failed"
-				: statuses.length === 0
-					? "not-running"
-					: statuses.every((s) => s.appliedFingerprint === snapshot.fingerprint)
-						? "applied"
-						: "next-turn";
-
-		return { activation, runtimeErrors };
-	}
-
 	async dispatch(request: ClientRpcRequest, connection: ConnectionState): Promise<unknown> {
 		if (isKnowledgeRequest(request)) {
 			return await dispatchKnowledgeRequest(request, {
@@ -623,6 +563,13 @@ export class Dispatcher {
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 			});
 		}
+		if (isPluginsRequest(request)) {
+			return await dispatchPluginsRequest(request, {
+				plugins: this.plugins,
+				registry: this.registry,
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -656,52 +603,6 @@ export class Dispatcher {
 						const libraries = this.knowledge.libraries(request.params.libraryIds);
 						return runtime.setKnowledgeLinks(libraries);
 					});
-				});
-			case "plugin/market/list":
-				return this.plugins.listMarkets();
-			case "plugin/market/add":
-				return await this.replayMutation(request, async () => this.plugins.addMarket(request.params));
-			case "plugin/market/select":
-				return await this.replayMutation(request, async () => this.plugins.selectMarket(request.params));
-			case "plugin/market/remove":
-				return await this.replayMutation(request, async () => this.plugins.removeMarket(request.params));
-			case "plugin/market/refresh":
-				return await this.plugins.refreshMarket(request.params);
-			case "plugin/catalog":
-				return await this.plugins.getCatalog(request.params.sourceId);
-			case "plugin/inspect":
-				return await this.plugins.inspectPlugin(request.params.sourceId, request.params.entryId);
-			case "plugin/install":
-				return await this.replayMutation(request, async () => {
-					const res = await this.plugins.install(request.params);
-					const state = await this.getPluginActivationState(res.plugin.plugin.id);
-					return withPluginActivationState(res, state);
-				});
-			case "plugin/list":
-				return this.plugins.listInstalled();
-			case "plugin/get": {
-				const { activation, runtimeErrors } = await this.getPluginActivationState(request.params.pluginId);
-				return this.plugins.getInstalled(request.params.pluginId, activation, runtimeErrors);
-			}
-			case "plugin/setEnabled":
-				return await this.replayMutation(request, async () => {
-					const res = this.plugins.setEnabled(request.params);
-					const state = await this.getPluginActivationState(res.plugin.plugin.id);
-					return withPluginActivationState(res, state);
-				});
-			case "plugin/remove":
-				return await this.replayMutation(request, async () => {
-					const res = this.plugins.remove(request.params);
-					const { activation } = await this.getPluginActivationState();
-					return { ...res, activation };
-				});
-			case "plugin/update/inspect":
-				return await this.plugins.inspectUpdate(request.params.pluginId);
-			case "plugin/update":
-				return await this.replayMutation(request, async () => {
-					const res = await this.plugins.update(request.params);
-					const state = await this.getPluginActivationState(res.plugin.plugin.id);
-					return withPluginActivationState(res, state);
 				});
 			case "project/deletePreview": {
 				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
