@@ -100,7 +100,7 @@ export function getExportTemplateDir(): string {
 }
 
 /** Get path to package.json */
-export function getPackageJsonPath(): string {
+function getPackageJsonPath(): string {
 	return join(getPackageDir(), "package.json");
 }
 
@@ -147,7 +147,7 @@ export const VERSION: string = pkg.version || "0.0.0";
 // ${APP_NAME}_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
-export function expandTildePath(path: string): string {
+function expandTildePath(path: string): string {
 	return normalizePath(path);
 }
 

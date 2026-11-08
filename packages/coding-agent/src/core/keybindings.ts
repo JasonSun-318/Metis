@@ -61,7 +61,7 @@ declare module "@metis/tui" {
 	interface Keybindings extends AppKeybindings {}
 }
 
-export const KEYBINDINGS = {
+const KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
 	"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },

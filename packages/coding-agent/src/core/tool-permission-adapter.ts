@@ -22,7 +22,7 @@ const CLAIM_KEYS = ["command", "effects", "networkEndpoints", "readPaths", "shel
  * Shared cap alias kept for existing imports; the value itself lives in the
  * leaf limits module so policy and this adapter never depend on each other.
  */
-export const MAX_BASH_COMMAND_BYTES = MAX_SHELL_COMMAND_BYTES;
+const MAX_BASH_COMMAND_BYTES = MAX_SHELL_COMMAND_BYTES;
 
 export interface ToolIdentityInput {
 	readonly provenance: ToolProvenance;

@@ -117,7 +117,7 @@ export function getConfigValueEnvVarNames(config: string): string[] {
 	return reference.type === "template" ? getTemplateEnvVarNames(reference.parts) : [];
 }
 
-export function getMissingConfigValueEnvVarNames(config: string, env?: Record<string, string>): string[] {
+function getMissingConfigValueEnvVarNames(config: string, env?: Record<string, string>): string[] {
 	return getConfigValueEnvVarNames(config).filter((name) => resolveEnvConfigValue(name, env) === undefined);
 }
 

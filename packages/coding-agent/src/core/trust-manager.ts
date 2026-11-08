@@ -58,7 +58,7 @@ function findNearestTrustEntry(data: TrustFile, cwd: string): ProjectTrustStoreE
 	}
 }
 
-export function getProjectTrustParentPath(cwd: string): string | undefined {
+function getProjectTrustParentPath(cwd: string): string | undefined {
 	const trustPath = normalizeCwd(cwd);
 	const parentDir = dirname(trustPath);
 	return parentDir === trustPath ? undefined : parentDir;

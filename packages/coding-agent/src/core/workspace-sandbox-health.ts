@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { SandboxDependencyCheck } from "@anthropic-ai/sandbox-runtime";
 import { getPackageDir } from "../config.ts";
 
-export const SANDBOX_RUNTIME_VERSION = "0.0.67";
+const SANDBOX_RUNTIME_VERSION = "0.0.67";
 export const SANDBOX_RUNTIME_ID = `@anthropic-ai/sandbox-runtime@${SANDBOX_RUNTIME_VERSION}`;
 
 export type WorkspaceSandboxHealthStatus = "healthy" | "unavailable" | "misconfigured";

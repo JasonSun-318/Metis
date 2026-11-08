@@ -814,6 +814,6 @@ export function createWorkspaceSandboxSelfTest(
 	};
 }
 
-export const workspaceSandboxSelfTest = createWorkspaceSandboxSelfTest({
+const workspaceSandboxSelfTest = createWorkspaceSandboxSelfTest({
 	readiness: workspaceSandboxHealth,
 });

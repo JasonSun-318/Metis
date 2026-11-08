@@ -5,7 +5,7 @@ import { convertToLlm } from "./messages.ts";
 import { parseSkillBlock } from "./skills.ts";
 import type { SystemPromptPart } from "./system-prompt.ts";
 
-export const CONTEXT_USAGE_CATEGORY_ORDER: readonly ContextUsageCategory[] = [
+const CONTEXT_USAGE_CATEGORY_ORDER: readonly ContextUsageCategory[] = [
 	"system_prompt",
 	"tool_definitions",
 	"rules",
@@ -16,7 +16,7 @@ export const CONTEXT_USAGE_CATEGORY_ORDER: readonly ContextUsageCategory[] = [
 	"conversation",
 ];
 
-export const FIXED_CONTEXT_USAGE_CATEGORIES: ReadonlySet<ContextUsageCategory> = new Set([
+const FIXED_CONTEXT_USAGE_CATEGORIES: ReadonlySet<ContextUsageCategory> = new Set([
 	"system_prompt",
 	"tool_definitions",
 	"rules",

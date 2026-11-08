@@ -4,7 +4,7 @@ import type { ToolDefinition } from "./extensions/types.ts";
 import { MAX_PLAN_MARKDOWN_UTF8_BYTES, type StoredPlan } from "./plan-state.ts";
 import { permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
-export const SubmitPlanParams = Type.Object(
+const SubmitPlanParams = Type.Object(
 	{
 		title: Type.String({ minLength: 1, maxLength: 256 }),
 		markdown: Type.String({ minLength: 1 }),

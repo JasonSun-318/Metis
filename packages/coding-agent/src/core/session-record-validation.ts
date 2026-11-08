@@ -209,7 +209,7 @@ export function validateSessionRecordEnvelopes(records: readonly unknown[], file
 	}
 }
 
-export function validateRawSessionRecords(records: readonly unknown[], filePath: string): SessionHeader {
+function validateRawSessionRecords(records: readonly unknown[], filePath: string): SessionHeader {
 	validateSessionRecordEnvelopes(records, filePath);
 	const header = validateSessionHeader(records[0] as Record<string, unknown>, filePath);
 	const version = header.version ?? 1;
@@ -267,12 +267,7 @@ export function parseSessionControlRecord(record: unknown, lineNumber: number, f
 	}
 }
 
-export function validateRecordId(
-	id: unknown,
-	lineNumber: number,
-	filePath: string,
-	seen: Set<string>,
-): asserts id is string {
+function validateRecordId(id: unknown, lineNumber: number, filePath: string, seen: Set<string>): asserts id is string {
 	if (typeof id !== "string" || id.length === 0) {
 		corruptSession(filePath, lineNumber, "Session entry has an invalid id");
 	}

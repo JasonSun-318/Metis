@@ -32,7 +32,7 @@ export const MAX_SESSION_ATTACHMENT_BYTES = 128 * 1024 * 1024;
 export const MAX_SESSION_ATTACHMENTS_BYTES = 256 * 1024 * 1024;
 export const MAX_SESSION_DELIVERED_FILES = 32;
 export const SESSION_DELIVERED_DIR_NAME = "delivered";
-export const SESSION_WORK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_WORK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionAttachmentInput {
 	readonly path: string;
@@ -337,7 +337,7 @@ export function getOwnedSessionDeliveredDir(agentDir: string, sessionId: string)
 	}
 }
 
-export function deliveredFileStorageName(fileId: string, name: string): string {
+function deliveredFileStorageName(fileId: string, name: string): string {
 	if (!/^[a-f0-9]{16}$/u.test(fileId)) throw new TypeError("Invalid delivered file id");
 	const extension = extname(name);
 	const suffix = /^\.[a-z0-9_-]{1,31}$/i.test(extension) ? extension : "";

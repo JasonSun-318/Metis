@@ -14,7 +14,7 @@ export interface SetTasksDetails {
 	tasks: TaskItem[];
 }
 
-export const SetTasksParams = Type.Object(
+const SetTasksParams = Type.Object(
 	{
 		tasks: Type.Array(
 			Type.Object(
