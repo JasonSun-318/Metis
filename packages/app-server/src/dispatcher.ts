@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type ClientParams, type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
-import { type ModelRegistry, ScheduleError, type ScheduleManager, SessionManager } from "@metis/coding-agent/host";
+import { type ModelRegistry, ScheduleError, type ScheduleManager } from "@metis/coding-agent/host";
 import { AgentCatalog } from "./agent-catalog.ts";
 import { ArchivedConversationCatalog } from "./archived-conversations.ts";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "./dispatch/agent-types.ts";
@@ -15,6 +15,7 @@ import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./disp
 import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "./dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
+import { dispatchProjectRequest, isProjectRequest, type ProjectDispatchContext } from "./dispatch/project.ts";
 import {
 	dispatchScheduleRequest,
 	isScheduleRequest,
@@ -308,82 +309,15 @@ export class Dispatcher {
 		return entry.result;
 	}
 
-	private async deleteModeProject(request: Extract<ClientRpcRequest, { method: "project/delete" }>): Promise<unknown> {
-		let invalidation: { mode: "chat" | "code"; cwd: string; reason: "deleted" | "reload_required" } | undefined;
-		const publishInvalidation = () => {
-			const event = invalidation;
-			invalidation = undefined;
-			if (event) this.subscriptionHub.invalidateProject({ type: "project/invalidated", ...event });
+	private projectContext(): ProjectDispatchContext {
+		return {
+			catalog: this.catalog,
+			registry: this.registry,
+			subscriptionHub: this.subscriptionHub,
+			interactions: this.interactions,
+			scheduleManager: this.scheduleManager,
+			replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 		};
-		try {
-			const result = await this.replayMutation(request, () =>
-				this.catalog.withModeProjectBlocked(request.params, async (snapshot) => {
-					const deleteSessions = async () => {
-						let quiesced = false;
-						try {
-							return await this.registry.withSessionsQuiesced(
-								snapshot.refs.map((ref) => ref.summary.sessionId),
-								async () => {
-									quiesced = true;
-									const result = await SessionManager.trashModeProjectData({
-										agentDir: this.catalog.agentDir,
-										sessionsRoot: this.catalog.sessionsRoot,
-										mode: snapshot.mode,
-										cwd: snapshot.cwd,
-										sessions: snapshot.refs.map((ref) => ({
-											sessionId: ref.summary.sessionId,
-											path: ref.path,
-											relativePath: ref.relativePath,
-											archived: ref.summary.archived,
-											updatedAt: ref.storageUpdatedAt ?? ref.summary.updatedAt,
-										})),
-									});
-									if (!result.ok) {
-										if (result.code === "PROJECT_CHANGED") {
-											throw new AppServerError("BUSY");
-										}
-										if (result.code === "SESSION_IN_USE") throw new AppServerError("SESSION_IN_USE");
-										if (result.code === "SESSION_CORRUPT") throw new AppServerError("SESSION_CORRUPT");
-										console.error(`project/delete failed for ${snapshot.cwd}: ${result.error}`);
-										throw new AppServerError("OPERATION_FAILED");
-									}
-									for (const ref of snapshot.refs) {
-										this.subscriptionHub.removeSession(ref.summary.sessionId);
-									}
-									invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "deleted" };
-									return {
-										mode: snapshot.mode,
-										cwd: snapshot.cwd,
-										deletedSessionCount: result.deletedSessionCount,
-									};
-								},
-								() => {
-									for (const ref of snapshot.refs) {
-										this.interactions.releaseSession(ref.summary.sessionId);
-									}
-								},
-							);
-						} catch (error) {
-							if (quiesced) {
-								for (const ref of snapshot.refs) {
-									this.subscriptionHub.removeSession(ref.summary.sessionId);
-								}
-								invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "reload_required" };
-							}
-							throw error;
-						}
-					};
-					return snapshot.mode === "chat"
-						? this.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions)
-						: deleteSessions();
-				}),
-			);
-			publishInvalidation();
-			return result;
-		} catch (error) {
-			publishInvalidation();
-			throw error;
-		}
 	}
 
 	private sessionContext(connection: ConnectionState): SessionsDispatchContext {
@@ -530,30 +464,16 @@ export class Dispatcher {
 		if (isSessionsRequest(request)) {
 			return await dispatchSessionsRequest(request, this.sessionContext(connection));
 		}
-		switch (request.method) {
-			case "initialize":
-				throw new AppServerError("INVALID_REQUEST");
-			case "project/deletePreview": {
-				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
-				const snapshot = this.catalog.modeProjectSnapshot(request.params.mode, cwd);
-				return {
-					mode: snapshot.mode,
-					cwd: snapshot.cwd,
-					sessionCount: snapshot.refs.length,
-					blockingScheduleCount:
-						snapshot.mode === "chat" ? this.scheduleManager.countFixedWorkspaceTasks(snapshot.cwd) : 0,
-					revision: snapshot.revision,
-				};
-			}
-			case "project/delete":
-				return await this.deleteModeProject(request);
-			case "connection/ack":
-				return {
-					acknowledgedCursor: connection.subscriptions.acknowledge(
-						request.params.serverEpoch,
-						request.params.cursor,
-					),
-				};
+		if (isProjectRequest(request)) {
+			return await dispatchProjectRequest(request, this.projectContext());
 		}
+		if (request.method === "initialize") throw new AppServerError("INVALID_REQUEST");
+		if (request.method === "connection/ack") {
+			return {
+				acknowledgedCursor: connection.subscriptions.acknowledge(request.params.serverEpoch, request.params.cursor),
+			};
+		}
+		// Every protocol method is routed above; validation rejects anything else.
+		throw new AppServerError("INVALID_REQUEST");
 	}
 }

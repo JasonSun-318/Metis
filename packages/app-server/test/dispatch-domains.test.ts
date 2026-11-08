@@ -14,6 +14,7 @@ import { dispatchPersonalizationRequest, isPersonalizationRequest } from "../src
 import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "../src/dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
+import { dispatchProjectRequest, isProjectRequest } from "../src/dispatch/project.ts";
 import { dispatchScheduleRequest, isScheduleRequest } from "../src/dispatch/schedule.ts";
 import { dispatchSessionsRequest, isSessionsRequest } from "../src/dispatch/sessions.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
@@ -468,6 +469,36 @@ function sessionsContext() {
 	};
 }
 
+function projectContext() {
+	const catalog = {
+		refreshModeProjectStorage: vi.fn(async (cwd: string) => cwd),
+		modeProjectSnapshot: vi.fn((mode: string, cwd: string) => ({ mode, cwd, refs: [], revision: 1 })),
+		withModeProjectBlocked: vi.fn(async () => {
+			throw new Error("project delete runs in integration tests");
+		}),
+	} as unknown as SessionCatalog;
+	const scheduleManager = {
+		countFixedWorkspaceTasks: vi.fn(() => 0),
+		withNoFixedWorkspaceTasks: vi.fn(async (_cwd: string, run: () => Promise<unknown>) => await run()),
+	} as unknown as ScheduleManager;
+	const registry = {
+		withSessionsQuiesced: vi.fn(async (_ids: readonly string[], run: () => Promise<unknown>) => await run()),
+	} as unknown as SessionRegistry;
+	const subscriptionHub = { invalidateProject: vi.fn(), removeSession: vi.fn() } as unknown as SessionSubscriptions;
+	const interactions = { releaseSession: vi.fn() } as unknown as InteractionBroker;
+	return {
+		catalog,
+		context: {
+			catalog,
+			registry,
+			subscriptionHub,
+			interactions,
+			scheduleManager,
+			...replayTracker(),
+		},
+	};
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -558,6 +589,12 @@ const DOMAINS = [
 		recognized: isSessionsRequest,
 		dispatch: dispatchSessionsRequest,
 		context: sessionsContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("project/"),
+		recognized: isProjectRequest,
+		dispatch: dispatchProjectRequest,
+		context: projectContext,
 	},
 	{
 		owns: (method: string) => method.startsWith("turn/"),
@@ -752,5 +789,17 @@ describe("dispatcher domain matrix", () => {
 		).resolves.toEqual({ state: "idle", input: { sessionId: "s1" } });
 		await dispatchSessionsRequest(request("session/goal/get", { sessionId: "s1" }), sessions.context);
 		expect(sessions.registry.run).toHaveBeenCalledTimes(2);
+	});
+	it("reports mode-project deletion previews with the blocking task count", async () => {
+		const project = projectContext();
+		await expect(
+			dispatchProjectRequest(request("project/deletePreview", { mode: "chat", cwd: "/work" }), project.context),
+		).resolves.toEqual({
+			mode: "chat",
+			cwd: "/work",
+			sessionCount: 0,
+			blockingScheduleCount: 0,
+			revision: 1,
+		});
 	});
 });
