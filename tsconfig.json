@@ -19,6 +19,7 @@
 			"@metis/app-server": ["./packages/app-server/src/index.ts"],
 			"@metis/app-server/*": ["./packages/app-server/src/*"],
 			"@metis/coding-agent": ["./packages/coding-agent/src/index.ts"],
+			"@metis/coding-agent/host": ["./packages/coding-agent/src/host.ts"],
 			"@metis/coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@metis/coding-agent/*": ["./packages/coding-agent/src/*"],
 			"typebox": ["./node_modules/typebox"],
