@@ -9,7 +9,8 @@
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
-		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build && cd ../app-protocol && npm run build && cd ../app-server && npm run build",
+		"clean:artifacts": "node scripts/clean-artifacts.mjs",
+		"build": "node scripts/build-packages.mjs",
 		"check": "node scripts/run-checks.mjs",
 		"check:biome": "biome check --error-on-warnings .",
 		"check:fast": "node scripts/check-fast.mjs",

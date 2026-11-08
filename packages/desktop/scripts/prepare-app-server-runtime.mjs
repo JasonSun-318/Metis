@@ -2,6 +2,13 @@ import { access, cp, lstat, mkdir, readFile, readdir, rm } from "node:fs/promise
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import {
+	readRuntimeStamp,
+	runtimeInputFingerprint,
+	runtimeStampPath,
+	stampMatches,
+	writeRuntimeStamp,
+} from "./app-server-runtime-stamp.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(desktopRoot, "../..");
@@ -17,6 +24,13 @@ const workspacePackages = new Map([
 const installLockPath = join(repoRoot, "packages", "coding-agent", "install-lock", "package-lock.json");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const packagedNativeTarget = process.env.METIS_NATIVE_TOOLS_TARGET;
+const forceRebuild = process.argv.includes("--force") || process.env.METIS_FORCE_DEV_REBUILD === "1";
+const checkOnly = process.argv.includes("--check");
+const knownArguments = new Set(["--force", "--check"]);
+const unknownArguments = process.argv.slice(2).filter((argument) => !knownArguments.has(argument));
+if (unknownArguments.length > 0) {
+	throw new Error(`Unknown argument(s): ${unknownArguments.join(", ")}`);
+}
 
 async function run(command, args, failure, env = process.env) {
 	await new Promise((resolveRun, rejectRun) => {
@@ -64,6 +78,64 @@ async function copyWorkspacePackage(packageRoot, destination) {
 			verbatimSymlinks: true,
 		});
 	}
+}
+
+const fingerprint = await runtimeInputFingerprint({
+	repoRoot,
+	packageDirectories: workspacePackages.values(),
+	extraFiles: [
+		join(repoRoot, "tsconfig.base.json"),
+		join(repoRoot, "package-lock.json"),
+		installLockPath,
+		join(repoRoot, "scripts", "stage-coding-agent-native-tools.mjs"),
+		join(repoRoot, "scripts", "stage-shell-analysis.mjs"),
+		join(desktopRoot, "scripts", "prepare-app-server-runtime.mjs"),
+	],
+});
+const stampFile = runtimeStampPath(repoRoot);
+const environment = {
+	platform: process.platform,
+	arch: process.arch,
+	nativeTarget: packagedNativeTarget ?? "",
+};
+const stamp = await readRuntimeStamp(stampFile);
+const fingerprintCurrent = stampMatches(stamp, fingerprint.fingerprint, environment);
+
+const runtimeEntry = join(runtimeRoot, "node_modules", "@metis", "app-server", "dist", "utility-entry.js");
+const requiredPaths = [
+	runtimeEntry,
+	...workspacePackages.keys().map((name) =>
+		join(runtimeRoot, "node_modules", ...name.split("/"), "dist"),
+	),
+	...workspacePackages.values().map((directory) => join(directory, "dist")),
+];
+const runtimeComplete = (
+	await Promise.all(
+		requiredPaths.map(async (path) => {
+			try {
+				await access(path);
+				return true;
+			} catch {
+				return false;
+			}
+		}),
+	)
+).every(Boolean);
+
+if (checkOnly) {
+	if (fingerprintCurrent && runtimeComplete) {
+		console.log("app-server runtime is up to date; no rebuild needed.");
+		process.exit(0);
+	}
+	console.log("app-server runtime is stale; a rebuild is needed.");
+	process.exit(1);
+}
+
+if (!forceRebuild && fingerprintCurrent && runtimeComplete) {
+	console.log(
+		`app-server runtime is up to date (${fingerprint.fileCount} input files); skipping package builds. Set METIS_FORCE_DEV_REBUILD=1 to rebuild.`,
+	);
+	process.exit(0);
 }
 
 const buildSteps = [
@@ -146,3 +218,12 @@ if (
 		{ ...process.env, METIS_NATIVE_TOOLS_TARGET: developmentNativeTarget },
 	);
 }
+
+await writeRuntimeStamp(stampFile, {
+	fingerprint: fingerprint.fingerprint,
+	platform: environment.platform,
+	arch: environment.arch,
+	nativeTarget: environment.nativeTarget,
+	generatedAt: new Date().toISOString(),
+});
+console.log(`Recorded app-server runtime fingerprint (${fingerprint.fileCount} input files).`);

@@ -63,6 +63,12 @@ analyses such as runtime cycles, public API surfaces, duplicate/dead-export
 reports and type debt run in the full gate only. Run `npm run check:scripts` for
 the check-script regressions alone.
 
+The desktop dev runtime hashes its build inputs and skips the six package builds
+when nothing changed; set `METIS_FORCE_DEV_REBUILD=1` to force a rebuild.
+`npm run clean:artifacts` reports regenerable desktop build/test artifacts (add
+`--apply` to delete them, or `--include-cache` for the check cache and dev
+runtime).
+
 Biome checks source and test `.ts`/`.tsx` files, desktop browser TSX fixtures,
 and explicitly listed check scripts. Keep Hook dependencies complete; explain
 intentional refresh or focus triggers with dependency-specific suppressions.
