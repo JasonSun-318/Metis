@@ -1,4 +1,4 @@
-import { createRpcError, type ProtocolValidationError, type RpcErrorResponse } from "@metis/app-protocol";
+import { createRpcError, ProtocolValidationError, type RpcErrorResponse } from "@metis/app-protocol";
 import type { AppServer } from "../app-server.ts";
 
 export interface TransportHandlers {
@@ -37,6 +37,33 @@ function isInitializeRequest(value: unknown): boolean {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const descriptor = Object.getOwnPropertyDescriptor(value, "method");
 	return descriptor !== undefined && "value" in descriptor && descriptor.value === "initialize";
+}
+
+const ENVELOPE_TOO_LARGE_MESSAGE = "Protocol envelope exceeds the 8 MiB limit";
+
+function isEnvelopeTooLargeError(error: unknown): boolean {
+	return error instanceof ProtocolValidationError && error.message === ENVELOPE_TOO_LARGE_MESSAGE;
+}
+
+function requestIdOf(value: unknown): string | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const descriptor = Object.getOwnPropertyDescriptor(value, "id");
+	if (!descriptor || !("value" in descriptor)) return null;
+	const id = descriptor.value;
+	return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
+ * A response that cannot fit in one transport envelope is a per-request
+ * failure, not a transport failure. Returning a correlated error keeps the
+ * connection and every other session on the server alive.
+ */
+function oversizedResponseError(request: unknown): RpcErrorResponse | undefined {
+	const id = requestIdOf(request);
+	if (id === null) return undefined;
+	// Protocol errors use fixed messages, so this reuses the non-retryable
+	// OPERATION_FAILED code instead of adding a wire-contract error code.
+	return { jsonrpc: "2.0", id, error: createRpcError("OPERATION_FAILED") };
 }
 
 function isConnectionAckRequest(value: unknown): boolean {
@@ -84,7 +111,15 @@ export function bindAppServerTransport(server: AppServer, transport: TransportCo
 			detachOutbound = connection.onMessage((message) => transport.send(message));
 		}
 		if (!isShutdownRequest(envelope)) {
-			await transport.send(await connection.handle(envelope));
+			const response = await connection.handle(envelope);
+			try {
+				await transport.send(response);
+			} catch (error) {
+				if (!isEnvelopeTooLargeError(error)) throw error;
+				const fallback = oversizedResponseError(envelope);
+				if (fallback === undefined) throw error;
+				await transport.send(fallback);
+			}
 			return;
 		}
 		await transport.send(await server.handleHost(envelope));
