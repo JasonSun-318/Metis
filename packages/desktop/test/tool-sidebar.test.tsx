@@ -74,6 +74,16 @@ function mount() {
 		retainWorkspaceSessions: vi.fn().mockResolvedValue(undefined),
 		closeTerminal: vi.fn().mockResolvedValue(undefined),
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
+		listWorkspaceDirectory: vi.fn().mockResolvedValue([]),
+		getWorkspaceReview: vi.fn().mockResolvedValue({
+			kind: "review",
+			repositoryRoot: "/work/two",
+			branch: "main",
+			head: null,
+			revision: "working-tree",
+			files: [],
+			commits: [],
+		}),
 	} as unknown as MetisDesktopApi;
 	const container = document.createElement("div");
 	const chatSlot = document.createElement("div");
@@ -208,6 +218,34 @@ describe("per-session tools sidebar", () => {
 		await act(async () => button(view.toolsSlot, "New browser tab").click());
 		expect(view.toolsSlot.querySelectorAll('[role="tab"]')).toHaveLength(2);
 		expect(document.querySelector(".tool-add-menu")).toBeNull();
+	});
+
+	it("uses the owning session's mode for Files and Review", async () => {
+		const view = mount();
+		await view.render({
+			sessionsById: new Map([
+				[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "chat" }],
+				[OTHER, { sessionId: OTHER, cwd: "/work/two", mode: "code" }],
+			]),
+		});
+
+		const menu = () => view.container.querySelector(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu")!;
+		const chatTools = [...menu().querySelectorAll("button")].map((tool) => tool.textContent?.trim());
+		expect(chatTools).toContain("Terminal");
+		expect(chatTools).not.toContain("Files");
+		expect(chatTools).not.toContain("Review");
+		expect(view.api.listWorkspaceDirectory).not.toHaveBeenCalled();
+		expect(view.api.getWorkspaceReview).not.toHaveBeenCalled();
+
+		await view.render({ chatSessionId: OTHER, chatCwd: "/work/two", mode: "chat" });
+		await act(async () => button(menu(), "Files").click());
+		expect(view.api.listWorkspaceDirectory).toHaveBeenCalledExactlyOnceWith({ sessionId: OTHER, relativePath: "" });
+		await act(async () => button(view.toolsSlot, "New tab").click());
+		await act(async () => button(menu(), "Review").click());
+		expect(view.api.getWorkspaceReview).toHaveBeenCalledExactlyOnceWith({
+			sessionId: OTHER,
+			revision: "working-tree",
+		});
 	});
 
 	it("closes the sidebar after the last tool tab is closed", async () => {

@@ -1218,9 +1218,15 @@ export function SessionWorkspaceView({
 		addBrowser(toolsTarget, profile);
 	};
 
-	const addFiles = (target: { sessionId: string | null; cwd: string | null }) => {
-		const { sessionId: ownerSessionId, cwd } = target;
-		if (!ownerSessionId || !cwd || mode !== "code") return;
+	const codeWorkspaceFor = useCallback(
+		(sessionId: string) => {
+			const session = sessionsById.get(sessionId);
+			return session?.mode === "code" && session.cwd ? { sessionId, cwd: session.cwd } : null;
+		},
+		[sessionsById],
+	);
+
+	const addFiles = ({ sessionId: ownerSessionId, cwd }: { sessionId: string; cwd: string }) => {
 		const stored = loadStoredFiles(ownerSessionId, cwd);
 		setExpandedBySession((values) => {
 			if (values.has(ownerSessionId)) return values;
@@ -1262,9 +1268,7 @@ export function SessionWorkspaceView({
 	};
 
 	const addReview = useCallback(
-		(target: { sessionId: string | null; cwd: string | null }) => {
-			const { sessionId: ownerSessionId, cwd } = target;
-			if (!ownerSessionId || !cwd || mode !== "code") return;
+		(ownerSessionId: string) => {
 			updateWorkspace((workspace) => {
 				const existing = workspaceTabs(workspace).find(
 					(tab) => tab.kind === "review" && tab.sessionId === ownerSessionId,
@@ -1279,19 +1283,17 @@ export function SessionWorkspaceView({
 				return placeTab(workspace, tab);
 			});
 		},
-		[mode, placeTab, t, updateWorkspace],
+		[placeTab, t, updateWorkspace],
 	);
 
 	const openCodeChanges = useCallback(
 		(ownerSessionId: string, path?: string) => {
+			if (!codeWorkspaceFor(ownerSessionId)) return;
 			showToolsSidebar();
 			setReviewFocus({ sessionId: ownerSessionId, path, id: crypto.randomUUID() });
-			addReview({
-				sessionId: ownerSessionId,
-				cwd: sessionsById.get(ownerSessionId)?.cwd ?? projectFor(ownerSessionId)?.cwd ?? null,
-			});
+			addReview(ownerSessionId);
 		},
-		[addReview, projectFor, sessionsById, showToolsSidebar],
+		[addReview, codeWorkspaceFor, showToolsSidebar],
 	);
 
 	const addAgent = (target: { sessionId: string | null; cwd: string | null }) => {
@@ -1780,12 +1782,12 @@ export function SessionWorkspaceView({
 		return fallback;
 	};
 
-	const toolLauncher = (target: { sessionId: string | null; cwd: string | null }) => {
-		const targetMode = target.sessionId === null ? mode : (sessionsById.get(target.sessionId)?.mode ?? mode);
+	const toolLauncher = (target: { sessionId: string; cwd: string | null }) => {
+		const codeWorkspace = codeWorkspaceFor(target.sessionId);
 		return (
 			<nav aria-label={t("Available tools")} className="tool-sidebar-menu">
-				{targetMode === "code" && (
-					<button disabled={!target.cwd} onClick={() => addReview(target)} type="button">
+				{codeWorkspace && (
+					<button onClick={() => addReview(codeWorkspace.sessionId)} type="button">
 						<ClipboardText aria-hidden="true" size={18} />
 						<span>{t("Review")}</span>
 					</button>
@@ -1794,8 +1796,8 @@ export function SessionWorkspaceView({
 					<TerminalWindow aria-hidden="true" size={18} />
 					<span>{t("Terminal")}</span>
 				</button>
-				{targetMode === "code" && (
-					<button disabled={!target.cwd} onClick={() => addFiles(target)} type="button">
+				{codeWorkspace && (
+					<button onClick={() => addFiles(codeWorkspace)} type="button">
 						<FileText aria-hidden="true" size={18} />
 						<span>{t("Files")}</span>
 					</button>
