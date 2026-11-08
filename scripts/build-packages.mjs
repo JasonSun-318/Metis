@@ -77,7 +77,8 @@ function runBuild(task) {
 		});
 		child.on("error", (error) => {
 			resolveRun({
-				name,
+				name: task.name,
+				script,
 				status: 1,
 				stdout,
 				stderr: `${stderr}${error.message}\n`,
@@ -85,7 +86,14 @@ function runBuild(task) {
 			});
 		});
 		child.on("close", (status) => {
-			resolveRun({ name, status: status ?? 1, stdout, stderr, durationMs: Date.now() - startedAt });
+			resolveRun({
+				name: task.name,
+				script,
+				status: status ?? 1,
+				stdout,
+				stderr,
+				durationMs: Date.now() - startedAt,
+			});
 		});
 	});
 }
