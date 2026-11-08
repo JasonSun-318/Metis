@@ -16,6 +16,10 @@ import { ArchivedConversationCatalog, deleteArchivedAgent } from "./archived-con
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "./dispatch/agent-types.ts";
 import { dispatchHooksRequest, isHooksRequest } from "./dispatch/hooks.ts";
 import { dispatchKnowledgeRequest, isKnowledgeRequest } from "./dispatch/knowledge.ts";
+import { dispatchMcpRequest, isMcpRequest } from "./dispatch/mcp.ts";
+import { dispatchMemoryRequest, isMemoryRequest } from "./dispatch/memory.ts";
+import { dispatchModelRequest, isModelRequest } from "./dispatch/model.ts";
+import { dispatchPermissionRequest, isPermissionRequest } from "./dispatch/permission.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./dispatch/personalization.ts";
 import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
@@ -29,7 +33,6 @@ import type { MemoryService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
-import { readPermissionSandboxHealth, runPermissionSandboxSelfTest } from "./permission-sandbox-health.ts";
 import type { PersonalizationService } from "./personalization.ts";
 import type { PluginActivationStatus, PluginInstalledView, PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
@@ -586,6 +589,40 @@ export class Dispatcher {
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 			});
 		}
+		if (isMcpRequest(request)) {
+			return await dispatchMcpRequest(request, {
+				registry: this.registry,
+				runtimeRef: (sessionId) => this.runtimeRef(sessionId),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isMemoryRequest(request)) {
+			return await dispatchMemoryRequest(request, {
+				memorySettings: this.memorySettings,
+				registry: this.registry,
+				dropRuntimeSubscriptions: (sessionIds) => this.dropRuntimeSubscriptions(sessionIds),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isModelRequest(request)) {
+			return await dispatchModelRequest(request, {
+				modelRegistry: this.modelRegistry,
+				modelSettings: this.modelSettings,
+				registry: this.registry,
+				dropRuntimeSubscriptions: (sessionIds) => this.dropRuntimeSubscriptions(sessionIds),
+				mutateModelServiceSettings: <T>(mutate: () => Promise<T>) => this.mutateModelServiceSettings(mutate),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isPermissionRequest(request)) {
+			return await dispatchPermissionRequest(request, {
+				permissionRules: this.permissionRules,
+				permissionAutoSettings: this.permissionAutoSettings,
+				registry: this.registry,
+				mutatePermissionAutoSettings: <T>(mutate: () => Promise<T>) => this.mutatePermissionAutoSettings(mutate),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -620,98 +657,6 @@ export class Dispatcher {
 						return runtime.setKnowledgeLinks(libraries);
 					});
 				});
-			case "mcp/list":
-				if ("sessionId" in request.params) {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.listMcpServers());
-				}
-				return await this.registry.listDraftMcpServers(request.params.cwd);
-			case "mcp/import/inspect":
-				if ("sessionId" in request.params) {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.inspectMcpImport(request.params));
-				}
-				return await this.registry.inspectDraftMcpImport(request.params);
-			case "mcp/import":
-				return await this.replayMutation(request, async () => {
-					if ("sessionId" in request.params) {
-						const ref = this.runtimeRef(request.params.sessionId);
-						return await this.registry.run(ref, (runtime) => runtime.importMcpServers(request.params));
-					}
-					return await this.registry.importDraftMcpServers(request.params);
-				});
-			case "mcp/get":
-				if ("sessionId" in request.params) {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.getMcpServer(request.params));
-				}
-				return await this.registry.getDraftMcpServer(request.params);
-			case "mcp/catalog/get": {
-				const ref = this.runtimeRef(request.params.sessionId);
-				return await this.registry.run(ref, (runtime) => runtime.getMcpCatalogItem(request.params));
-			}
-			case "mcp/upsert":
-				return await this.replayMutation(request, async () => {
-					if ("sessionId" in request.params) {
-						const ref = this.runtimeRef(request.params.sessionId);
-						return await this.registry.run(ref, (runtime) => runtime.upsertMcpServer(request.params));
-					}
-					return await this.registry.upsertDraftMcpServer(request.params);
-				});
-			case "mcp/remove":
-				return await this.replayMutation(request, async () => {
-					if ("sessionId" in request.params) {
-						const ref = this.runtimeRef(request.params.sessionId);
-						return await this.registry.run(ref, (runtime) => runtime.removeMcpServer(request.params));
-					}
-					return await this.registry.removeDraftMcpServer(request.params);
-				});
-			case "mcp/restart":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.restartMcpServer(request.params));
-				});
-			case "mcp/credential/set":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.setMcpCredential(request.params));
-				});
-			case "mcp/credential/clear":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.clearMcpCredential(request.params));
-				});
-			case "memory/get":
-				return this.memorySettings.view(request.params);
-			case "memory/update":
-				return await this.replayMutation(request, async () => {
-					// Share the settings mutation lock so open sessions cannot run with
-					// a half-applied tool set; failed refreshes close the session.
-					const release = await this.registry.beginModelServiceSettingsRefresh();
-					try {
-						const result = await this.memorySettings.update(request.params);
-						this.dropRuntimeSubscriptions(await this.registry.refreshOpenMemorySettings());
-						return result;
-					} finally {
-						release();
-					}
-				});
-			case "memory/notes/list":
-				return this.memorySettings.listNotes(request.params);
-			case "memory/notes/read":
-				return this.memorySettings.readNote(request.params);
-			case "memory/notes/write":
-				return await this.replayMutation(request, () => this.memorySettings.writeNote(request.params));
-			case "memory/history/list":
-				return this.memorySettings.history(request.params);
-			case "memory/history/read":
-				return this.memorySettings.historyRead(request.params);
-			case "memory/undo":
-				return await this.replayMutation(request, () => this.memorySettings.undo(request.params));
-			case "memory/undoRun":
-				return await this.replayMutation(request, () => this.memorySettings.undoRun(request.params));
-			case "memory/dream/run":
-				return await this.memorySettings.dreamRun(request.params);
 			case "plugin/market/list":
 				return this.plugins.listMarkets();
 			case "plugin/market/add":
@@ -757,83 +702,6 @@ export class Dispatcher {
 					const res = await this.plugins.update(request.params);
 					const state = await this.getPluginActivationState(res.plugin.plugin.id);
 					return withPluginActivationState(res, state);
-				});
-			case "model/list":
-				this.modelRegistry.refresh();
-				return {
-					models: this.modelRegistry
-						.getAvailable()
-						.map((model) => ({ provider: model.provider, modelId: model.id, name: model.name }))
-						.sort(
-							(left, right) =>
-								left.name.localeCompare(right.name) || left.provider.localeCompare(right.provider),
-						),
-				};
-			case "model/settings/get":
-				return this.modelSettings.view();
-			case "model/settings/update":
-				return await this.replayMutation(request, () =>
-					this.mutateModelServiceSettings(async () => {
-						const result = await this.modelSettings.update(request.params.mutation);
-						if (request.params.mutation.type === "set_permission_reviewer") {
-							this.dropRuntimeSubscriptions(await this.registry.refreshOpenPermissionAutoSettings());
-						}
-						return result;
-					}),
-				);
-			case "model/testConnection":
-				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
-			case "model/discover":
-				return await this.modelSettings.discover(request.params);
-			case "permission/sandbox/health":
-				return await readPermissionSandboxHealth();
-			case "permission/sandbox/selfTest":
-				return await runPermissionSandboxSelfTest();
-			case "permission/auto/get":
-				return await this.permissionAutoSettings.read();
-			case "permission/auto/update":
-				return await this.replayMutation(request, () =>
-					this.mutatePermissionAutoSettings(() => this.permissionAutoSettings.update(request.params)),
-				);
-			case "permission/rules/list": {
-				const result = await this.permissionRules.list(request.params, this.registry);
-				if (result.scope !== "project") return result;
-				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) =>
-					runtime.getPermissionScopePreview?.(),
-				);
-				return opened.open && opened.result ? { ...result, scopePreview: opened.result } : result;
-			}
-			case "permission/rules/catalog":
-				return await this.permissionRules.listRemembered(this.registry);
-			case "permission/rules/revoke":
-				return await this.replayMutation(request, async () => {
-					const result = await this.permissionRules.revokeRemembered(request.params, this.registry);
-					if (request.params.scope === "session") {
-						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
-					} else {
-						await this.registry.notifyOpenPermissionRulesChanged();
-					}
-					return result;
-				});
-			case "permission/rules/delete":
-				return await this.replayMutation(request, async () => {
-					const result = await this.permissionRules.delete(request.params, this.registry);
-					if (result.scope === "session") {
-						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
-					} else {
-						await this.registry.notifyOpenPermissionRulesChanged();
-					}
-					return result;
-				});
-			case "permission/rules/clear":
-				return await this.replayMutation(request, async () => {
-					const result = await this.permissionRules.clear(request.params, this.registry);
-					if (result.scope === "session") {
-						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
-					} else {
-						await this.registry.notifyOpenPermissionRulesChanged();
-					}
-					return result;
 				});
 			case "project/deletePreview": {
 				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);

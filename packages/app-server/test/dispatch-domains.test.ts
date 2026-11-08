@@ -1,13 +1,22 @@
 import { ClientRequestMethods, type ClientRpcRequest } from "@metis/app-protocol";
+import type { ModelRegistry } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "../src/dispatch/agent-types.ts";
 import { dispatchHooksRequest, isHooksRequest } from "../src/dispatch/hooks.ts";
+import { dispatchMcpRequest, isMcpRequest } from "../src/dispatch/mcp.ts";
+import { dispatchMemoryRequest, isMemoryRequest } from "../src/dispatch/memory.ts";
+import { dispatchModelRequest, isModelRequest } from "../src/dispatch/model.ts";
+import { dispatchPermissionRequest, isPermissionRequest } from "../src/dispatch/permission.ts";
 import { dispatchPersonalizationRequest, isPersonalizationRequest } from "../src/dispatch/personalization.ts";
 import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
 import type { HooksService } from "../src/hooks.ts";
+import type { MemoryService } from "../src/memory-settings.ts";
+import type { ModelSettingsService } from "../src/model-settings.ts";
+import type { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
+import type { PermissionRulesService } from "../src/permission-rules.ts";
 import type { PersonalizationService } from "../src/personalization.ts";
 import type { ProfileSummaryCache } from "../src/profile-summary.ts";
 import type { SessionRegistry } from "../src/session-registry.ts";
@@ -105,6 +114,122 @@ function planContext() {
 	return { runtime, registry, context: { registry, runtimeRef: () => ref, ...replayTracker() } };
 }
 
+function mcpContext() {
+	const runtime = {
+		listMcpServers: vi.fn(async () => ({ servers: [] })),
+		inspectMcpImport: vi.fn(async (input: unknown) => input),
+		importMcpServers: vi.fn(async (input: unknown) => input),
+		getMcpServer: vi.fn(async (input: unknown) => input),
+		getMcpCatalogItem: vi.fn(async (input: unknown) => input),
+		upsertMcpServer: vi.fn(async (input: unknown) => input),
+		removeMcpServer: vi.fn(async (input: unknown) => input),
+		restartMcpServer: vi.fn(async (input: unknown) => input),
+		setMcpCredential: vi.fn(async (input: unknown) => input),
+		clearMcpCredential: vi.fn(async (input: unknown) => input),
+	};
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+		listDraftMcpServers: vi.fn(async () => ({ servers: [] })),
+		inspectDraftMcpImport: vi.fn(async (input: unknown) => input),
+		importDraftMcpServers: vi.fn(async (input: unknown) => input),
+		getDraftMcpServer: vi.fn(async (input: unknown) => input),
+		upsertDraftMcpServer: vi.fn(async (input: unknown) => input),
+		removeDraftMcpServer: vi.fn(async (input: unknown) => input),
+	} as unknown as SessionRegistry;
+	return { runtime, registry, context: { registry, runtimeRef: () => ref, ...replayTracker() } };
+}
+
+function memoryContext() {
+	const release = vi.fn();
+	const memorySettings = {
+		view: vi.fn((input: unknown) => input),
+		update: vi.fn(async (input: unknown) => input),
+		listNotes: vi.fn(async () => ({ notes: [] })),
+		readNote: vi.fn(async () => ({ content: "" })),
+		writeNote: vi.fn(async (input: unknown) => input),
+		history: vi.fn(async () => ({ entries: [] })),
+		historyRead: vi.fn(async () => ({ content: "" })),
+		undo: vi.fn(async (input: unknown) => input),
+		undoRun: vi.fn(async (input: unknown) => input),
+		dreamRun: vi.fn(async (input: unknown) => input),
+	} as unknown as MemoryService;
+	const registry = {
+		beginModelServiceSettingsRefresh: vi.fn(async () => release),
+		refreshOpenMemorySettings: vi.fn(async () => ["s1"]),
+	} as unknown as SessionRegistry;
+	const dropRuntimeSubscriptions = vi.fn();
+	return {
+		memorySettings,
+		release,
+		dropRuntimeSubscriptions,
+		context: { memorySettings, registry, dropRuntimeSubscriptions, ...replayTracker() },
+	};
+}
+
+function modelContext() {
+	const modelRegistry = {
+		refresh: vi.fn(),
+		getAvailable: vi.fn(() => [
+			{ provider: "p2", id: "m2", name: "Zeta" },
+			{ provider: "p1", id: "m1", name: "Alpha" },
+		]),
+	} as unknown as ModelRegistry;
+	const modelSettings = {
+		view: vi.fn(() => ({ models: [] })),
+		update: vi.fn(async (input: unknown) => ({ updated: input })),
+		testConnection: vi.fn(async () => ({ ok: true })),
+		discover: vi.fn(async () => ({ models: [] })),
+	} as unknown as ModelSettingsService;
+	const registry = {
+		refreshOpenPermissionAutoSettings: vi.fn(async () => ["s1"]),
+	} as unknown as SessionRegistry;
+	const dropRuntimeSubscriptions = vi.fn();
+	const mutateModelServiceSettings = async <T>(mutate: () => Promise<T>): Promise<T> => await mutate();
+	return {
+		modelRegistry,
+		modelSettings,
+		dropRuntimeSubscriptions,
+		context: {
+			modelRegistry,
+			modelSettings,
+			registry,
+			dropRuntimeSubscriptions,
+			mutateModelServiceSettings,
+			...replayTracker(),
+		},
+	};
+}
+
+function permissionContext() {
+	const permissionRules = {
+		list: vi.fn(async () => ({ scope: "project", rules: [] })),
+		listRemembered: vi.fn(async () => ({ rules: [] })),
+		revokeRemembered: vi.fn(async () => ({ scope: "project" })),
+		delete: vi.fn(async () => ({ scope: "project" })),
+		clear: vi.fn(async () => ({ scope: "project" })),
+	} as unknown as PermissionRulesService;
+	const permissionAutoSettings = {
+		read: vi.fn(async () => ({ mode: "auto" })),
+		update: vi.fn(async (input: unknown) => input),
+	} as unknown as PermissionAutoSettingsService;
+	const registry = {
+		withOpenRuntime: vi.fn(async (_sessionId: string, run: (runtime: unknown) => Promise<unknown>) => ({
+			open: true,
+			result: await run({ getPermissionScopePreview: () => ({ scope: "workspace" }) }),
+		})),
+		notifySessionPermissionRulesChanged: vi.fn(async () => undefined),
+		notifyOpenPermissionRulesChanged: vi.fn(async () => undefined),
+	} as unknown as SessionRegistry;
+	const mutatePermissionAutoSettings = async <T>(mutate: () => Promise<T>): Promise<T> => await mutate();
+	return {
+		permissionRules,
+		permissionAutoSettings,
+		registry,
+		context: { permissionRules, permissionAutoSettings, registry, mutatePermissionAutoSettings, ...replayTracker() },
+	};
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -148,6 +273,30 @@ const DOMAINS = [
 		dispatch: dispatchPlanRequest,
 		context: planContext,
 	},
+	{
+		owns: (method: string) => method.startsWith("mcp/"),
+		recognized: isMcpRequest,
+		dispatch: dispatchMcpRequest,
+		context: mcpContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("memory/"),
+		recognized: isMemoryRequest,
+		dispatch: dispatchMemoryRequest,
+		context: memoryContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("model/"),
+		recognized: isModelRequest,
+		dispatch: dispatchModelRequest,
+		context: modelContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("permission/"),
+		recognized: isPermissionRequest,
+		dispatch: dispatchPermissionRequest,
+		context: permissionContext,
+	},
 ] as const;
 
 describe("dispatcher domain matrix", () => {
@@ -167,7 +316,15 @@ describe("dispatcher domain matrix", () => {
 			const built = domain.context();
 			for (const method of Object.keys(ClientRequestMethods)) {
 				if (!domain.owns(method)) continue;
-				await expect(domain.dispatch(request(method), built.context as never)).resolves.not.toThrow();
+				// The matrix only proves routing: handlers may legitimately reject
+				// empty params, but must never fall through as "Unhandled".
+				let error: unknown;
+				try {
+					await domain.dispatch(request(method), built.context as never);
+				} catch (dispatchError) {
+					error = dispatchError;
+				}
+				expect(String(error instanceof Error ? error.message : error)).not.toMatch(/^Unhandled /);
 			}
 		}
 	});
@@ -230,5 +387,52 @@ describe("dispatcher domain matrix", () => {
 		await dispatchAgentTypeRequest(request("agentType/remove", { id: "a" }), agentTypes.context);
 		expect(agentTypes.context.mutations).toEqual(["agentType/upsert", "agentType/remove"]);
 		expect(agentTypes.registry.listAgentTypes).toHaveBeenCalledOnce();
+	});
+	it("scopes MCP reads and routes MCP mutations through replay", async () => {
+		const mcp = mcpContext();
+		await dispatchMcpRequest(request("mcp/list", { cwd: "/work" }), mcp.context);
+		await dispatchMcpRequest(request("mcp/list", { sessionId: "s1" }), mcp.context);
+		await dispatchMcpRequest(request("mcp/upsert", { sessionId: "s1", name: "server" }), mcp.context);
+		expect(mcp.registry.listDraftMcpServers).toHaveBeenCalledWith("/work");
+		expect(mcp.runtime.listMcpServers).toHaveBeenCalledOnce();
+		expect(mcp.context.mutations).toEqual(["mcp/upsert"]);
+	});
+
+	it("applies the memory settings mutation lock and refresh", async () => {
+		const memory = memoryContext();
+		await dispatchMemoryRequest(request("memory/update", { toolset: "all" }), memory.context);
+		expect(memory.memorySettings.update).toHaveBeenCalledWith({ toolset: "all" });
+		expect(memory.release).toHaveBeenCalledOnce();
+		expect(memory.dropRuntimeSubscriptions).toHaveBeenCalledWith(["s1"]);
+	});
+
+	it("lists sorted models and refreshes permission auto settings on reviewer changes", async () => {
+		const model = modelContext();
+		await expect(dispatchModelRequest(request("model/list"), model.context)).resolves.toEqual({
+			models: [
+				{ provider: "p1", modelId: "m1", name: "Alpha" },
+				{ provider: "p2", modelId: "m2", name: "Zeta" },
+			],
+		});
+		await dispatchModelRequest(
+			request("model/settings/update", { mutation: { type: "set_permission_reviewer" } }),
+			model.context,
+		);
+		expect(model.dropRuntimeSubscriptions).toHaveBeenCalledWith(["s1"]);
+	});
+
+	it("merges the project permission scope preview and notifies rule changes", async () => {
+		const permission = permissionContext();
+		await expect(
+			dispatchPermissionRequest(request("permission/rules/list", { sessionId: "s1" }), permission.context),
+		).resolves.toEqual({
+			scope: "project",
+			rules: [],
+			scopePreview: { scope: "workspace" },
+		});
+		await dispatchPermissionRequest(request("permission/auto/update", { mode: "ask" }), permission.context);
+		await dispatchPermissionRequest(request("permission/rules/clear", { sessionId: "s1" }), permission.context);
+		expect(permission.context.mutations).toEqual(["permission/auto/update", "permission/rules/clear"]);
+		expect(permission.registry.notifyOpenPermissionRulesChanged).toHaveBeenCalledOnce();
 	});
 });
