@@ -15,6 +15,8 @@ export interface SidebarListMotionProps {
 	 * Additional owner boundary; changing it cancels motion within the same scope.
 	 */
 	readonly ownerKey?: string;
+	/** Stable rendered order/structure identity. Omit for callers without a layout projection. */
+	readonly layoutKey?: string;
 }
 
 interface SnapshotEntry {
@@ -94,9 +96,16 @@ export class SidebarListMotion extends Component<SidebarListMotionProps> {
 		this.mediaListener = null;
 	}
 
-	override getSnapshotBeforeUpdate(): MotionSnapshot | null {
+	override getSnapshotBeforeUpdate(previous: Readonly<SidebarListMotionProps>): MotionSnapshot | null {
 		const root = this.root;
 		if (!root) return null;
+		if (
+			this.props.layoutKey !== undefined &&
+			previous.layoutKey === this.props.layoutKey &&
+			previous.scope === this.props.scope &&
+			previous.ownerKey === this.props.ownerKey
+		)
+			return null;
 		const entries = new Map<string, SnapshotEntry>();
 		for (const el of Array.from(root.querySelectorAll<HTMLElement>("[data-sidebar-motion-key]"))) {
 			const key = motionKeyOf(el);

@@ -15,15 +15,6 @@ import type {
 export type ProjectionSyncStatus = "empty" | "ready" | "resubscribing" | "resnapshot_required";
 export type BatchApplyResult = "applied" | "resnapshot_required";
 
-export interface MutableAgentTranscriptState {
-	agentId: string | null;
-	taskId: string | null;
-	readonly itemsById: Map<string, ItemView>;
-	itemOrder: string[];
-	nextBeforeItemId: string | null;
-	journalRevision: number;
-}
-
 export type RendererNotification = Extract<DomainEvent, { type: "interaction/notify" }> & {
 	readonly translation?: { readonly key: string; readonly values: Record<string, string | number> };
 };
@@ -53,8 +44,6 @@ export interface MutableSessionProjection {
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	agents: AgentSummaryView[];
-	nextAgentAfterId: string | null;
-	readonly agentTranscript: MutableAgentTranscriptState;
 	tasks: SessionSnapshot["tasks"];
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
@@ -76,19 +65,6 @@ export interface MutableProjectionState {
 	readonly retiredSessions: Map<string, MutableSessionProjection>;
 	nextSubscriptionToken: number;
 	readonly fallbackProjection: MutableSessionProjection;
-}
-
-function clearAgentTranscript(
-	state: MutableAgentTranscriptState,
-	agentId: string | null = null,
-	taskId: string | null = null,
-): void {
-	state.agentId = agentId;
-	state.taskId = taskId;
-	state.itemsById.clear();
-	state.itemOrder = [];
-	state.nextBeforeItemId = null;
-	state.journalRevision = 0;
 }
 
 export function emptyProjection() {
@@ -114,15 +90,6 @@ export function emptyProjection() {
 		model: undefined as SessionSnapshot["model"],
 		availableModels: [] as NonNullable<SessionSnapshot["availableModels"]>,
 		agents: [] as AgentSummaryView[],
-		nextAgentAfterId: null as string | null,
-		agentTranscript: {
-			agentId: null as string | null,
-			taskId: null as string | null,
-			itemsById: new Map<string, ItemView>(),
-			itemOrder: [] as string[],
-			nextBeforeItemId: null as string | null,
-			journalRevision: 0,
-		},
 		tasks: [] as SessionSnapshot["tasks"],
 		deliveredFiles: [] as SessionSnapshot["deliveredFiles"],
 		goal: null as SessionSnapshot["goal"],
@@ -446,8 +413,6 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	session.model = snapshot.model;
 	session.availableModels = snapshot.availableModels ?? [];
 	session.agents = snapshot.agents;
-	session.nextAgentAfterId =
-		snapshot.nextAgentAfterId ?? (snapshot.agents.length >= 100 ? (snapshot.agents.at(-1)?.agentId ?? null) : null);
 	session.tasks = snapshot.tasks;
 	session.deliveredFiles = snapshot.deliveredFiles;
 	session.goal = snapshot.goal;
@@ -457,8 +422,6 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	if (!existed || session.syncStatus !== "subscribing" || session.focusOnSnapshot) {
 		state.activeSessionId = sessionId;
 	}
-	// The snapshot replaced this bucket's contents; a selected transcript must refetch.
-	if (session.agentTranscript.agentId) session.agentTranscript.journalRevision += 1;
 
 	const buffered = session.buffer;
 	session.buffer = null;
@@ -527,14 +490,6 @@ function targetsSessionProject(
 	event: Extract<DomainEvent, { type: "project/invalidated" }>,
 ): boolean {
 	return session?.scheduled === undefined && session?.mode === event.mode && session.cwd === event.cwd;
-}
-
-function isSelectedAgentLiveTask(session: MutableSessionProjection, agentId: string, taskId?: string): boolean {
-	const transcript = session.agentTranscript;
-	if (transcript.agentId !== agentId) return false;
-	if (transcript.taskId === null) return true;
-	if (taskId !== undefined) return taskId === transcript.taskId;
-	return session.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === transcript.taskId;
 }
 
 function canApplyEvents(session: MutableSessionProjection, events: readonly DomainEvent[]): boolean {
@@ -660,35 +615,8 @@ function applyEvent(state: MutableProjectionState, session: MutableSessionProjec
 		case "agent/deleted": {
 			const deleted = new Set(event.deletedAgentIds);
 			session!.agents = session!.agents.filter((agent) => !deleted.has(agent.agentId));
-			const transcript = session!.agentTranscript;
-			if (transcript.agentId && deleted.has(transcript.agentId)) clearAgentTranscript(transcript);
 			return;
 		}
-		case "agent/item/started":
-		case "agent/item/completed":
-			if (isSelectedAgentLiveTask(session!, event.agentId)) {
-				session!.agentTranscript.itemOrder = upsertOrdered(
-					session!.agentTranscript.itemsById,
-					session!.agentTranscript.itemOrder,
-					event.item.itemId,
-					structuredClone(event.item),
-				);
-			}
-			return;
-		case "agent/item/delta": {
-			if (!isSelectedAgentLiveTask(session!, event.agentId)) return;
-			const transcript = session!.agentTranscript;
-			const item = transcript.itemsById.get(event.itemId);
-			if (item?.state === "streaming") {
-				transcript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
-			}
-			return;
-		}
-		case "agent/itemsChanged":
-			if (isSelectedAgentLiveTask(session!, event.agentId, event.taskId)) {
-				session!.agentTranscript.journalRevision += 1;
-			}
-			return;
 		case "turn/started":
 		case "turn/completed":
 		case "turn/interrupted":
@@ -884,69 +812,6 @@ export function prependProjectionItems(
 	session.itemOrder = [...added, ...session.itemOrder];
 	session.nextBeforeItemId = page.nextBeforeItemId;
 	session.revision += 1;
-}
-
-export function selectAgentTranscript(
-	state: MutableProjectionState,
-	sessionId: string,
-	agentId: string | null,
-	taskId: string | null = null,
-): boolean {
-	const session = state.sessions.get(sessionId);
-	if (!session) return false;
-	const transcript = session.agentTranscript;
-	if (transcript.agentId === agentId && transcript.taskId === taskId) return false;
-	clearAgentTranscript(transcript, agentId, taskId);
-	session.revision += 1;
-	return true;
-}
-
-export function replaceAgentItems(
-	state: MutableProjectionState,
-	sessionId: string,
-	agentId: string,
-	taskId: string | null,
-	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
-): boolean {
-	const session = state.sessions.get(sessionId);
-	if (!session) return false;
-	const transcript = session.agentTranscript;
-	if (transcript.agentId !== agentId || transcript.taskId !== taskId) return false;
-	if (page.items.some((item) => item.sessionId !== agentId))
-		throw new TypeError("History page does not belong to child");
-	transcript.itemsById.clear();
-	transcript.itemOrder = [];
-	for (const item of page.items) {
-		transcript.itemsById.set(item.itemId, structuredClone(item));
-		transcript.itemOrder.push(item.itemId);
-	}
-	transcript.nextBeforeItemId = page.nextBeforeItemId;
-	session.revision += 1;
-	return true;
-}
-
-export function prependAgentItems(
-	state: MutableProjectionState,
-	sessionId: string,
-	agentId: string,
-	taskId: string | null,
-	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
-): boolean {
-	const session = state.sessions.get(sessionId);
-	if (!session) return false;
-	const transcript = session.agentTranscript;
-	if (transcript.agentId !== agentId || transcript.taskId !== taskId) return false;
-	if (page.items.some((item) => item.sessionId !== agentId))
-		throw new TypeError("History page does not belong to child");
-	const added: string[] = [];
-	for (const item of page.items) {
-		if (!transcript.itemsById.has(item.itemId)) added.push(item.itemId);
-		transcript.itemsById.set(item.itemId, structuredClone(item));
-	}
-	transcript.itemOrder = [...added, ...transcript.itemOrder];
-	transcript.nextBeforeItemId = page.nextBeforeItemId;
-	session.revision += 1;
-	return true;
 }
 
 export function addPendingInteraction(state: MutableProjectionState, interaction: InteractionView): void {

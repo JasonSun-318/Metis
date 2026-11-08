@@ -48,13 +48,6 @@ export interface ReviewTab {
 	readonly title: string;
 }
 
-export interface AgentTab {
-	readonly kind: "agent";
-	readonly id: string;
-	readonly sessionId: string;
-	readonly title: string;
-}
-
 export interface PlanTab {
 	readonly kind: "plan";
 	readonly id: string;
@@ -94,7 +87,6 @@ export type WorkspaceTab =
 	| BrowserTab
 	| FileTab
 	| ReviewTab
-	| AgentTab
 	| PreviewTab
 	| PlanTab;
 

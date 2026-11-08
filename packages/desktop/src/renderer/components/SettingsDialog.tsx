@@ -1,4 +1,10 @@
-import type { ModelSettingsView, PermissionPresetView, SessionSnapshot } from "@metis/app-protocol";
+import type {
+	AgentMode,
+	ModelSettingsView,
+	PermissionPresetView,
+	SessionSnapshot,
+	SessionSummary,
+} from "@metis/app-protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -36,19 +42,26 @@ type SettingsPage =
 	| "agentTypes"
 	| "permissions"
 	| "browser"
-	| "usage";
+	| "usage"
+	| "archived";
 
 export function SettingsDialog({
 	api,
 	closeDelayMs,
+	workMode = "chat",
+	onWorkModeChange,
 	generalPreferences,
 	onClose,
+	onDeleteSession,
+	onDeleteAgent,
+	onRestoreConversation,
 	onGeneralPreferencesChange,
 	onThemeChange,
 	serverReady,
 	sessionId,
 	permissionPreset,
 	permissionRuleFocus,
+	focusImageGeneration = false,
 	sandboxHealth,
 	sessionCwd,
 	sessionTitle,
@@ -56,22 +69,31 @@ export function SettingsDialog({
 }: {
 	readonly api: MetisDesktopApi;
 	readonly closeDelayMs?: number;
+	readonly workMode?: AgentMode;
+	readonly onWorkModeChange?: (mode: AgentMode) => void;
 	readonly generalPreferences: GeneralPreferences;
 	readonly onClose: () => void;
+	readonly onDeleteSession?: (session: SessionSummary) => Promise<void>;
+	readonly onDeleteAgent?: (rootSessionId: string, agentId: string) => Promise<void>;
+	readonly onRestoreConversation?: (session: SessionSummary, agentId?: string) => Promise<void>;
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
 	readonly serverReady: boolean;
 	readonly sessionId?: string;
 	readonly permissionPreset?: PermissionPresetView;
 	readonly permissionRuleFocus?: { readonly id: string; readonly scope?: string } | null;
+	readonly focusImageGeneration?: boolean;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
 	readonly sessionCwd?: string | null;
 	readonly sessionTitle?: string;
 	readonly theme: AppTheme;
 }) {
 	const { t } = useTranslation();
-	const [page, setPage] = useState<SettingsPage>(permissionRuleFocus ? "permissions" : "profile");
+	const [page, setPage] = useState<SettingsPage>(
+		permissionRuleFocus ? "permissions" : focusImageGeneration ? "model" : "profile",
+	);
 	const [closing, setClosing] = useState(false);
+	const [imageGenerationFocusPending, setImageGenerationFocusPending] = useState(focusImageGeneration);
 	const [dirty, setDirty] = useState(false);
 	const [pendingDestination, setPendingDestination] = useState<SettingsPage | "close" | null>(null);
 	const unsavedDialog = useRef<HTMLDialogElement>(null);
@@ -112,6 +134,9 @@ export function SettingsDialog({
 	useEffect(() => {
 		if (permissionRuleFocus) setPage("permissions");
 	}, [permissionRuleFocus]);
+	useEffect(() => {
+		if (page !== "model") setImageGenerationFocusPending(false);
+	}, [page]);
 	useEffect(() => {
 		if (!pendingDestination) return;
 		const dialog = unsavedDialog.current!;
@@ -291,6 +316,8 @@ export function SettingsDialog({
 						<div className="settings-page-mount">
 							{page === "general" ? (
 								<GeneralPanel
+									workMode={workMode}
+									onWorkModeChange={onWorkModeChange}
 									api={api}
 									generalPreferences={generalPreferences}
 									onDirtyChange={setDirty}
@@ -303,6 +330,7 @@ export function SettingsDialog({
 							{page === "model" ? (
 								<ModelSettingsPanel
 									api={api}
+									focusImageGeneration={imageGenerationFocusPending}
 									initialSettings={modelSettingsRef.current ?? undefined}
 									onSettingsChange={cacheModelSettings}
 									onDirtyChange={setDirty}

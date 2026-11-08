@@ -17,6 +17,7 @@ import { App, sessionDisplayTitle } from "../src/renderer/components/App.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesDialog.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
+import { SidebarListMotion } from "../src/renderer/components/SidebarListMotion.tsx";
 import { GENERAL_PREFERENCES_STORAGE_KEY } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomePeriod, HOME_GREETINGS } from "../src/renderer/new-task-home-content.ts";
@@ -646,6 +647,7 @@ function createHarness(
 		sendQueuedTurn: vi.fn().mockResolvedValue({}),
 		interruptTurn: vi.fn().mockResolvedValue({}),
 		readItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
+		readProcess: vi.fn().mockResolvedValue({ total: 0, index: 0, process: null }),
 		getSessionStatus: vi.fn(async ({ sessionId }) => ({
 			sessionId,
 			mode: "code" as const,
@@ -732,6 +734,7 @@ async function mountWorkspaceFileEditor() {
 	await flush();
 
 	await act(async () => button(container, "Code").click());
+	await act(async () => button(container, "Code project task").click());
 	await flush();
 	await addTool(container, "Files");
 	await flush();
@@ -759,6 +762,62 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
+	it("streams visible text without rerendering the sessions sidebar", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-stream", "chat", "/work/chat-project", "Streaming task");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api, emitEvent } = createHarness({ sessions: [active] });
+		vi.mocked(api.openSession).mockResolvedValue({
+			...snapshot(active),
+			recentItems: [
+				{
+					itemId: "stream-item",
+					sessionId: active.sessionId,
+					role: "assistant",
+					state: "streaming",
+					content: [{ type: "text", text: "Performance message" }],
+					createdAt: active.createdAt,
+				},
+			],
+		});
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={store} />));
+			await flush();
+			await flush();
+			const renderSidebar = vi.spyOn(SidebarListMotion.prototype, "render");
+			await act(async () =>
+				emitEvent({
+					type: "app-server",
+					envelope: {
+						jsonrpc: "2.0",
+						method: "connection/events",
+						params: {
+							serverEpoch: EPOCH,
+							fromCursor: 1,
+							toCursor: 1,
+							events: [
+								{
+									type: "item/delta",
+									sessionId: active.sessionId,
+									itemId: "stream-item",
+									delta: { type: "text", text: " is streaming" },
+								},
+							],
+						},
+					},
+				}),
+			);
+			await flush();
+			expect(container.textContent).toContain("Performance message is streaming");
+			expect(renderSidebar).not.toHaveBeenCalled();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
 	it.each(["en", "zh-CN"] as const)(
 		"dismisses memory event notifications after five seconds without replaying older notices (%s)",
 		async (locale) => {
@@ -1110,7 +1169,7 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
-	it("groups each mode independently from the single-level grouping menu", async () => {
+	it("shares grouping and project rows across presentation modes", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const now = new Date();
 		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
@@ -1154,19 +1213,19 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(document.body, "Project").click());
 		expect(projectRow(container, "/work/shared")).toBeTruthy();
 		expect(container.querySelector(".session-grouping-label")?.textContent).toBe("Projects");
-		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("project");
 
 		await act(async () => button(container, "Code").click());
 		await flush();
 		expect(button(container, "Group sessions")).toBeTruthy();
-		expect(container.querySelector(".project-heading")).toBeNull();
-		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
+		expect(container.querySelector(".project-heading")).not.toBeNull();
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("project");
 
 		await act(async () => button(container, "Group sessions").click());
 		await act(async () => menuOption(document.body, "None").click());
 		expect(container.querySelector(".session-section")).toBeNull();
-		expect(container.querySelectorAll(".session-row")).toHaveLength(1);
-		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"none"}');
+		expect(container.querySelectorAll(".session-row")).toHaveLength(3);
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("none");
 
 		await act(async () => root.unmount());
 	});
@@ -1237,7 +1296,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("shows Scheduled tasks only in Chat mode", async () => {
+	it("shows Scheduled tasks in both presentation modes", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
 		const container = document.createElement("div");
@@ -1251,7 +1310,7 @@ describe("Chat desktop shell", () => {
 			[...container.querySelectorAll("button")].some(
 				(candidate) => candidate.textContent?.trim() === "Scheduled tasks",
 			),
-		).toBe(false);
+		).toBe(true);
 		await act(async () => root.unmount());
 	});
 
@@ -1608,7 +1667,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("round-trips strict mode-scoped project preferences without splitting Unicode aliases", () => {
+	it("round-trips unified project preferences without splitting Unicode aliases", () => {
 		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", `  ${"🚀".repeat(81)}  `);
 		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
 		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code alias");
@@ -1616,15 +1675,10 @@ describe("Chat desktop shell", () => {
 
 		const loaded = loadProjectPreferences(localStorage);
 		expect([...loaded.values()]).toEqual(
-			expect.arrayContaining([
-				{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true },
-				{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
-			]),
+			expect.arrayContaining([{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true }]),
 		);
 		const withoutChat = removeProjectPreference(loaded, "chat", "/work/shared");
-		expect([...withoutChat.values()]).toEqual([
-			{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
-		]);
+		expect([...withoutChat.values()]).toEqual([]);
 	});
 
 	it("ignores malformed project preference documents and invalid entries", () => {
@@ -1642,7 +1696,7 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
-	it("applies aliases per mode, clears blank aliases, and stably partitions pinned projects", () => {
+	it("shares aliases across modes, clears blank aliases, and stably partitions pinned projects", () => {
 		const store = new AppStore();
 		store.setSessions({
 			sessions: [
@@ -1659,12 +1713,14 @@ describe("Chat desktop shell", () => {
 		preferences = setProjectPinned(preferences, "chat", "/work/c", true);
 		preferences = setProjectAlias(preferences, "chat", "/work/a", "   ");
 
-		expect(
-			buildSessionTree(store.getSnapshot(), "chat", preferences).projects.map((project) => project.name),
-		).toEqual(["b", "c", "a"]);
-		expect(buildSessionTree(store.getSnapshot(), "code", preferences).projects[0]).toMatchObject({
-			name: "Code A alias",
-			pinned: false,
+		expect(buildSessionTree(store.getSnapshot(), preferences).projects.map((project) => project.name)).toEqual([
+			"b",
+			"c",
+			"a",
+		]);
+		expect(buildSessionTree(store.getSnapshot(), preferences).projects[0]).toMatchObject({
+			name: "b",
+			pinned: true,
 		});
 	});
 
@@ -1924,7 +1980,7 @@ describe("Chat desktop shell", () => {
 			[...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) =>
 				item.textContent?.trim(),
 			),
-		).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
+		).toEqual(["Pin", "Copy title", "Rename", "Archive conversation", "Delete"]);
 		await act(async () => button(document.body, "Pin").click());
 		expect(button(container, "Pinned")).toBeTruthy();
 		otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
@@ -2056,7 +2112,7 @@ describe("Chat desktop shell", () => {
 			[...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) =>
 				item.textContent?.trim(),
 			),
-		).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
+		).toEqual(["Pin", "Copy title", "Rename", "Archive conversation", "Delete"]);
 		await act(async () => button(document.body, "Rename").click());
 		let input = document.body.querySelector<HTMLInputElement>("#session-rename-input")!;
 		expect(input.value).toBe("Active task");
@@ -2168,7 +2224,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renames and pins only the exact mode without mutating sessions or Desktop APIs", async () => {
+	it("renames and pins the unified project without mutating sessions or Desktop APIs", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const sharedSessions = [
 			session("chat-shared-row", "chat", "/work/shared", "Chat session"),
@@ -2203,9 +2259,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Code").click());
 		await flush();
 		const codeGroup = projectRow(container, "/work/shared");
-		expect(codeGroup.querySelector(".project-heading > span:not([aria-hidden])")?.textContent).toBe("shared");
+		expect(codeGroup.querySelector(".project-heading > span:not([aria-hidden])")?.textContent).toBe("Chat alias");
 		await act(async () => button(codeGroup, "Project actions").click());
-		expect(button(codeGroup, "Pin")).not.toBeNull();
+		expect(button(codeGroup, "Unpin")).not.toBeNull();
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		chatGroup = projectRow(container, "/work/shared");
@@ -2227,7 +2283,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("shows a complete mode-specific delete preview, blocks schedules, then removes only Chat", async () => {
+	it("previews both legacy modes, blocks schedules and removes the whole project", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const chatActive = session("chat-delete-active", "chat", "/work/shared", "Chat active");
 		const chatArchived = {
@@ -2242,27 +2298,20 @@ describe("Chat desktop shell", () => {
 		saveSessionPins(localStorage, new Set([chatActive.sessionId, chatArchived.sessionId, code.sessionId]));
 		localStorage.setItem("metis.activeSessionId.chat", chatActive.sessionId);
 		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
-		vi.mocked(api.previewProjectDelete)
-			.mockResolvedValueOnce({
+		let previewRound = 0;
+		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
+			if (mode === "chat") previewRound++;
+			return {
 				ok: true,
 				result: {
-					mode: "chat",
-					cwd: "/canonical/shared",
-					sessionCount: 2,
-					blockingScheduleCount: 1,
-					revision: "a".repeat(64),
-				},
-			})
-			.mockResolvedValueOnce({
-				ok: true,
-				result: {
-					mode: "chat",
-					cwd: "/canonical/shared",
-					sessionCount: 2,
-					blockingScheduleCount: 0,
+					mode,
+					cwd,
+					sessionCount: mode === "chat" ? 2 : 1,
+					blockingScheduleCount: mode === "chat" && previewRound === 1 ? 1 : 0,
 					revision: "b".repeat(64),
 				},
-			});
+			};
+		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -2273,9 +2322,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(group, "Delete").click());
 		await flush();
 		expect(api.previewProjectDelete).toHaveBeenCalledWith({ mode: "chat", cwd: "/work/shared" });
-		expect(projectDialog().textContent).toContain("2 Chat sessions");
-		expect(projectDialog().textContent).toContain("/canonical/shared");
-		expect(projectDialog().textContent).toContain("Code project and its memory are unchanged");
+		expect(projectDialog().textContent).toContain("3 sessions");
+		expect(projectDialog().textContent).toContain("/work/shared");
 		expect(projectDialog().textContent).toContain("source folder and its files are unchanged");
 		expect(projectDialog().textContent).toContain("Schedules are not deleted automatically");
 		expect(button(container, "Move to Trash").disabled).toBe(true);
@@ -2297,14 +2345,11 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Chat local");
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
-		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
-			{ mode: "code", cwd: "/work/shared", alias: "Code local", pinned: false },
-		]);
-		expect(loadSessionPins(localStorage)).toEqual(new Set([code.sessionId]));
+		expect([...loadProjectPreferences(localStorage).values()]).toEqual([]);
+		expect(loadSessionPins(localStorage)).toEqual(new Set());
+		expect(api.deleteProject).toHaveBeenCalledWith(expect.objectContaining({ mode: "code", cwd: "/work/shared" }));
 		await act(async () => button(container, "Code").click());
-		await flush();
-		expect(container.textContent).toContain("Code local");
-		expect(container.textContent).toContain("Code preserved");
+		expect(container.textContent).not.toContain("Code preserved");
 		await act(async () => root.unmount());
 	});
 
@@ -2331,11 +2376,11 @@ describe("Chat desktop shell", () => {
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe(chat.sessionId);
 		await act(async () => button(container, "Retry").click());
 		await flush();
-		expect(api.previewProjectDelete).toHaveBeenCalledTimes(2);
+		expect(api.previewProjectDelete).toHaveBeenCalledTimes(4);
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
 		await flush();
-		expect(api.deleteProject).toHaveBeenCalledTimes(2);
+		expect(api.deleteProject).toHaveBeenCalledTimes(3);
 		expect(vi.mocked(api.deleteProject).mock.calls[0]![0].requestId).toBe(
 			vi.mocked(api.deleteProject).mock.calls[1]![0].requestId,
 		);
@@ -2583,7 +2628,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("filters the initial Chat tree and creates the real session only on first send", async () => {
+	it("unifies the initial session tree and creates the real session only on first send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api, order } = createHarness();
@@ -2594,7 +2639,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(container.textContent).toContain("Chat project task");
-		expect(container.textContent).not.toContain("Code project task");
+		expect(container.textContent).toContain("Code project task");
 		expect(api.openSession).not.toHaveBeenCalled();
 		await act(async () => button(container, "New task").click());
 		expect(api.createSession).not.toHaveBeenCalled();
@@ -3310,13 +3355,13 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "code",
+				mode: "chat",
 				cwd: "/work/selected-project",
 			}),
 		);
 		expect(api.startTurn).toHaveBeenCalledWith(
 			expect.objectContaining({
-				sessionId: "code-created",
+				sessionId: "chat-created",
 				text: "Inspect this codebase",
 			}),
 		);
@@ -3341,17 +3386,16 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "A Code task still needs a project"));
-		expect(button(container, "Send message").disabled).toBe(true);
+		expect(button(container, "Send message").disabled).toBe(false);
 		await act(async () => editor.closest("form")!.requestSubmit());
-		expect(api.createSession).not.toHaveBeenCalled();
-		expect(projectRow(container, "/work/code-project")).not.toBeNull();
-		expect(container.querySelector('[data-active-session-id="code-existing"]')).toBeNull();
-		expect(api.openSession).not.toHaveBeenCalled();
-		expect(api.createSession).not.toHaveBeenCalled();
+		await flush();
+		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({ mode: "chat" }));
+		expect(vi.mocked(api.createSession).mock.calls[0]![0]).not.toHaveProperty("cwd");
+
 		await act(async () => root.unmount());
 	});
 
-	it("isolates the home draft when switching from Chat to a historyless Code mode", async () => {
+	it("preserves the home draft when switching from Chat to a historyless Code mode", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		saveProfileIdentity({ displayName: "Ava", avatarDataUrl: null });
 		vi.spyOn(Math, "random").mockReturnValue(0.999999);
@@ -3365,7 +3409,12 @@ describe("Chat desktop shell", () => {
 			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("chat");
 			expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(4);
 			const chatEditor = container.querySelector<HTMLElement>("#composer-input")!;
-			await act(async () => changeTextarea(chatEditor, "Chat draft must not follow the mode switch"));
+			await act(async () => changeTextarea(chatEditor, "Draft follows presentation switching"));
+			await act(async () => button(container, "Add to message").click());
+			await act(async () =>
+				button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+			);
+			expect(container.textContent).toContain("report.pdf");
 
 			await act(async () => button(container, "Code").click());
 			await flush();
@@ -3373,8 +3422,10 @@ describe("Chat desktop shell", () => {
 			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("code");
 			expect(container.querySelectorAll(".new-task-starter-grid .new-task-starter")).toHaveLength(4);
 			const codeEditor = container.querySelector<HTMLElement>("#composer-input")!;
-			expect(composerText(codeEditor)).toBe("");
-			expect(container.querySelector(".new-task-home-heading h1")?.textContent).toContain("build");
+			expect(composerText(codeEditor)).toBe("Draft follows presentation switching");
+			expect(codeEditor).toBe(chatEditor);
+			expect(container.textContent).toContain("report.pdf");
+			expect(api.createSession).not.toHaveBeenCalled();
 		} finally {
 			saveProfileIdentity(DEFAULT_PROFILE_IDENTITY);
 			await act(async () => root.unmount());
@@ -3432,13 +3483,13 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "code",
+				mode: "chat",
 				cwd: "/Users/test/Metis Projects/Desktop App",
 			}),
 		);
 		expect(api.startTurn).toHaveBeenCalledWith(
 			expect.objectContaining({
-				sessionId: "code-created",
+				sessionId: "chat-created",
 				text: "Initialize the app",
 			}),
 		);
@@ -3497,6 +3548,7 @@ describe("Chat desktop shell", () => {
 		vi.mocked(api.listSkills).mockClear();
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 
 		expect(container.querySelector('[data-active-session-id="code-existing"]')).not.toBeNull();
@@ -3533,6 +3585,7 @@ describe("Chat desktop shell", () => {
 
 		vi.mocked(api.listSkills).mockImplementationOnce(() => new Promise(() => undefined));
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await act(async () => button(container, "Add to message").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
@@ -4076,6 +4129,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 
 		await act(async () =>
@@ -4143,6 +4197,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 
 		await act(async () =>
@@ -4617,7 +4672,6 @@ describe("Chat desktop shell", () => {
 			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
 			defaultThinkingSelection: "max",
 			autoSessionTitle: true,
-			vision: null,
 			permissionReviewer: { config: null, status: "unconfigured" },
 			providers: [
 				{
@@ -4741,6 +4795,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 
 		const trigger = button(container, "Select effort, current High");
@@ -4842,7 +4897,7 @@ describe("Chat desktop shell", () => {
 	it("keeps a Code draft retryable after the first open fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
-		const { api } = createHarness({ failOpenSessionIds: ["code-created"] });
+		const { api } = createHarness({ failOpenSessionIds: ["chat-created"] });
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -4868,7 +4923,7 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).toHaveBeenCalledTimes(1);
 		expect(api.startTurn).toHaveBeenCalledWith(
 			expect.objectContaining({
-				sessionId: "code-created",
+				sessionId: "chat-created",
 				text: "Retry this Code task",
 			}),
 		);
@@ -5149,7 +5204,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps the Chat home visible when restoring its remembered session fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({ failOpenSessionIds: ["chat-existing"] });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -5184,22 +5239,13 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.textContent).toContain("Chat project task");
 
-		let resolveCodeOpen!: (value: SessionSnapshot) => void;
-		vi.mocked(api.openSession).mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					resolveCodeOpen = resolve;
-				}),
-		);
-		act(() => button(container, "Code").click());
+		const editor = container.querySelector("#composer-input");
+		const calls = vi.mocked(api.openSession).mock.calls.length;
+		await act(async () => button(container, "Code").click());
+		expect(api.openSession).toHaveBeenCalledTimes(calls);
+		expect(container.querySelector("#composer-input")).toBe(editor);
+		expect(container.querySelector(".new-task-home")).toBeNull();
 
-		expect(container.textContent).toContain("Chat project task");
-		expect(container.textContent).not.toContain("Metis Code");
-
-		await act(async () =>
-			resolveCodeOpen(snapshot(session("code-existing", "code", "/work/code-project", "Code project task"))),
-		);
-		expect(container.textContent).toContain("Code project task");
 		await act(async () => root.unmount());
 	});
 
@@ -5272,7 +5318,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("restores the remembered session per mode and keeps Skills visual-only", async () => {
+	it("opens either legacy session in the chosen presentation and keeps Skills visual-only", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
@@ -5284,9 +5330,10 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		expect(container.textContent).toContain("Code project task");
-		expect(container.textContent).not.toContain("Chat project task");
+		expect(container.textContent).toContain("Chat project task");
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-existing" });
 		expect(container.textContent).toContain("Test model");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
@@ -5303,14 +5350,11 @@ describe("Chat desktop shell", () => {
 		const toolMenu = await openToolStartPage(container);
 		expect(toolMenu.textContent).toContain("Review");
 		expect(toolMenu.textContent).toContain("Files");
-		expect(toolMenu.textContent).toContain("Agents");
-		await act(async () => button(toolMenu, "Agents").click());
+		expect(toolMenu.textContent).not.toContain("Agents");
+		await act(async () => button(toolMenu, "Knowledge").click());
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
-		const agentStartPage = await openToolStartPage(container);
-		const agentMenuItem = [...agentStartPage.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
-			candidate.textContent?.includes("Agents"),
-		)!;
-		await act(async () => agentMenuItem.click());
+		const knowledgeStartPage = await openToolStartPage(container);
+		await act(async () => button(knowledgeStartPage, "Knowledge").click());
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
 		const backendCalls =
@@ -5323,6 +5367,7 @@ describe("Chat desktop shell", () => {
 		);
 
 		await act(async () => button(container, "Chat").click());
+		await act(async () => button(container, "Chat project task").click());
 		await flush();
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "chat-existing" });
 		const visiblePanel = activeWorkspace(container).querySelector<HTMLElement>(".workspace-panel:not([hidden]) > *")!;
@@ -5340,7 +5385,7 @@ describe("Chat desktop shell", () => {
 		expect(chatToolMenu.textContent).not.toContain("Browser");
 		expect(chatToolMenu.textContent).not.toContain("Review");
 		expect(chatToolMenu.textContent).not.toContain("Files");
-		expect(chatToolMenu.textContent).toContain("Agents");
+		expect(chatToolMenu.textContent).not.toContain("Agents");
 		await act(async () => root.unmount());
 	});
 
@@ -5370,9 +5415,11 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".plugins-catalog-page")).not.toBeNull();
 		expect(button(container, "Go back").disabled).toBe(false);
 
+		await act(async () => button(container, "Code").click());
 		await act(async () => button(container, "Go back").click());
 		await flush();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.querySelector(".mode-switch")?.getAttribute("data-mode")).toBe("code");
 		expect(button(container, "Go forward").disabled).toBe(false);
 
 		await act(async () => button(container, "Go forward").click());
@@ -5524,8 +5571,10 @@ describe("Chat desktop shell", () => {
 		).toEqual(["tool-tabs-scroll", "tool-add"]);
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await act(async () => button(container, "Chat").click());
+		await act(async () => button(container, "Chat project task").click());
 		await flush();
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
@@ -6053,6 +6102,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await act(async () => button(container, "Other task").click());
 		await flush();
@@ -6182,6 +6232,7 @@ describe("Chat desktop shell", () => {
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
 			await act(async () => button(container, "Code").click());
+			await act(async () => button(container, "Code project task").click());
 			await flush();
 			await act(async () => button(container, "Mode race worker").click());
 			await flush();
@@ -6197,7 +6248,7 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
-	it("renders a live agent tree for a session that is not the focused chat", async () => {
+	it("opens a child from the left tree while another session is focused and preserves its tools", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
 			x: 0,
@@ -6250,6 +6301,10 @@ describe("Chat desktop shell", () => {
 			...snapshot(summaries[sessionId]!),
 			agents: sessionId === "code-existing" ? [worker] : [],
 		}));
+		vi.mocked(api.listAgents).mockImplementation(async ({ sessionId }) => ({
+			agents: sessionId === "code-existing" ? [worker] : [],
+			nextAfterAgentId: null,
+		}));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -6257,38 +6312,36 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
-		await addTool(container, "Agents");
+		await addTool(container, "Knowledge");
 		await flush();
 
-		// The sidebar follows the focused session: switching away hides this
-		// session's tool panels without unmounting them.
+		// Other right-side tools still follow their owning session.
 		await act(async () => button(container, "Other code task").click());
 		await flush();
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-other" });
-		expect(activeWorkspace(container).querySelector(".tool-sidebar-panel:not([hidden]) .subagent-panel")).toBeNull();
 		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(1);
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-label="Knowledge"]')).toBeNull();
 
-		// Switching back restores this session's strip with Agents still active.
-		await act(async () => button(container, "Code project task").click());
+		const sessionsSidebar = container.querySelector<HTMLElement>(".session-sidebar")!;
+		await act(async () => button(sessionsSidebar, "Code worker").click());
 		await flush();
-		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
-			expect.objectContaining({ liveSessionIds: ["code-existing"] }),
-		);
-
-		const visiblePanels = [
-			...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-sidebar-panel:not([hidden])"),
-		];
-		const agentPanel = visiblePanels.find((panel) => panel.querySelector(".subagent-panel"));
-		expect(agentPanel).toBeTruthy();
-		expect(agentPanel!.textContent).toContain("Code worker");
-		expect(activeWorkspace(container).textContent).not.toContain("This session is not in focus.");
-
-		await act(async () => button(agentPanel!, "View transcript for Code worker").click());
-		await flush();
+		expect(
+			activeWorkspace(container).querySelector('.workspace-panel:not([hidden]) [data-agent-id="worker-1"]'),
+		).not.toBeNull();
 		expect(api.readAgentItems).toHaveBeenCalledWith(
 			expect.objectContaining({ sessionId: "code-existing", agentId: "worker-1" }),
 		);
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: ["code-existing"] }),
+		);
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-label="Knowledge"]')).not.toBeNull();
+		const childTabs = () => activeWorkspace(container).querySelectorAll('[role="tab"][aria-label="Code worker"]');
+		expect(childTabs()).toHaveLength(1);
+		await act(async () => button(sessionsSidebar, "Code worker").click());
+		await flush();
+		expect(childTabs()).toHaveLength(1);
 
 		await act(async () => root.unmount());
 	});
@@ -6402,7 +6455,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("activates an automatically opened Process tab during the turn and returns to chat after it", async () => {
+	it("opens process history during the turn and keeps the completed output visible", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
@@ -6423,6 +6476,7 @@ describe("Chat desktop shell", () => {
 				activeTurnId: "turn-running",
 				process: {
 					processId: "process-one",
+					turnId: "turn-running",
 					command: "echo one",
 					output: "one\n",
 					state: "running",
@@ -6432,7 +6486,7 @@ describe("Chat desktop shell", () => {
 		);
 		expect(
 			activeWorkspace(container).querySelector(
-				'.tool-sidebar-tabbar [role="tab"][aria-label="Process"][aria-selected="true"]',
+				'.tool-sidebar-tabbar [role="tab"][aria-label="Activity log"][aria-selected="true"]',
 			),
 		).not.toBeNull();
 
@@ -6441,6 +6495,7 @@ describe("Chat desktop shell", () => {
 				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
 				process: {
 					processId: "process-one",
+					turnId: "turn-running",
 					command: "echo one",
 					output: "one\n",
 					state: "completed",
@@ -6448,23 +6503,24 @@ describe("Chat desktop shell", () => {
 				},
 			}),
 		);
-		// The chat tab reactivates in the pane while Process stays in the sidebar.
+		// The conversation remains selected while completed process output stays visible.
 		expect(
 			activeWorkspace(container)
 				.querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] [aria-selected="true"]')
 				?.getAttribute("aria-label"),
 		).toBe("Chat project task");
-		expect(activeWorkspace(container).querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
+		expect(activeWorkspace(container).querySelector('[role="tab"][aria-label="Activity log"]')).not.toBeNull();
 
-		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
-		await act(async () => button(toolsStrip, "Process").click());
+		expect(
+			activeWorkspace(container).querySelector('[role="tab"][aria-label="Activity log"][aria-selected="true"]'),
+		).not.toBeNull();
 		expect(container.querySelector(".tool-sidebar-panel:not([hidden]) .process-panel")?.textContent).toContain(
 			"Command completed",
 		);
 		await act(async () => root.unmount());
 	});
 
-	it("reactivates the Process tab for each new command even after the user returns to chat", async () => {
+	it("keeps process history closed for the rest of a turn and opens it on the next turn", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
@@ -6485,6 +6541,7 @@ describe("Chat desktop shell", () => {
 				activeTurnId: "turn-running",
 				process: {
 					processId: "process-one",
+					turnId: "turn-running",
 					command: "echo one",
 					output: "one\n",
 					state: "running",
@@ -6495,8 +6552,9 @@ describe("Chat desktop shell", () => {
 		const sessionStrip = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar[data-pane-id]")!;
 		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
 		const chatTab = () => button(sessionStrip, "Chat project task");
-		const processTab = () => button(toolsStrip, "Process");
-		await act(async () => chatTab().click());
+		const processTab = () => button(toolsStrip, "Activity log");
+		await act(async () => button(container, "Hide tools sidebar").click());
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.hidden).toBe(true);
 
 		await act(async () =>
 			store.applySnapshot({
@@ -6504,6 +6562,7 @@ describe("Chat desktop shell", () => {
 				activeTurnId: "turn-running",
 				process: {
 					processId: "process-two",
+					turnId: "turn-running",
 					command: "echo two",
 					output: "two\n",
 					state: "running",
@@ -6511,16 +6570,15 @@ describe("Chat desktop shell", () => {
 				},
 			}),
 		);
-		expect(processTab().getAttribute("aria-selected")).toBe("true");
-		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain(
-			"echo two",
-		);
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.hidden).toBe(true);
+		expect(container.querySelector(".process-panel:not([hidden])")).toBeNull();
 
 		await act(async () =>
 			store.applySnapshot({
 				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
 				process: {
 					processId: "process-two",
+					turnId: "turn-running",
 					command: "echo two",
 					output: "two\n",
 					state: "completed",
@@ -6529,6 +6587,7 @@ describe("Chat desktop shell", () => {
 			}),
 		);
 		expect(chatTab().getAttribute("aria-selected")).toBe("true");
+		expect(container.querySelector<HTMLElement>(".tool-sidebar")?.hidden).toBe(true);
 
 		await act(async () =>
 			store.applySnapshot({
@@ -6536,6 +6595,7 @@ describe("Chat desktop shell", () => {
 				activeTurnId: "turn-next",
 				process: {
 					processId: "process-three",
+					turnId: "turn-next",
 					command: "echo three",
 					output: "",
 					state: "running",
@@ -6584,6 +6644,7 @@ describe("Chat desktop shell", () => {
 				await flush();
 				if (mode === "code") {
 					await act(async () => button(container, "Code").click());
+					await act(async () => button(container, "Code project task").click());
 					await flush();
 				}
 				const draftClose = container.querySelector<HTMLButtonElement>('[aria-label="Close New task"]');
@@ -6653,6 +6714,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Review");
 		await flush();
@@ -6683,6 +6745,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Terminal");
 		await flush();
@@ -6737,6 +6800,7 @@ describe("Chat desktop shell", () => {
 		Object.defineProperty(container.querySelector(".workspace"), "clientWidth", { configurable: true, value: 1_200 });
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Files");
 		await flush();
@@ -6795,8 +6859,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
 		await act(async () => button(container, "Chat").click());
 		await flush();
-		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await act(async () => button(activeWorkspace(container), "README.md").click());
 		await flush();
@@ -6807,6 +6872,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Files");
 		await flush();
@@ -6843,6 +6909,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Files");
 		await flush();
@@ -6891,8 +6958,9 @@ describe("Chat desktop shell", () => {
 		expect(editor.state.doc.toString()).toBe("# Edited README");
 		await act(async () => button(container, "Chat").click());
 		await flush();
-		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(0);
+		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(1);
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await act(async () => button(fileTabbar, "README.md").click());
 		await flush();
@@ -7094,6 +7162,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Files");
 		await flush();
@@ -7258,6 +7327,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Code").click());
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		await addTool(container, "Files");
 		await flush();
@@ -7571,7 +7641,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: target.sessionId });
-		expect(container.querySelector(".mode-switch")?.getAttribute("data-mode")).toBe("code");
+		expect(container.querySelector(".mode-switch")?.getAttribute("data-mode")).toBe("chat");
 		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
 			dirty: false,
 			language: "en",

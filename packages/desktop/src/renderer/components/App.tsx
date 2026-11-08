@@ -70,9 +70,9 @@ interface AppProps {
 
 type WindowsNavigationLocation =
 	| { readonly view: "settings" }
-	| { readonly view: "tasks"; readonly mode: AgentMode; readonly sessionId: string | null }
-	| { readonly view: "skills"; readonly mode: AgentMode; readonly section: "skills" | "mcp" }
-	| { readonly view: "schedules"; readonly mode: AgentMode; readonly taskId: string | null };
+	| { readonly view: "tasks"; readonly sessionId: string | null }
+	| { readonly view: "skills"; readonly section: "skills" | "mcp" }
+	| { readonly view: "schedules"; readonly taskId: string | null };
 
 const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
@@ -196,6 +196,7 @@ export function App({ api, store }: AppProps) {
 	const draftBusy = workspaceState.draftBusy;
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [imageGenerationSettingsFocus, setImageGenerationSettingsFocus] = useState(false);
 	const [permissionRuleFocus, setPermissionRuleFocus] = useState<PermissionRuleReference | null>(null);
 	const [codeProjectSetupOpen, setCodeProjectSetupOpen] = useState(false);
 	const codeProjectSetupGeneration = useRef(0);
@@ -216,6 +217,17 @@ export function App({ api, store }: AppProps) {
 		readonly plan: PlanView;
 	} | null>(null);
 	const [activeAgentConversation, setActiveAgentConversation] = useState<AgentConversationTarget | null>(null);
+	const [agentRemovalRequest, setAgentRemovalRequest] = useState<{
+		nonce: number;
+		rootSessionId: string;
+		agentIds: readonly string[];
+	}>();
+	const [agentRenameRequest, setAgentRenameRequest] = useState<{
+		nonce: number;
+		rootSessionId: string;
+		agentId: string;
+		name: string;
+	}>();
 	const [agentFocusRequest, setAgentFocusRequest] = useState<{
 		nonce: number;
 		target: AgentConversationTarget;
@@ -269,10 +281,10 @@ export function App({ api, store }: AppProps) {
 	const [fullscreen, setFullscreen] = useState(false);
 	const currentNavigationLocation = useMemo<WindowsNavigationLocation>(() => {
 		if (settingsOpen) return { view: "settings" };
-		if (destination === "skills") return { view: "skills", mode, section: pluginSection };
-		if (destination === "schedules") return { view: "schedules", mode, taskId: selectedScheduleTaskId };
-		return { view: "tasks", mode, sessionId: newTaskDraft ? null : state.activeSessionId };
-	}, [destination, mode, newTaskDraft, pluginSection, selectedScheduleTaskId, settingsOpen, state.activeSessionId]);
+		if (destination === "skills") return { view: "skills", section: pluginSection };
+		if (destination === "schedules") return { view: "schedules", taskId: selectedScheduleTaskId };
+		return { view: "tasks", sessionId: newTaskDraft ? null : state.activeSessionId };
+	}, [destination, newTaskDraft, pluginSection, selectedScheduleTaskId, settingsOpen, state.activeSessionId]);
 	const rememberCurrentNavigation = useCallback(() => {
 		if (api.platform !== "win32") return;
 		setNavigationBack((entries) => {
@@ -635,17 +647,15 @@ export function App({ api, store }: AppProps) {
 					return;
 				}
 				setSettingsOpen(false);
+				setImageGenerationSettingsFocus(false);
 				if (target.view === "tasks") {
 					setDestination("tasks");
 					if (target.sessionId && store.getSnapshot().sessionsById.has(target.sessionId)) {
 						await workspaceWorkflow.openVisibleSession(target.sessionId);
 					} else {
-						workspaceWorkflow.startNewTask(target.mode);
+						workspaceWorkflow.startNewTask();
 					}
 					return;
-				}
-				if (workspaceWorkflow.getSnapshot().mode !== target.mode) {
-					await workspaceWorkflow.selectMode(target.mode);
 				}
 				if (target.view === "skills") {
 					setPluginSection(target.section);
@@ -677,15 +687,8 @@ export function App({ api, store }: AppProps) {
 	const createEmptySessionInProject = useCallback(
 		async (projectMode: AgentMode, cwd: string): Promise<void> => {
 			rememberCurrentNavigation();
-			if (projectMode === "code") {
-				cancelHomeTransition();
-				setDestination("tasks");
-				closeCodeProjectSetup();
-				workspaceWorkflow.startNewTask("code");
-				workspaceWorkflow.setDraftFolder(cwd);
-				requestChatFocus(null);
-				return;
-			}
+			cancelHomeTransition();
+			closeCodeProjectSetup();
 			setDestination("tasks");
 			await workspaceWorkflow.createSessionInProject(projectMode, cwd);
 			const created = store.getSnapshot().activeSessionId;
@@ -700,6 +703,7 @@ export function App({ api, store }: AppProps) {
 			workspaceWorkflow,
 		],
 	);
+
 	const createEmptyProjectSession = useCallback(
 		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
 		[createEmptySessionInProject],
@@ -716,6 +720,33 @@ export function App({ api, store }: AppProps) {
 	const deleteSession = useCallback(
 		(session: SessionSummary) => workspaceWorkflow.deleteSession(session),
 		[workspaceWorkflow],
+	);
+	const archiveSession = useCallback(
+		(session: SessionSummary) => workspaceWorkflow.archiveSession(session),
+		[workspaceWorkflow],
+	);
+	const restoreArchivedConversation = useCallback(
+		(session: SessionSummary, agentId?: string) => workspaceWorkflow.restoreArchivedConversation(session, agentId),
+		[workspaceWorkflow],
+	);
+	const removeAgentConversations = useCallback((rootSessionId: string, agentIds: readonly string[]) => {
+		setAgentRemovalRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, rootSessionId, agentIds }));
+		setActiveAgentConversation((current) =>
+			current?.sessionId === rootSessionId && agentIds.includes(current.agentId) ? null : current,
+		);
+	}, []);
+	const renameAgentConversation = useCallback((rootSessionId: string, agentId: string, name: string) => {
+		setAgentRenameRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, rootSessionId, agentId, name }));
+		setActiveAgentConversation((current) =>
+			current?.sessionId === rootSessionId && current.agentId === agentId ? { ...current, name } : current,
+		);
+	}, []);
+	const deleteArchivedAgent = useCallback(
+		async (rootSessionId: string, agentId: string) => {
+			await api.deleteAgent({ sessionId: rootSessionId, agentId, requestId: crypto.randomUUID() });
+			removeAgentConversations(rootSessionId, [agentId]);
+		},
+		[api, removeAgentConversations],
 	);
 
 	const openVisibleSession = useCallback(
@@ -747,6 +778,7 @@ export function App({ api, store }: AppProps) {
 			cancelHomeTransition();
 			setDestination("tasks");
 			setSettingsOpen(false);
+			setImageGenerationSettingsFocus(false);
 			closeCodeProjectSetup();
 			focusAgentConversation(target);
 			setAgentFocusRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, target }));
@@ -873,13 +905,8 @@ export function App({ api, store }: AppProps) {
 		(sessionId: string): WorkspaceProject | null => {
 			const session = store.getSnapshot().sessionsById.get(sessionId);
 			if (!session?.cwd || session.cwdOrigin === "managed") return null;
-			// One folder is one group across modes, so its label must not depend on
-			// which mode's session happens to lead the group: prefer the Code alias,
-			// then the Chat alias, then the folder name.
 			const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
-			const alias =
-				projectPreferences.get(sessionProjectKey("code", session.cwd))?.alias ??
-				projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
+			const alias = projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
 			return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
 		},
 		[projectPreferences, store],
@@ -887,37 +914,14 @@ export function App({ api, store }: AppProps) {
 
 	const changeMode = useCallback(
 		(nextMode: AgentMode) => {
-			if (nextMode === mode) return;
-			const focusNonce = ++chatFocusNonce.current;
-			rememberCurrentNavigation();
-			cancelHomeTransition();
-			setDestination("tasks");
-			closeCodeProjectSetup();
-			setError(null);
-			void workspaceWorkflow.selectMode(nextMode).then(() => {
-				if (chatFocusNonce.current !== focusNonce) return;
-				const landedDraft = workspaceWorkflow.getSnapshot().draft;
-				requestChatFocus(landedDraft ? landedDraft.sessionId : store.getSnapshot().activeSessionId);
-			});
+			void workspaceWorkflow.selectMode(nextMode);
 		},
-		[
-			cancelHomeTransition,
-			closeCodeProjectSetup,
-			mode,
-			rememberCurrentNavigation,
-			requestChatFocus,
-			store,
-			workspaceWorkflow,
-		],
+		[workspaceWorkflow],
 	);
 
-	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
+	const visibleNewTaskDraft = destination === "tasks" ? newTaskDraft : null;
 	const recentHomeProjects = useMemo(
-		() =>
-			recentProjectsFromGroups([
-				...buildSessionTree(sidebarState, "chat", projectPreferences).projects,
-				...buildSessionTree(sidebarState, "code", projectPreferences).projects,
-			]),
+		() => recentProjectsFromGroups(buildSessionTree(sidebarState, projectPreferences).projects),
 		[projectPreferences, sidebarState],
 	);
 	const activeCodeProjectSetupRequest = codeProjectSetupRequest.current;
@@ -945,7 +949,7 @@ export function App({ api, store }: AppProps) {
 	const createScheduleWithMetis = async (cwd: string | null) => {
 		rememberCurrentNavigation();
 		setDestination("tasks");
-		workspaceWorkflow.startNewTask("chat");
+		workspaceWorkflow.startNewTask();
 		workspaceWorkflow.setDraftFolder(cwd);
 		await workspaceWorkflow.submitNewTask(
 			{ text: ASSISTED_SCHEDULE_PROMPT, attachments: [] },
@@ -960,7 +964,7 @@ export function App({ api, store }: AppProps) {
 				? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
 				: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
 		setDestination("tasks");
-		workspaceWorkflow.startNewTask("chat");
+		workspaceWorkflow.startNewTask();
 		workspaceWorkflow.setDraftFolder(target.cwd);
 		await workspaceWorkflow.submitNewTask({ text: prompt, attachments: [] });
 	};
@@ -970,13 +974,7 @@ export function App({ api, store }: AppProps) {
 		? state.sessionsById.get(workspaceState.openingSessionId)
 		: undefined;
 	const newTaskOpen = visibleNewTaskDraft !== null;
-	const visibleActiveSession =
-		destination === "tasks" &&
-		activeSession &&
-		(activeSession.mode === mode || openingSession?.mode === mode) &&
-		!newTaskOpen
-			? activeSession
-			: undefined;
+	const visibleActiveSession = destination === "tasks" && activeSession && !newTaskOpen ? activeSession : undefined;
 	const toolsSession =
 		visibleActiveSession ??
 		(visibleNewTaskDraft?.sessionId
@@ -1023,7 +1021,6 @@ export function App({ api, store }: AppProps) {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
 	}, []);
 	const workspaceProjectName = (() => {
-		const contextMode = visibleActiveSession?.mode ?? visibleNewTaskDraft?.mode ?? mode;
 		// Managed sessions live under uuid-named directories, so the cwd
 		// basename is not a project name — fall back to the app name like the
 		// sidebar's task grouping does.
@@ -1033,7 +1030,7 @@ export function App({ api, store }: AppProps) {
 				: (visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null);
 		if (!cwd) return "Metis";
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
-		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
+		return projectPreferences.get(sessionProjectKey("chat", cwd))?.alias ?? name;
 	})();
 
 	useEffect(() => {
@@ -1152,7 +1149,7 @@ export function App({ api, store }: AppProps) {
 		};
 	}, [api, bootstrapped, reportError, serverReady, settingsOpen]);
 	const interactiveSessionId =
-		destination === "tasks" && openingSession?.mode === mode
+		destination === "tasks" && openingSession
 			? openingSession.sessionId
 			: (visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId ?? undefined);
 	const visibleInteraction = firstInteractionForSession(
@@ -1494,8 +1491,13 @@ export function App({ api, store }: AppProps) {
 		},
 		[openSettings],
 	);
+	const configureImageGeneration = useCallback(() => {
+		setImageGenerationSettingsFocus(true);
+		openSettings();
+	}, [openSettings]);
 	const closeSettings = useCallback(() => {
 		setSettingsOpen(false);
+		setImageGenerationSettingsFocus(false);
 		setPermissionRuleFocus(null);
 		if (api.platform === "win32") {
 			setNavigationBack((entries) => entries.slice(0, -1));
@@ -1583,8 +1585,21 @@ export function App({ api, store }: AppProps) {
 		};
 	}, []);
 
+	const sidebarAgentNavigation = useMemo(
+		() => ({
+			api,
+			active: activeAgentConversation,
+			onOpen: openAgentConversation,
+			onRemoved: removeAgentConversations,
+			onRenamed: renameAgentConversation,
+		}),
+		[api, activeAgentConversation, openAgentConversation, removeAgentConversations, renameAgentConversation],
+	);
 	const sidebarProjectBusy = useCallback(
-		(group: ProjectSessionGroup) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.mode, group.cwd)),
+		(group: ProjectSessionGroup) =>
+			(["chat", "code"] as const).some((value) =>
+				workspaceState.busyProjectKeys.has(sessionProjectKey(value, group.cwd)),
+			),
 		[workspaceState.busyProjectKeys],
 	);
 	const sidebarWorkspace = useMemo(
@@ -1595,6 +1610,7 @@ export function App({ api, store }: AppProps) {
 			onCreateProjectSession: createEmptyProjectSession,
 			onDeleteProject: deleteProject,
 			onDeleteSession: deleteSession,
+			onArchiveSession: archiveSession,
 			onModeChange: changeMode,
 			onNewTask: startNewTask,
 			onOpen: openVisibleSession,
@@ -1615,6 +1631,7 @@ export function App({ api, store }: AppProps) {
 			createEmptyProjectSession,
 			deleteProject,
 			deleteSession,
+			archiveSession,
 			draftBusy,
 			mode,
 			newTaskOpen,
@@ -1642,6 +1659,7 @@ export function App({ api, store }: AppProps) {
 	// stable so memoized chat views only re-render on their own bucket changes.
 	const chatView = useMemo<SessionChatViewContext>(
 		() => ({
+			appearance: mode,
 			api,
 			bootstrapped,
 			composerFormRef: conversationComposerFormRef,
@@ -1651,6 +1669,7 @@ export function App({ api, store }: AppProps) {
 			onChangePermissionPreset: changePermissionPreset,
 			onChangeThinking: changeThinking,
 			onClearError: clearError,
+			onConfigureImageGeneration: configureImageGeneration,
 			onError: reportError,
 			onFork: forkFromReply,
 			onManageMcp: openMcpManagement,
@@ -1670,10 +1689,12 @@ export function App({ api, store }: AppProps) {
 		[
 			api,
 			bootstrapped,
+			mode,
 			changeModel,
 			changePermissionPreset,
 			changeThinking,
 			clearError,
+			configureImageGeneration,
 			forkFromReply,
 			handlePreviewDeliveredFile,
 			openKnowledge,
@@ -1695,7 +1716,6 @@ export function App({ api, store }: AppProps) {
 	const homePage = visibleNewTaskDraft ? (
 		<>
 			<NewTaskHome
-				key={mode}
 				busy={draftBusy || !serverReady}
 				commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
 				composerFormRef={homeComposerFormRef}
@@ -1708,7 +1728,7 @@ export function App({ api, store }: AppProps) {
 				knowledge={{
 					api,
 					sessionId: visibleNewTaskDraft.sessionId ?? undefined,
-					disabled: draftBusy || !serverReady || (mode === "code" && !visibleNewTaskDraft.folder),
+					disabled: draftBusy || !serverReady,
 					onPrepare: () => workspaceWorkflow.prepareNewTask(),
 					onOpen: openKnowledge,
 				}}
@@ -1721,7 +1741,7 @@ export function App({ api, store }: AppProps) {
 						folderLocked={visibleNewTaskDraft.sessionId !== null}
 						mode={mode}
 						onChooseFolder={chooseNewTaskFolder}
-						onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
+						onClearFolder={() => clearHomeProject(mode)}
 						onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
 					/>
 				}
@@ -1833,7 +1853,7 @@ export function App({ api, store }: AppProps) {
 					)}
 					{sessionsSidebarOpen && (
 						<SessionSidebar
-							agentNavigation={{ api, active: activeAgentConversation, onOpen: openAgentConversation }}
+							agentNavigation={sidebarAgentNavigation}
 							destination={destination}
 							isClosing={sidebarClosing}
 							onDeleteSchedule={deleteScheduledTask}
@@ -1917,7 +1937,7 @@ export function App({ api, store }: AppProps) {
 								serverReady={serverReady}
 								state={state}
 							/>
-						) : destination === "schedules" && mode === "chat" ? (
+						) : destination === "schedules" ? (
 							<ScheduledTasksPanel
 								api={api}
 								onCreateWithMetis={createScheduleWithMetis}
@@ -1935,6 +1955,8 @@ export function App({ api, store }: AppProps) {
 							<SessionWorkspaceView
 								agentFocusRequest={agentFocusRequest}
 								onAgentConversationFocus={focusAgentConversation}
+								agentRemovalRequest={agentRemovalRequest}
+								agentRenameRequest={agentRenameRequest}
 								api={api}
 								chat={newTaskOpen || !visibleActiveSession ? homePage : null}
 								chatView={chatView}
@@ -1997,6 +2019,8 @@ export function App({ api, store }: AppProps) {
 				{settingsOpen ? (
 					<SettingsDialog
 						api={api}
+						workMode={mode}
+						onWorkModeChange={changeMode}
 						generalPreferences={generalPreferences}
 						onClose={closeSettings}
 						onGeneralPreferencesChange={setGeneralPreferences}
@@ -2007,6 +2031,10 @@ export function App({ api, store }: AppProps) {
 							state.activeSessionId ? state.sessions.get(state.activeSessionId)?.permissionPreset : undefined
 						}
 						permissionRuleFocus={permissionRuleFocus}
+						focusImageGeneration={imageGenerationSettingsFocus}
+						onDeleteSession={deleteSession}
+						onDeleteAgent={deleteArchivedAgent}
+						onRestoreConversation={restoreArchivedConversation}
 						sessionCwd={state.activeSessionId ? state.sessionsById.get(state.activeSessionId)?.cwd : undefined}
 						sessionTitle={
 							state.activeSessionId

@@ -1,4 +1,5 @@
 import type {
+	AgentMode,
 	InteractionResponseInput,
 	McpServerSummaryView,
 	ModelOptionView,
@@ -25,6 +26,7 @@ import { emptyProjection } from "../store/reducer.ts";
 import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
+import { type ImageGenerationActions, ImageGenerationContext } from "./ImageGenerationContext.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
@@ -46,6 +48,7 @@ export type SessionChatSubmit = (input: ConversationSubmission) => Promise<void>
 // the pane's sessionId explicitly so one implementation serves every visible
 // session, not just the projected one.
 export interface SessionChatViewContext {
+	readonly appearance?: AgentMode;
 	readonly api: MetisDesktopApi;
 	readonly bootstrapped: boolean;
 	readonly composerFormRef: RefObject<HTMLFormElement | null>;
@@ -57,6 +60,7 @@ export interface SessionChatViewContext {
 	readonly onChangePermissionPreset: (sessionId: string, preset: PermissionPresetView) => Promise<void>;
 	readonly onChangeThinking: (sessionId: string, selection: ThinkingSelectionView) => Promise<void>;
 	readonly onClearError: () => void;
+	readonly onConfigureImageGeneration?: () => void;
 	readonly onError: (cause: unknown) => void;
 	readonly onFork: (sessionId: string, entryId: string) => void;
 	readonly onManageMcp: () => void;
@@ -85,6 +89,7 @@ export interface SessionChatViewProps extends SessionChatViewContext {
 }
 
 export const SessionChatView = memo(function SessionChatView({
+	appearance = "chat",
 	api,
 	bootstrapped,
 	canonicalComposer,
@@ -94,6 +99,7 @@ export const SessionChatView = memo(function SessionChatView({
 	onChangePermissionPreset,
 	onChangeThinking,
 	onClearError,
+	onConfigureImageGeneration,
 	onError,
 	onFork,
 	onManageMcp,
@@ -127,6 +133,27 @@ export const SessionChatView = memo(function SessionChatView({
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [mcpServers, setMcpServers] = useState<readonly McpServerSummaryView[]>([]);
 	const [prefillRequest, setPrefillRequest] = useState<ComposerPrefillRequest>();
+	const imageGenerationActions = useMemo<ImageGenerationActions>(
+		() => ({
+			api,
+			onConfigure: onConfigureImageGeneration,
+			onReveal: (owner, fileId) =>
+				api.openDeliveredFile({ sessionId: owner, fileId, action: "reveal" }).then(() => undefined),
+			onEdit:
+				session?.scheduled === undefined
+					? (_owner, image) => {
+							setPrefillRequest((current) => ({
+								id: (current?.id ?? 0) + 1,
+								text: t("Please continue editing {{name}} ({{reference}}):", {
+									name: image.name,
+									reference: `metis-image:${image.fileId}`,
+								}),
+							}));
+						}
+					: undefined,
+		}),
+		[api, onConfigureImageGeneration, session?.scheduled, t],
+	);
 	const [composerControl, setComposerControl] = useState<{
 		readonly id: number;
 		readonly target: "model" | "thinking" | "mcp" | null;
@@ -697,41 +724,43 @@ export const SessionChatView = memo(function SessionChatView({
 
 	return (
 		<div className="workspace-body">
-			<div className="conversation-column" data-mode={session?.mode ?? "chat"}>
-				<Transcript
-					interactions={{
-						requests: inlineInteractions,
-						onRespond,
-						askUserDrafts: askUserDrafts.current,
-						sandboxHealth: projection.sandboxHealth,
-						disabled: !visible || !serverReady || !syncReady,
-					}}
-					quoteSessionId={visible && serverReady ? writableSessionId : undefined}
-					showNavigation
-					submittedTurnId={submittedTurnId}
-					activeTurnId={projection.activeTurnId}
-					retry={projection.retry}
-					waitingForAnswer={waitingForAnswer}
-					activeTurnStartedAt={
-						projection.activeTurnId ? projection.turnsById.get(projection.activeTurnId)?.startedAt : undefined
-					}
-					appearance={session?.mode ?? "chat"}
-					autoLoadOlder
-					hasOlder={projection.nextBeforeItemId !== null}
-					itemIds={projection.itemOrder}
-					itemsById={projection.itemsById}
-					loadingOlder={loadingOlder}
-					onCancelPlan={cancelPlanAction}
-					onCopy={copyText}
-					onFork={forkItem}
-					onLoadOlder={loadOlder}
-					onOpenDeliveredFile={openDeliveredFile}
-					onOpenPlan={openPlan}
-					onPreviewDeliveredFile={previewDeliveredFile}
-					onRevisePlan={revisePlan}
-					onStartPlan={startPlanAction}
-					planActionsBusy={planActionsBusy}
-				/>
+			<div className="conversation-column" data-mode={appearance}>
+				<ImageGenerationContext.Provider value={imageGenerationActions}>
+					<Transcript
+						interactions={{
+							requests: inlineInteractions,
+							onRespond,
+							askUserDrafts: askUserDrafts.current,
+							sandboxHealth: projection.sandboxHealth,
+							disabled: !visible || !serverReady || !syncReady,
+						}}
+						quoteSessionId={visible && serverReady ? writableSessionId : undefined}
+						showNavigation
+						submittedTurnId={submittedTurnId}
+						activeTurnId={projection.activeTurnId}
+						retry={projection.retry}
+						waitingForAnswer={waitingForAnswer}
+						activeTurnStartedAt={
+							projection.activeTurnId ? projection.turnsById.get(projection.activeTurnId)?.startedAt : undefined
+						}
+						appearance={appearance}
+						autoLoadOlder
+						hasOlder={projection.nextBeforeItemId !== null}
+						itemIds={projection.itemOrder}
+						itemsById={projection.itemsById}
+						loadingOlder={loadingOlder}
+						onCancelPlan={cancelPlanAction}
+						onCopy={copyText}
+						onFork={forkItem}
+						onLoadOlder={loadOlder}
+						onOpenDeliveredFile={openDeliveredFile}
+						onOpenPlan={openPlan}
+						onPreviewDeliveredFile={previewDeliveredFile}
+						onRevisePlan={revisePlan}
+						onStartPlan={startPlanAction}
+						planActionsBusy={planActionsBusy}
+					/>
+				</ImageGenerationContext.Provider>
 				{compactingStartedAt !== null && (
 					<TurnRuntimeStatus items={[]} running startedAt={compactingStartedAt} variant="compaction" />
 				)}
@@ -742,7 +771,7 @@ export const SessionChatView = memo(function SessionChatView({
 								? { api, sessionId: writableSessionId, onOpen: onOpenKnowledge }
 								: undefined
 						}
-						appearance={session?.mode ?? "chat"}
+						appearance={appearance}
 						collaborationControl={collaborationControl}
 						contextControl={planRevisionChip}
 						contextUsageExpanded={sessionStatusPanel?.sessionId === sessionId && !sessionStatusPanel.closing}

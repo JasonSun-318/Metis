@@ -228,7 +228,7 @@ async function mount(options: { hasOlder?: boolean; onLoadOlder?: () => Promise<
 					hasOlder={hasOlder}
 					itemIds={items.map((item) => item.itemId)}
 					itemsById={new Map(items.map((item) => [item.itemId, item]))}
-					latestLabel="Latest"
+					activeTurnId={`${sessionId}-turn`}
 					loadingOlder={false}
 					onLoadOlder={onLoadOlder}
 					quoteSessionId={sessionId}
@@ -386,6 +386,7 @@ describe("Transcript rail scroll ownership", () => {
 		await view.render(FIRST_SESSION, "A longer streaming answer");
 		await view.resize();
 		expect(view.scroll.scrollTop).toBe(300);
+		expect(view.container.querySelector(".transcript-latest")?.textContent).toBe("Scroll to bottom");
 		metrics.viewportHeight = 500;
 		await view.resize();
 		expect(view.scroll.scrollTop).toBe(300);

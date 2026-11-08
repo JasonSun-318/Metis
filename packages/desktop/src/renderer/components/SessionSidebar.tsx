@@ -1,4 +1,4 @@
-import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
+import type { AgentMode, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,7 +7,7 @@ import type { AgentActivity } from "../agent-activity.ts";
 import { useAgentActivities } from "../hooks/use-agent-activities.ts";
 import { localeForIntl } from "../i18n.ts";
 import { CaretDown, CaretRight } from "../icons.tsx";
-import type { ProjectSessionGroup } from "../session-groups.ts";
+import type { ProjectDeletePreview, ProjectSessionGroup } from "../session-groups.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
@@ -19,7 +19,7 @@ import {
 	loadSessionGroupingPreferences,
 	type SessionGroupBy,
 	saveSessionGroupingPreferences,
-	sessionsForMode,
+	sidebarSessions,
 } from "../store/session-grouping.ts";
 import { AccountMenu } from "./AccountMenu.tsx";
 import { AgentSidebarBranch, type AgentSidebarNavigation } from "./AgentSidebarBranch.tsx";
@@ -91,17 +91,15 @@ export interface SessionSidebarWorkspace {
 	readonly onModeChange: (mode: AgentMode) => void;
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
+	readonly onArchiveSession?: (session: SessionSummary) => Promise<void>;
 	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
 	readonly onPinSession: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
 	readonly onCopySessionTitle: (title: string) => Promise<void>;
 	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
-	readonly onDeleteProject: (
-		group: ProjectSessionGroup,
-		preview: ClientResult<"project/deletePreview">,
-	) => Promise<void>;
+	readonly onDeleteProject: (group: ProjectSessionGroup, preview: ProjectDeletePreview) => Promise<void>;
 	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
-	readonly onPreviewProjectDelete: (group: ProjectSessionGroup) => Promise<ClientResult<"project/deletePreview">>;
+	readonly onPreviewProjectDelete: (group: ProjectSessionGroup) => Promise<ProjectDeletePreview>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
@@ -119,17 +117,16 @@ function projectName(cwd: string): string {
 
 export function buildSessionTree(
 	state: Pick<AppStoreSnapshot, "sessionOrder" | "sessionsById">,
-	mode: AgentMode,
 	preferences: ProjectPreferenceMap,
 	excludedSessionIds: ReadonlySet<string> = new Set(),
 ): SessionTree {
 	const modePreferences = new Map<string, ProjectPreference>();
 	for (const preference of preferences.values()) {
-		if (preference.mode === mode) modePreferences.set(preference.cwd, preference);
+		if (preference.mode === "chat") modePreferences.set(preference.cwd, preference);
 	}
 	const projects = new Map<string, SessionSummary[]>();
 	const tasks: SessionSummary[] = [];
-	for (const session of sessionsForMode(state, mode)) {
+	for (const session of sidebarSessions(state)) {
 		if (session.scheduled) continue;
 		if (session.cwdOrigin === "managed" || !session.cwd) {
 			if (!excludedSessionIds.has(session.sessionId)) tasks.push(session);
@@ -141,7 +138,13 @@ export function buildSessionTree(
 	}
 	const groups = [...projects].map(([cwd, sessions]) => {
 		const preference = modePreferences.get(cwd);
-		return { mode, cwd, name: preference?.alias ?? projectName(cwd), pinned: preference?.pinned ?? false, sessions };
+		return {
+			mode: "chat" as const,
+			cwd,
+			name: preference?.alias ?? projectName(cwd),
+			pinned: preference?.pinned ?? false,
+			sessions,
+		};
 	});
 	return {
 		projects: [...groups.filter((group) => group.pinned), ...groups.filter((group) => !group.pinned)],
@@ -159,6 +162,7 @@ function SessionButton({
 	busy,
 	deleteDisabled,
 	onCopy,
+	onArchive,
 	onDelete,
 	onPin,
 	onRename,
@@ -173,6 +177,7 @@ function SessionButton({
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
 	readonly onCopy: (title: string) => Promise<void>;
+	readonly onArchive?: (session: SessionSummary) => Promise<void>;
 	readonly onDelete: (session: SessionSummary) => Promise<void>;
 	readonly onPin: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
@@ -219,6 +224,12 @@ function SessionButton({
 				</span>
 			</button>
 			<SessionActions
+				onArchive={
+					!session.scheduled && session.state !== "unsupported" && session.state !== "corrupt"
+						? onArchive
+						: undefined
+				}
+				archiveDisabled={Boolean(running) || deleteDisabled}
 				allowRename={!session.scheduled && session.state !== "unsupported"}
 				deleteDisabled={deleteDisabled || session.state === "unsupported"}
 				disabled={busy}
@@ -346,6 +357,7 @@ function ProjectGroup({
 							deleteDisabled={isDeleteDisabled(session)}
 							key={session.sessionId}
 							onCopy={workspace.onCopySessionTitle}
+							onArchive={workspace.onArchiveSession}
 							onDelete={workspace.onDeleteSession}
 							onOpen={workspace.onOpen}
 							onPin={workspace.onPinSession}
@@ -384,23 +396,34 @@ export const SessionSidebar = memo(function SessionSidebar({
 }: SessionSidebarProps) {
 	const { t, i18n } = useTranslation();
 	const agentMotionSeen = useRef(new Set<string>());
-	const agentNavigation = providedAgentNavigation
-		? {
-				...providedAgentNavigation,
-				motionSeen: agentMotionSeen.current,
-				attentionAgentIds: new Set(
-					state.interactionOrder.flatMap((id) => {
-						const interaction = state.interactionsById.get(id);
-						return interaction?.agentId ? [interaction.agentId] : [];
-					}),
-				),
-			}
-		: undefined;
+	const attentionAgentKey = state.interactionOrder
+		.flatMap((id) => {
+			const interaction = state.interactionsById.get(id);
+			return interaction?.agentId ? [interaction.agentId] : [];
+		})
+		.sort()
+		.join("\n");
+	const attentionAgentIds = useMemo(
+		() => new Set(attentionAgentKey ? attentionAgentKey.split("\n") : []),
+		[attentionAgentKey],
+	);
+	const agentNavigation = useMemo(
+		() =>
+			providedAgentNavigation
+				? {
+						...providedAgentNavigation,
+						motionSeen: agentMotionSeen.current,
+						attentionAgentIds,
+					}
+				: undefined,
+		[providedAgentNavigation, attentionAgentIds],
+	);
 	const {
 		busy,
 		mode,
 		newTaskOpen,
 		onCopySessionTitle,
+		onArchiveSession,
 		onDeleteSession,
 		onModeChange,
 		onNewTask,
@@ -416,15 +439,19 @@ export const SessionSidebar = memo(function SessionSidebar({
 		() => scheduleTasks.filter((task) => task.status === "active" || task.status === "paused"),
 		[scheduleTasks],
 	);
-	const modeSessions = useMemo(() => sessionsForMode(state, mode), [mode, state]);
-	const activityBySession = useAgentActivities(agentNavigation?.api, modeSessions, agentNavigation?.attentionAgentIds);
+	const modeSessions = useMemo(() => sidebarSessions(state), [state]);
+	const { activityBySession, layoutKey: agentLayoutKey } = useAgentActivities(
+		agentNavigation?.api,
+		modeSessions,
+		agentNavigation?.attentionAgentIds,
+	);
 	const scheduledSessions = useMemo(
 		() => modeSessions.filter((session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId)),
 		[modeSessions, scheduledTaskIds],
 	);
 	const tree = useMemo(
-		() => buildSessionTree(state, mode, preferences, pinnedSessionIds),
-		[mode, pinnedSessionIds, preferences, state],
+		() => buildSessionTree(state, preferences, pinnedSessionIds),
+		[pinnedSessionIds, preferences, state],
 	);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
@@ -435,7 +462,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 			return DEFAULT_SESSION_GROUPING;
 		}
 	});
-	const grouping = groupingByMode[mode];
+	const grouping = groupingByMode.chat;
 	const allSessions = useMemo(() => modeSessions.filter((session) => session.scheduled === undefined), [modeSessions]);
 	const pinnedSessions = useMemo(
 		() => allSessions.filter((session) => pinnedSessionIds.has(session.sessionId)),
@@ -446,6 +473,30 @@ export const SessionSidebar = memo(function SessionSidebar({
 		[allSessions, pinnedSessionIds],
 	);
 	const hasSessions = allSessions.length > 0;
+	const sections =
+		grouping === "date"
+			? groupSessionsByDate(sessions, new Date(), locale)
+			: grouping === "status"
+				? groupSessionsByStatus(sessions, state, activityBySession)
+				: grouping === "unread"
+					? groupSessionsByUnread(sessions)
+					: [];
+	const motionLayoutKey = JSON.stringify([
+		width,
+		locale,
+		agentLayoutKey,
+		pinnedSessions.map((session) => session.sessionId),
+		grouping === "project"
+			? [
+					tree.projects.map((group) => [group.cwd, group.sessions.map((session) => session.sessionId)]),
+					tree.tasks.map((session) => session.sessionId),
+				]
+			: grouping === "none"
+				? sessions.map((session) => session.sessionId)
+				: sections.map((section) => [section.key, section.sessions.map((session) => session.sessionId)]),
+		visibleScheduleTasks.slice(0, 6).map((task) => task.id),
+		scheduledSessions.map((session) => session.sessionId),
+	]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(mode): Changing destination or mode dismisses the previous project action menu.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(destination): Changing destination or mode dismisses the previous project action menu.
 	useEffect(() => setActiveProjectActions(null), [destination, mode]);
@@ -465,6 +516,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 			deleteDisabled={isDeleteDisabled(session)}
 			key={session.sessionId}
 			onCopy={onCopySessionTitle}
+			onArchive={onArchiveSession}
 			onDelete={onDeleteSession}
 			onOpen={onOpen}
 			onPin={onPinSession}
@@ -521,20 +573,18 @@ export const SessionSidebar = memo(function SessionSidebar({
 				<AnimatedNavIcon kind="customize" />
 				{t("Customize")}
 			</button>
-			{mode === "chat" && (
-				<button
-					aria-current={destination === "schedules" ? "page" : undefined}
-					className="sidebar-nav-button"
-					disabled={busy}
-					onClick={onSchedules}
-					type="button"
-				>
-					<AnimatedNavIcon kind="schedule" />
-					{t("Scheduled tasks")}
-				</button>
-			)}
+			<button
+				aria-current={destination === "schedules" ? "page" : undefined}
+				className="sidebar-nav-button"
+				disabled={busy}
+				onClick={onSchedules}
+				type="button"
+			>
+				<AnimatedNavIcon kind="schedule" />
+				{t("Scheduled tasks")}
+			</button>
 			<nav
-				aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })}
+				aria-label={t("Conversation list")}
 				className="project-list"
 				data-empty={!hasSessions || undefined}
 				data-grouping={grouping}
@@ -542,8 +592,8 @@ export const SessionSidebar = memo(function SessionSidebar({
 				{grouping === "project" && <span className="session-grouping-label">{t("Projects")}</span>}
 				<SessionGroupingMenu
 					onChange={(nextGrouping: SessionGroupBy) => {
-						setGroupingByMode((current) => {
-							const next = { ...current, [mode]: nextGrouping };
+						setGroupingByMode(() => {
+							const next = { chat: nextGrouping, code: nextGrouping };
 							try {
 								saveSessionGroupingPreferences(localStorage, next);
 							} catch {
@@ -555,16 +605,13 @@ export const SessionSidebar = memo(function SessionSidebar({
 					value={grouping}
 				/>
 				<SidebarListMotion
-					ownerKey={`${mode}:${grouping}:${destination}`}
-					scope={`${mode}:${grouping}:${destination}:${isClosing ? "closing" : "open"}`}
+					layoutKey={motionLayoutKey}
+					ownerKey={`unified:${grouping}:${destination}`}
+					scope={`unified:${grouping}:${destination}:${isClosing ? "closing" : "open"}`}
 				>
-					{!hasSessions && (
-						<p className="empty-copy">
-							{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}
-						</p>
-					)}
+					{!hasSessions && <p className="empty-copy">{t("No tasks yet.")}</p>}
 					{pinnedSessions.length > 0 && (
-						<SessionSection label={t("Pinned")} motionKey={`${mode}:section:pinned`}>
+						<SessionSection label={t("Pinned")} motionKey="unified:section:pinned">
 							{pinnedSessions.map(renderSession)}
 						</SessionSection>
 					)}
@@ -584,49 +631,49 @@ export const SessionSidebar = memo(function SessionSidebar({
 							/>
 						))}
 					{grouping === "project" && tree.tasks.length > 0 && (
-						<section className="loose-tasks" data-sidebar-motion-key={`${mode}:loose`}>
-							<h2 data-sidebar-motion-exit="true" data-sidebar-motion-key={`${mode}:loose:header`}>
+						<section className="loose-tasks" data-sidebar-motion-key="unified:loose">
+							<h2 data-sidebar-motion-exit="true" data-sidebar-motion-key="unified:loose:header">
 								{t("Tasks")}
 							</h2>
 							{tree.tasks.map(renderSession)}
 						</section>
 					)}
 					{grouping === "date" &&
-						groupSessionsByDate(sessions, new Date(), locale).map((section) => (
+						sections.map((section) => (
 							<SessionSection
-								key={`${mode}:date:${section.key}`}
+								key={`unified:date:${section.key}`}
 								label={t(section.label)}
-								motionKey={`${mode}:date:${section.key}`}
+								motionKey={`unified:date:${section.key}`}
 							>
 								{section.sessions.map(renderSession)}
 							</SessionSection>
 						))}
 					{grouping === "status" &&
-						groupSessionsByStatus(sessions, state, activityBySession).map((section) => (
+						sections.map((section) => (
 							<SessionSection
-								key={`${mode}:status:${section.key}`}
+								key={`unified:status:${section.key}`}
 								label={t(section.label, { context: "session_grouping" })}
-								motionKey={`${mode}:status:${section.key}`}
+								motionKey={`unified:status:${section.key}`}
 							>
 								{section.sessions.map(renderSession)}
 							</SessionSection>
 						))}
 					{grouping === "unread" &&
-						groupSessionsByUnread(sessions).map((section) => (
+						sections.map((section) => (
 							<SessionSection
-								key={`${mode}:unread:${section.key}`}
+								key={`unified:unread:${section.key}`}
 								label={t(section.label)}
-								motionKey={`${mode}:unread:${section.key}`}
+								motionKey={`unified:unread:${section.key}`}
 							>
 								{section.sessions.map(renderSession)}
 							</SessionSection>
 						))}
 					{grouping === "none" && sessions.map(renderSession)}
-					{mode === "chat" && (visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
+					{(visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
 						<section
 							aria-label={t("Scheduled tasks")}
 							className="scheduled-task-quick-list"
-							data-sidebar-motion-key={`${mode}:scheduled`}
+							data-sidebar-motion-key="unified:scheduled"
 						>
 							<h2>{t("Scheduled tasks")}</h2>
 							{visibleScheduleTasks.slice(0, 6).map((task) => (

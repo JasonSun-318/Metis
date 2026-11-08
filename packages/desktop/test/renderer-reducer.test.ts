@@ -1,4 +1,10 @@
-import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
+import type {
+	AgentSummaryView,
+	ConnectionEventsParams,
+	ItemView,
+	SessionSnapshot,
+	SessionSummary,
+} from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
@@ -35,6 +41,23 @@ function item(itemId: string, text: string, state: ItemView["state"] = "streamin
 
 function childItem(itemId: string, text: string, state: ItemView["state"] = "streaming"): ItemView {
 	return { ...item(itemId, text, state), sessionId: "child-1" };
+}
+
+function agent(agentId: string, parentSessionId: string): AgentSummaryView {
+	return {
+		agentId,
+		name: agentId,
+		agentType: "worker",
+		depth: 1,
+		status: "running",
+		archived: false,
+		parentSessionId,
+		rootSessionId: parentSessionId,
+		agentPath: [agentId],
+		tasks: [],
+		createdAt: "2026-07-16T00:00:00.000Z",
+		updatedAt: "2026-07-16T00:00:00.000Z",
+	};
 }
 
 function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [item("item-1", "A")]): SessionSnapshot {
@@ -193,16 +216,17 @@ describe("renderer projection reducer", () => {
 		]);
 	});
 
-	it("keeps the selected child transcript separate from the parent", () => {
+	it("keeps agent history events separate from parent and child session projections", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 0));
-		store.selectAgentTranscript("session-1", "child-1");
+		store.beginSubscription("child-1", { focus: false });
+		store.applySnapshot({ ...snapshot(EPOCH_A, 0, []), session: session("child-1") });
 
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
 				fromCursor: 1,
-				toCursor: 4,
+				toCursor: 6,
 				events: [
 					{
 						type: "agent/item/started",
@@ -229,20 +253,33 @@ describe("renderer projection reducer", () => {
 						agentId: "child-1",
 						taskId: "task-1",
 					},
+					{
+						type: "item/started",
+						item: childItem("child-session-item", ""),
+					},
+					{
+						type: "item/delta",
+						sessionId: "child-1",
+						itemId: "child-session-item",
+						delta: { type: "text", text: "child conversation" },
+					},
 				],
 			}),
 		).toBe("applied");
 
 		const state = store.getSnapshot();
-		expect(state.agentTranscript.itemsById.get("child-live")?.content).toEqual([{ type: "text", text: "hello" }]);
-		expect(state.agentTranscript.journalRevision).toBe(1);
-		expect(state.itemsById.has("child-live")).toBe(false);
+		expect(state.activeSessionId).toBe("session-1");
+		expect(state.itemOrder).toEqual(["item-1"]);
+		expect(state.sessions.get("child-1")?.itemOrder).toEqual(["child-session-item"]);
+		expect(state.sessions.get("child-1")?.itemsById.get("child-session-item")?.content).toEqual([
+			{ type: "text", text: "child conversation" },
+		]);
 
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
-				fromCursor: 5,
-				toCursor: 5,
+				fromCursor: 7,
+				toCursor: 7,
 				events: [
 					{
 						type: "agent/item/started",
@@ -253,82 +290,11 @@ describe("renderer projection reducer", () => {
 				],
 			}),
 		).toBe("applied");
-		expect(store.getSnapshot().agentTranscript.itemsById.has("ignored")).toBe(false);
+		expect(store.getSnapshot().itemsById.has("ignored")).toBe(false);
+		expect(store.getSnapshot().sessions.get("child-1")?.itemsById.has("ignored")).toBe(false);
 	});
 
-	it("applies live events when the explicitly selected task is the current task", () => {
-		const store = new AppStore();
-		const task = {
-			taskId: "task-current",
-			taskSummary: "Current task",
-			status: "running" as const,
-			createdAt: "2026-07-16T00:00:00.000Z",
-			updatedAt: "2026-07-16T00:00:00.000Z",
-		};
-		store.applySnapshot({
-			...snapshot(EPOCH_A, 0),
-			agents: [
-				{
-					agentId: "child-1",
-					name: "Current worker",
-					agentType: "worker",
-					depth: 1,
-					status: "running",
-					archived: false,
-					parentSessionId: "session-1",
-					rootSessionId: "session-1",
-					agentPath: ["child-1"],
-					tasks: [task],
-					currentTask: task,
-					latestTask: task,
-					createdAt: "2026-07-16T00:00:00.000Z",
-					updatedAt: "2026-07-16T00:00:00.000Z",
-				},
-			],
-		});
-		store.selectAgentTranscript("session-1", "child-1", "task-current");
-
-		expect(
-			store.applyBatch({
-				serverEpoch: EPOCH_A,
-				fromCursor: 1,
-				toCursor: 4,
-				events: [
-					{
-						type: "agent/item/started",
-						sessionId: "session-1",
-						agentId: "child-1",
-						item: childItem("selected-live", ""),
-					},
-					{
-						type: "agent/item/delta",
-						sessionId: "session-1",
-						agentId: "child-1",
-						itemId: "selected-live",
-						delta: { type: "text", text: "visible" },
-					},
-					{
-						type: "agent/item/completed",
-						sessionId: "session-1",
-						agentId: "child-1",
-						item: childItem("selected-live", "visible", "completed"),
-					},
-					{
-						type: "agent/itemsChanged",
-						sessionId: "session-1",
-						agentId: "child-1",
-						taskId: "task-current",
-					},
-				],
-			}),
-		).toBe("applied");
-		expect(store.getSnapshot().agentTranscript.itemsById.get("selected-live")?.content).toEqual([
-			{ type: "text", text: "visible" },
-		]);
-		expect(store.getSnapshot().agentTranscript.journalRevision).toBe(1);
-	});
-
-	it("refreshes an explicitly selected task after its terminal summary clears currentTask", () => {
+	it("updates the terminal agent summary after currentTask clears", () => {
 		const store = new AppStore();
 		const task = {
 			taskId: "task-current",
@@ -354,7 +320,6 @@ describe("renderer projection reducer", () => {
 			updatedAt: task.updatedAt,
 		};
 		store.applySnapshot({ ...snapshot(EPOCH_A, 0), agents: [running] });
-		store.selectAgentTranscript("session-1", "child-1", "task-current");
 		const terminal = { ...task, status: "done" as const, updatedAt: "2026-07-16T00:01:00.000Z" };
 
 		expect(
@@ -384,124 +349,67 @@ describe("renderer projection reducer", () => {
 				],
 			}),
 		).toBe("applied");
-		expect(store.getSnapshot().agentTranscript.journalRevision).toBe(1);
+		expect(store.getSnapshot().agents).toEqual([
+			{
+				...running,
+				status: "done",
+				tasks: [terminal],
+				currentTask: undefined,
+				latestTask: terminal,
+				updatedAt: terminal.updatedAt,
+			},
+		]);
 	});
 
-	it("replaces and paginates child history, then mirrors the new session's empty transcript on switch", () => {
+	it("routes agent updates and descendant deletions to their own session bucket", () => {
 		const store = new AppStore();
-		store.applySnapshot(snapshot());
-		store.selectAgentTranscript("session-1", "child-1");
-		store.replaceAgentItems("session-1", "child-1", null, {
-			items: [childItem("durable", "new", "completed")],
-			nextBeforeItemId: "durable",
-		});
-		store.prependAgentItems("session-1", "child-1", null, {
-			items: [childItem("older", "old", "completed")],
-			nextBeforeItemId: null,
-		});
-		expect(store.getSnapshot().agentTranscript.itemOrder).toEqual(["older", "durable"]);
-
-		store.applySnapshot({ ...snapshot(EPOCH_B), session: session("session-2") });
-		expect(store.getSnapshot().agentTranscript).toMatchObject({
-			agentId: null,
-			itemOrder: [],
-			nextBeforeItemId: null,
-		});
-		// The previous session's own bucket keeps its selection.
-		expect(store.getSnapshot().sessions.get("session-1")?.agentTranscript.itemOrder).toEqual(["older", "durable"]);
-	});
-
-	it("requests a selected-child refresh after a same-session resnapshot", () => {
-		const store = new AppStore();
-		store.applySnapshot(snapshot(EPOCH_A));
-		store.selectAgentTranscript("session-1", "child-1");
-		store.applySnapshot(snapshot(EPOCH_B));
-		expect(store.getSnapshot().agentTranscript).toMatchObject({ agentId: "child-1", journalRevision: 1 });
-	});
-
-	it("routes agent transcript events and deletions to their own session bucket", () => {
-		const store = new AppStore();
-		store.applySnapshot(snapshot(EPOCH_A, 0));
+		const first = agent("child-a", "session-1");
+		const second = agent("child-b", "session-2");
+		const descendant = {
+			...agent("child-b-nested", "child-b"),
+			depth: 2,
+			rootSessionId: "session-2",
+			agentPath: ["child-b", "child-b-nested"],
+		};
+		store.applySnapshot({ ...snapshot(EPOCH_A, 0), agents: [first] });
 		store.beginSubscription("session-2", { focus: false });
-		store.applySnapshot({ ...snapshot(EPOCH_A, 0), session: session("session-2") });
-		expect(store.getSnapshot().activeSessionId).toBe("session-1");
-		store.selectAgentTranscript("session-1", "child-a");
-		store.selectAgentTranscript("session-2", "child-b");
+		store.applySnapshot({ ...snapshot(EPOCH_A, 0, []), session: session("session-2"), agents: [second, descendant] });
+		const updated = { ...second, status: "done" as const };
 
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
 				fromCursor: 1,
-				toCursor: 5,
-				events: [
-					{
-						type: "agent/item/started",
-						sessionId: "session-2",
-						agentId: "child-b",
-						item: { ...childItem("b-live", ""), sessionId: "child-b" },
-					},
-					{
-						type: "agent/item/delta",
-						sessionId: "session-2",
-						agentId: "child-b",
-						itemId: "b-live",
-						delta: { type: "text", text: "B" },
-					},
-					{
-						type: "agent/itemsChanged",
-						sessionId: "session-2",
-						agentId: "child-b",
-						taskId: "task-b",
-					},
-					{
-						type: "agent/item/started",
-						sessionId: "session-1",
-						agentId: "child-a",
-						item: { ...childItem("a-live", ""), sessionId: "child-a" },
-					},
-					{
-						type: "agent/item/started",
-						sessionId: "session-1",
-						agentId: "child-b",
-						item: { ...childItem("stray", "stray"), sessionId: "child-b" },
-					},
-				],
+				toCursor: 1,
+				events: [{ type: "agent/updated", sessionId: "session-2", agent: updated }],
 			}),
 		).toBe("applied");
-
-		let state = store.getSnapshot();
-		expect(state.sessions.get("session-2")?.agentTranscript.itemsById.get("b-live")?.content).toEqual([
-			{ type: "text", text: "B" },
-		]);
-		expect(state.sessions.get("session-2")?.agentTranscript.journalRevision).toBe(1);
-		expect(state.sessions.get("session-1")?.agentTranscript.itemOrder).toEqual(["a-live"]);
-		expect(state.sessions.get("session-1")?.agentTranscript.itemsById.has("stray")).toBe(false);
-		// The compat mirror still shows the active session's transcript.
-		expect(state.agentTranscript.agentId).toBe("child-a");
+		expect(store.getSnapshot().agents).toEqual([first]);
+		expect(store.getSnapshot().sessions.get("session-2")?.agents).toEqual([updated, descendant]);
 
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
-				fromCursor: 6,
-				toCursor: 6,
+				fromCursor: 2,
+				toCursor: 2,
 				events: [
 					{
 						type: "agent/deleted",
 						sessionId: "session-2",
 						agentId: "child-b",
-						deletedAgentIds: ["child-b"],
+						deletedAgentIds: ["child-b", "child-b-nested"],
 					},
 				],
 			}),
 		).toBe("applied");
-		state = store.getSnapshot();
-		expect(state.sessions.get("session-2")?.agentTranscript.agentId).toBeNull();
-		expect(state.sessions.get("session-2")?.agentTranscript.itemOrder).toEqual([]);
-		expect(state.sessions.get("session-1")?.agentTranscript.agentId).toBe("child-a");
-		expect(state.sessions.get("session-1")?.agentTranscript.itemsById.has("a-live")).toBe(true);
+		const state = store.getSnapshot();
+		expect(state.activeSessionId).toBe("session-1");
+		expect(state.agents).toEqual([first]);
+		expect(state.sessions.get("session-2")?.agents).toEqual([]);
+		expect(state.itemOrder).toEqual(["item-1"]);
 	});
 
-	it("filters sessions by mode and separates managed tasks from project folders", () => {
+	it("combines legacy classifications and separates managed tasks from project folders", () => {
 		const store = new AppStore();
 		const first = { ...session("session-1"), mode: "chat" as const, cwd: "/work/alpha", name: "First" };
 		const code = { ...session("session-2"), cwd: "/work/beta", name: "Code" };
@@ -516,16 +424,17 @@ describe("renderer projection reducer", () => {
 		const legacy = { ...session("session-5"), cwd: null, name: "Legacy" };
 		store.setSessions({ sessions: [first, code, third, managed, legacy], nextAfterSessionId: null });
 
-		const chat = buildSessionTree(store.getSnapshot(), "chat", new Map());
+		const chat = buildSessionTree(store.getSnapshot(), new Map());
 		expect(chat.projects.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
 			["alpha", ["session-1", "session-3"]],
+			["beta", ["session-2"]],
 		]);
-		expect(chat.tasks.map((item) => item.sessionId)).toEqual(["session-4"]);
+		expect(chat.tasks.map((item) => item.sessionId)).toEqual(["session-4", "session-5"]);
 		expect(chat.projects[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
 
-		const codeTree = buildSessionTree(store.getSnapshot(), "code", new Map());
-		expect(codeTree.projects.map((group) => group.name)).toEqual(["beta"]);
-		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-5"]);
+		const codeTree = buildSessionTree(store.getSnapshot(), new Map());
+		expect(codeTree.projects.map((group) => group.name)).toEqual(["alpha", "beta"]);
+		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-4", "session-5"]);
 	});
 
 	it("removes only one mode-project and clears its active projection idempotently", () => {

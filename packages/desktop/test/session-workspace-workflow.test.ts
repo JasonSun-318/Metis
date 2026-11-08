@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { type ItemView, RPC_ERROR_CODES, type SessionSnapshot, type SessionSummary } from "@metis/app-protocol";
+import {
+	type AgentSummaryView,
+	type ItemView,
+	RPC_ERROR_CODES,
+	type SessionSnapshot,
+	type SessionSummary,
+} from "@metis/app-protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionWorkspaceWorkflow } from "../src/renderer/session-workspace-workflow.ts";
+import { acquireAgentCatalog } from "../src/renderer/store/agent-catalog-store.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { DesktopApiEvent, MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
@@ -98,6 +105,11 @@ function harness(sessions: readonly SessionSummary[] = [], onDesktopEvent?: (eve
 		renameSession: vi.fn(),
 		forkSession: vi.fn(),
 		deleteSession: vi.fn(),
+		closeSession: vi.fn().mockResolvedValue({ closed: true }),
+		archiveSession: vi.fn(),
+		unarchiveSession: vi.fn(),
+		listAgents: vi.fn().mockResolvedValue({ agents: [], nextAfterAgentId: null }),
+		archiveAgent: vi.fn(),
 		previewProjectDelete: vi.fn(),
 		deleteProject: vi.fn(),
 		startTurn: vi.fn().mockResolvedValue({}),
@@ -117,6 +129,60 @@ function harness(sessions: readonly SessionSummary[] = [], onDesktopEvent?: (eve
 describe("SessionWorkspaceWorkflow", () => {
 	beforeEach(() => localStorage.clear());
 
+	it("switches presentation without changing the active session or pending draft creation", async () => {
+		const { api, store, workflow } = harness([summary("old", "code")]);
+		vi.mocked(api.openSession).mockResolvedValue(snapshot("old", "code"));
+		await workflow.openVisibleSession("old");
+		await workflow.selectMode("code");
+		expect(store.getSnapshot().activeSessionId).toBe("old");
+		expect(api.openSession).toHaveBeenCalledTimes(1);
+		workflow.startNewTask();
+		workflow.setDraftFolder("/chosen");
+		workflow.setDraftPermission("full");
+		const pending = deferred<{ session: SessionSummary }>();
+		vi.mocked(api.createSession).mockReturnValue(pending.promise);
+		vi.mocked(api.openSession).mockResolvedValue(snapshot("new"));
+		const submission = workflow.submitNewTask({ text: "keep me", attachments: [] });
+		await workflow.selectMode("chat");
+		expect(workflow.getSnapshot().draft).toMatchObject({ folder: "/chosen", permissionPreset: "full", mode: "chat" });
+		pending.resolve({ session: summary("new") });
+		await submission;
+		expect(api.createSession).toHaveBeenCalledOnce();
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({ mode: "chat", cwd: "/chosen", permissionPreset: "full" }),
+		);
+		expect(api.startTurn).toHaveBeenCalledOnce();
+		expect(store.getSnapshot().activeSessionId).toBe("new");
+		expect(workflow.getSnapshot().mode).toBe("chat");
+	});
+
+	it("persists the upgraded work mode before opening a conversation from the other legacy list", async () => {
+		const old = summary("11111111-1111-4111-8111-111111111111", "code");
+		localStorage.setItem("metis.activeSessionId.code", old.sessionId);
+		localStorage.setItem(
+			"metis.workspace-layout.v1",
+			JSON.stringify({
+				version: 1,
+				activePaneId: "pane",
+				nextNumber: 2,
+				panes: [{ id: "pane", row: 0, activeIndex: 0, chats: [{ sessionId: old.sessionId }] }],
+			}),
+		);
+		localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "project" }));
+		const { api, workflow } = harness([old, summary("other")]);
+		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) =>
+			snapshot(sessionId, sessionId === old.sessionId ? "code" : "chat"),
+		);
+		await workflow.start();
+		expect(workflow.getSnapshot().mode).toBe("code");
+		await workflow.openVisibleSession("other");
+		// Workspace persistence now points at the Chat-backed conversation.
+		localStorage.removeItem("metis.workspace-layout.v1");
+		expect(harness().workflow.getSnapshot().mode).toBe("code");
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("project");
+		workflow.dispose();
+	});
+
 	it("applies the welcome model and thinking selection before the first Code turn", async () => {
 		const { api, workflow } = harness();
 		Object.assign(api, {
@@ -126,8 +192,6 @@ describe("SessionWorkspaceWorkflow", () => {
 		vi.mocked(api.createSession).mockResolvedValue({ session: summary("new-code", "code") });
 		vi.mocked(api.openSession).mockResolvedValue(snapshot("new-code", "code"));
 		workflow.startNewTask("code");
-		await workflow.submitNewTask({ text: "Build it", attachments: [] });
-		expect(api.createSession).not.toHaveBeenCalled();
 		workflow.setDraftFolder("/project");
 		await workflow.submitNewTask({ text: "Build it", attachments: [] }, undefined, {
 			model: { provider: "example", modelId: "code-model" },
@@ -599,7 +663,7 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(vi.mocked(api.startTurn).mock.calls[1]![0].requestId).not.toBe(rejectedRequestId);
 	});
 
-	it("requires a folder for Code drafts and locks the draft after create", async () => {
+	it("allows a managed Code draft and locks its directory after creation", async () => {
 		const { api, workflow } = harness();
 		const created = summary("code-created", "code");
 		const opening = deferred<SessionSnapshot>();
@@ -607,14 +671,11 @@ describe("SessionWorkspaceWorkflow", () => {
 		vi.mocked(api.openSession).mockReturnValue(opening.promise);
 		workflow.startNewTask("code");
 
-		await workflow.submitNewTask({ text: "build", attachments: [] });
-		expect(api.createSession).not.toHaveBeenCalled();
-		workflow.setDraftFolder("/work/project");
 		const submission = workflow.submitNewTask({ text: "build", attachments: [] });
 		await Promise.resolve();
 		expect(workflow.getSnapshot().draft?.sessionId).toBe(created.sessionId);
 		workflow.setDraftFolder("/work/other");
-		expect(workflow.getSnapshot().draft?.folder).toBe("/work/project");
+		expect(workflow.getSnapshot().draft?.folder).toBeNull();
 		opening.resolve(snapshot(created.sessionId, "code"));
 		await submission;
 	});
@@ -712,6 +773,210 @@ describe("SessionWorkspaceWorkflow", () => {
 		await workflow.createSessionInProject("code", "/work/open-retry");
 
 		expect(vi.mocked(api.createSession).mock.calls[1]![0].requestId).toBe(completedCreateRequestId);
+	});
+
+	it.each(["chat", "code"] as const)(
+		"restores a %s conversation to its original list without changing the active conversation",
+		async (mode) => {
+			const active = summary("active");
+			const archived = { ...summary("archived", mode), archived: true, name: "Old conversation" };
+			const { api, workflow, store } = harness([active]);
+			store.upsertSession(active);
+			vi.mocked(api.openSession).mockResolvedValue(snapshot(active.sessionId));
+			await workflow.openVisibleSession(active.sessionId);
+			const before = workflow.getSnapshot();
+			vi.mocked(api.unarchiveSession).mockResolvedValue({ session: { ...archived, archived: false } });
+			await workflow.restoreArchivedConversation(archived);
+			expect(api.unarchiveSession).toHaveBeenCalledWith({
+				sessionId: archived.sessionId,
+				requestId: expect.any(String),
+			});
+			expect(store.getSnapshot().sessionsById.get(archived.sessionId)).toEqual({ ...archived, archived: false });
+			expect(store.getSnapshot().activeSessionId).toBe(active.sessionId);
+			expect(workflow.getSnapshot().mode).toBe(before.mode);
+			expect(api.openSession).toHaveBeenCalledTimes(1);
+			expect(api.archiveAgent).not.toHaveBeenCalled();
+			expect(api.listAgents).not.toHaveBeenCalled();
+		},
+	);
+	it("restores only the necessary child ancestry across bounded catalog pages", async () => {
+		const archived = { ...summary("archived", "code"), archived: true };
+		const { api, workflow, store } = harness([]);
+		vi.mocked(api.unarchiveSession).mockResolvedValue({ session: { ...archived, archived: false } });
+		const parent = { agentId: "parent", agentPath: ["parent"], archived: true } as AgentSummaryView;
+		const child = { agentId: "child", agentPath: ["parent", "child"], archived: true } as AgentSummaryView;
+		const sibling = { agentId: "sibling", agentPath: ["sibling"], archived: true } as AgentSummaryView;
+		vi.mocked(api.listAgents)
+			.mockResolvedValueOnce({ agents: [parent, sibling], nextAfterAgentId: "parent" })
+			.mockResolvedValueOnce({ agents: [child], nextAfterAgentId: null });
+		vi.mocked(api.archiveAgent).mockImplementation(async (input) => ({
+			agent: { ...(input.agentId === "parent" ? parent : child), archived: false },
+		}));
+		await workflow.restoreArchivedConversation(archived, "child");
+		expect(api.listAgents).toHaveBeenNthCalledWith(1, {
+			sessionId: archived.sessionId,
+			includeArchived: true,
+			limit: 100,
+		});
+		expect(api.listAgents).toHaveBeenNthCalledWith(2, {
+			sessionId: archived.sessionId,
+			includeArchived: true,
+			limit: 100,
+			afterAgentId: "parent",
+		});
+		expect(vi.mocked(api.archiveAgent).mock.calls.map(([input]) => [input.agentId, input.archived])).toEqual([
+			["parent", false],
+			["child", false],
+		]);
+		expect(store.getSnapshot().sessionsById.get(archived.sessionId)?.archived).toBe(false);
+		expect(api.openSession).not.toHaveBeenCalled();
+	});
+	it("reveals an inherited archived child without mutating already active ancestors", async () => {
+		const root = summary("live");
+		const { api, workflow, store } = harness([root]);
+		vi.mocked(api.listAgents).mockResolvedValue({
+			agents: [
+				{ agentId: "parent", agentPath: ["parent"], archived: true },
+				{ agentId: "child", agentPath: ["parent", "child"], archived: false },
+			] as AgentSummaryView[],
+			nextAfterAgentId: null,
+		});
+		await workflow.restoreArchivedConversation(root, "child");
+		expect(store.getSnapshot().sessionsById.get(root.sessionId)).toEqual(root);
+		expect(api.unarchiveSession).not.toHaveBeenCalled();
+		expect(api.archiveAgent).toHaveBeenCalledExactlyOnceWith({
+			sessionId: root.sessionId,
+			agentId: "parent",
+			archived: false,
+			requestId: expect.any(String),
+		});
+	});
+	it("preserves retry request identity after a lost restore response and leaves failures actionable", async () => {
+		const root = { ...summary("restore-retry"), archived: true };
+		const { api, workflow, store } = harness([]);
+		vi.mocked(api.unarchiveSession)
+			.mockRejectedValueOnce(new Error("restore response lost"))
+			.mockResolvedValue({ session: { ...root, archived: false } });
+		await expect(workflow.restoreArchivedConversation(root)).rejects.toThrow("restore response lost");
+		expect(store.getSnapshot().sessionsById.has(root.sessionId)).toBe(false);
+		const requestId = vi.mocked(api.unarchiveSession).mock.calls[0]![0].requestId;
+		await workflow.restoreArchivedConversation(root);
+		expect(vi.mocked(api.unarchiveSession).mock.calls[1]![0].requestId).toBe(requestId);
+		expect(store.getSnapshot().sessionsById.get(root.sessionId)?.archived).toBe(false);
+	});
+
+	it("refreshes an already mounted sidebar catalog so inherited descendants reappear after restoration", async () => {
+		const root = summary("catalog-root");
+		const { api, workflow } = harness([root]);
+		let parent: AgentSummaryView = {
+			agentId: "parent",
+			name: "Parent",
+			parentSessionId: root.sessionId,
+			rootSessionId: root.sessionId,
+			agentPath: ["parent"],
+			depth: 1,
+			agentType: "worker",
+			status: "done",
+			archived: true,
+			tasks: [],
+			createdAt: root.createdAt,
+			updatedAt: root.updatedAt,
+		};
+		const child: AgentSummaryView = {
+			...parent,
+			agentId: "child",
+			name: "Child",
+			parentSessionId: "parent",
+			agentPath: ["parent", "child"],
+			depth: 2,
+			archived: false,
+		};
+		vi.mocked(api.listAgents).mockImplementation(async (input) => ({
+			agents: input.includeArchived || !parent.archived ? [parent, child] : [],
+			nextAfterAgentId: null,
+		}));
+		vi.mocked(api.archiveAgent).mockImplementation(async () => {
+			parent = { ...parent, archived: false };
+			return { agent: parent };
+		});
+		const catalog = acquireAgentCatalog(api, root.sessionId);
+		catalog.retain();
+		const unsubscribe = catalog.store.subscribe(() => undefined);
+		try {
+			await vi.waitFor(() => expect(catalog.store.getSnapshot().loading).toBe(false));
+			expect(catalog.store.getSnapshot().agents).toEqual([]);
+			await workflow.restoreArchivedConversation(root, parent.agentId);
+			await vi.waitFor(() =>
+				expect(catalog.store.getSnapshot().agents.map((agent) => agent.agentId)).toEqual(["child", "parent"]),
+			);
+		} finally {
+			unsubscribe();
+			catalog.release();
+		}
+	});
+
+	it("coalesces repeated restore clicks into the same pending operation", async () => {
+		const archived = { ...summary("pending-restore"), archived: true };
+		const { api, workflow } = harness([]);
+		const pending = deferred<Awaited<ReturnType<MetisDesktopApi["unarchiveSession"]>>>();
+		vi.mocked(api.unarchiveSession).mockReturnValue(pending.promise);
+		const first = workflow.restoreArchivedConversation(archived);
+		const second = workflow.restoreArchivedConversation(archived);
+		expect(first).toBe(second);
+		expect(api.unarchiveSession).toHaveBeenCalledOnce();
+		pending.resolve({ session: { ...archived, archived: false } });
+		await first;
+	});
+
+	it("closes before archiving, hides the active session and clears its pin and workspace tabs", async () => {
+		const target = summary("archive-active");
+		const { api, workflow, store } = harness([target]);
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(target.sessionId));
+		await workflow.openVisibleSession(target.sessionId);
+		workflow.pinSession(target, true);
+		vi.mocked(api.archiveSession).mockImplementation(async () => {
+			expect(api.closeSession).toHaveBeenCalledOnce();
+			return { session: { ...target, archived: true } };
+		});
+		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [], nextAfterSessionId: null });
+		await workflow.archiveSession(target);
+		expect(api.deleteSession).not.toHaveBeenCalled();
+		expect(workflow.getSnapshot().pinnedSessionIds.has(target.sessionId)).toBe(false);
+		expect(workflow.getSnapshot().cleanupSessionIds).toEqual([target.sessionId]);
+		expect(workflow.getSnapshot().draft?.mode).toBe("chat");
+		expect(store.getSnapshot().sessionsById.has(target.sessionId)).toBe(false);
+	});
+
+	it("preserves dirty/running sessions without closing or archiving them", async () => {
+		const target = summary("archive-blocked");
+		const { api, workflow } = harness([target]);
+		workflow.reportDirtySessionIds([target.sessionId]);
+		await expect(workflow.archiveSession(target)).rejects.toThrow("unsaved files");
+		workflow.reportDirtySessionIds([]);
+		await expect(workflow.archiveSession({ ...target, state: "running" })).rejects.toThrow(
+			"Stop the current response",
+		);
+		expect(api.closeSession).not.toHaveBeenCalled();
+		expect(api.archiveSession).not.toHaveBeenCalled();
+	});
+
+	it("keeps a failed archive visible and reuses its request ID after a lost response", async () => {
+		const target = summary("archive-retry");
+		const { api, workflow, store } = harness([target]);
+		store.upsertSession(target);
+		vi.mocked(api.archiveSession)
+			.mockRejectedValueOnce(new Error("archive response lost"))
+			.mockResolvedValue({ session: { ...target, archived: true } });
+		await expect(workflow.archiveSession(target)).rejects.toThrow("archive response lost");
+		expect(store.getSnapshot().sessionsById.has(target.sessionId)).toBe(true);
+		expect(workflow.getSnapshot().cleanupSessionIds).toEqual([]);
+		const requestId = vi.mocked(api.archiveSession).mock.calls[0]![0].requestId;
+		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [], nextAfterSessionId: null });
+		await workflow.archiveSession(target);
+		expect(vi.mocked(api.archiveSession).mock.calls[1]![0].requestId).toBe(requestId);
+		expect(vi.mocked(api.closeSession).mock.calls[1]![0].requestId).not.toBe(
+			vi.mocked(api.closeSession).mock.calls[0]![0].requestId,
+		);
 	});
 
 	it("blocks deleting dirty sessions and queues cleanup after a successful delete", async () => {
@@ -932,12 +1197,58 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(vi.mocked(api.deleteProject).mock.calls[1]![0].requestId).toBe(requestId);
 	});
 
+	it("reconciles a partially deleted mixed project and retains its shared preferences for retry", async () => {
+		const chat = { ...summary("chat-project"), cwd: "/work/shared", cwdOrigin: "user-selected" as const };
+		const code = { ...summary("code-project", "code"), cwd: chat.cwd };
+		const { api, store, workflow } = harness([chat, code]);
+		store.setSessions({ sessions: [chat, code], nextAfterSessionId: null });
+		workflow.renameProject({ mode: "chat", cwd: chat.cwd }, "Shared project");
+		workflow.pinProject({ mode: "chat", cwd: chat.cwd }, true);
+		const preview = {
+			mode: "chat" as const,
+			cwd: chat.cwd,
+			sessionCount: 2,
+			blockingScheduleCount: 0,
+			revision: "a".repeat(64),
+			additionalProjects: [
+				{
+					mode: "code" as const,
+					cwd: chat.cwd,
+					sessionCount: 1,
+					blockingScheduleCount: 0,
+					revision: "b".repeat(64),
+				},
+			],
+		};
+		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [code], nextAfterSessionId: null });
+		vi.mocked(api.deleteProject)
+			.mockResolvedValueOnce({ ok: true, result: { mode: "chat", cwd: chat.cwd, deletedSessionCount: 1 } })
+			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.SESSION_IN_USE, "project in use"));
+		await expect(workflow.deleteProject({ mode: "chat", cwd: chat.cwd }, preview)).rejects.toThrow("still in use");
+		expect(store.getSnapshot().sessionsById.has(chat.sessionId)).toBe(false);
+		expect(store.getSnapshot().sessionsById.has(code.sessionId)).toBe(true);
+		expect([...workflow.getSnapshot().projectPreferences.values()]).toEqual([
+			{ mode: "chat", cwd: chat.cwd, alias: "Shared project", pinned: true },
+		]);
+		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [], nextAfterSessionId: null });
+		vi.mocked(api.deleteProject).mockImplementation(async (input) => ({
+			ok: true,
+			result: { mode: input.mode, cwd: input.cwd, deletedSessionCount: input.mode === "code" ? 1 : 0 },
+		}));
+		await workflow.deleteProject(
+			{ mode: "chat", cwd: chat.cwd },
+			{ ...preview, revision: "c".repeat(64), sessionCount: 1 },
+		);
+		expect(store.getSnapshot().sessionsById.size).toBe(0);
+		expect(workflow.getSnapshot().projectPreferences.size).toBe(0);
+	});
+
 	it("keeps project preview failures local to the dialog that owns the request", async () => {
 		const { api, workflow } = harness();
 		const stale = deferred<Awaited<ReturnType<MetisDesktopApi["previewProjectDelete"]>>>();
 		vi.mocked(api.previewProjectDelete)
 			.mockReturnValueOnce(stale.promise)
-			.mockResolvedValueOnce({
+			.mockResolvedValue({
 				ok: true,
 				result: {
 					mode: "chat",

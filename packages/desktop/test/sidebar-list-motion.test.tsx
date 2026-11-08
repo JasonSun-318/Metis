@@ -164,10 +164,10 @@ function markCommit(): void {
 	}
 }
 
-function item(key: string, exit = false) {
+function item(key: string, exit = false, label = "primary") {
 	return (
 		<div data-sidebar-motion-key={key} data-sidebar-motion-exit={exit ? "true" : undefined} key={key}>
-			<button type="button">primary</button>
+			<button type="button">{label}</button>
 			<button className="secondary" type="button">
 				secondary
 			</button>
@@ -191,6 +191,7 @@ async function mount(children: React.ReactNode) {
 		nextPositions?: Map<string, DOMRect>,
 		scope: string = SCOPE,
 		snapshotOverrides?: Map<string, DOMRect>,
+		layoutKey?: string,
 	) => {
 		markCommit();
 		if (snapshotOverrides) {
@@ -201,7 +202,11 @@ async function mount(children: React.ReactNode) {
 		}
 		if (nextPositions) for (const [key, value] of nextPositions) positions.set(key, value);
 		await act(async () => {
-			root.render(<SidebarListMotion scope={scope}>{next}</SidebarListMotion>);
+			root.render(
+				<SidebarListMotion layoutKey={layoutKey} scope={scope}>
+					{next}
+				</SidebarListMotion>,
+			);
 		});
 	};
 	await rerender(children);
@@ -217,6 +222,34 @@ function firstTransforms(): string[] {
 }
 
 describe("SidebarListMotion", () => {
+	it("skips geometry for an unchanged explicit layout identity while preserving focus and content", async () => {
+		const rerender = await mount([item("session:a"), item("session:b")]);
+		await rerender([item("session:a"), item("session:b")], undefined, SCOPE, undefined, "a,b");
+		const button = document.querySelector<HTMLButtonElement>('[data-sidebar-motion-key="session:a"] button')!;
+		button.focus();
+		let reads = 0;
+		const read = Element.prototype.getBoundingClientRect;
+		Element.prototype.getBoundingClientRect = function () {
+			reads += 1;
+			return read.call(this);
+		};
+		await rerender([item("session:a", false, "updated"), item("session:b")], undefined, SCOPE, undefined, "a,b");
+		expect(reads).toBe(0);
+		expect(button.textContent).toBe("updated");
+		expect(document.activeElement).toBe(button);
+		await rerender(
+			[item("session:b"), item("session:a")],
+			new Map([
+				["session:a", rect(0, 20)],
+				["session:b", rect(0, 0)],
+			]),
+			SCOPE,
+			undefined,
+			"b,a",
+		);
+		expect(reads).toBeGreaterThan(0);
+		expect(document.activeElement).toBe(button);
+	});
 	it("translates moved items with a 230ms ease and flags data-animating", async () => {
 		const rerender = await mount([item("session:a"), item("session:b")]);
 		await rerender(

@@ -104,6 +104,27 @@ afterEach(async () => {
 });
 
 describe("workspace tab strip", () => {
+	it("renames an open child in place and removes only the archived subtree tabs", async () => {
+		const view = mount();
+		await view.render({
+			agentFocusRequest: { nonce: 1, target: { sessionId: ALPHA_1, agentId: "child-one", name: "Before" } },
+		});
+		const draft = view.container.querySelector<HTMLInputElement>('[data-agent-draft="child-one"]')!;
+		draft.value = "keep my draft";
+		await view.render({
+			agentRenameRequest: { nonce: 1, rootSessionId: ALPHA_1, agentId: "child-one", name: "After" },
+		});
+		expect(view.tabs().some((title) => title.startsWith("After"))).toBe(true);
+		expect(view.container.querySelector('[data-agent-draft="child-one"]')).toBe(draft);
+		expect(draft.value).toBe("keep my draft");
+		await view.render({
+			agentFocusRequest: { nonce: 2, target: { sessionId: ALPHA_1, agentId: "child-two", name: "Sibling" } },
+		});
+		await view.render({ agentRemovalRequest: { nonce: 1, rootSessionId: ALPHA_1, agentIds: ["child-one"] } });
+		expect(view.container.querySelector('[data-agent-draft="child-one"]')).toBeNull();
+		expect(view.container.querySelector('[data-agent-draft="child-two"]')).not.toBeNull();
+		expect(view.tabs().some((title) => title.startsWith("Sibling"))).toBe(true);
+	});
 	it("opens child tabs without opening the root and keeps their drafts separate", async () => {
 		const view = mount();
 		await view.render({});
@@ -268,38 +289,35 @@ describe("workspace tab strip", () => {
 		expect(view.tabs()).not.toContain("Beta*");
 	});
 
-	it("uses each session's mode for active and inactive conversation icons", async () => {
+	it.each(["chat", "code"] as const)("omits mode icons from conversation tabs in %s presentation", async (mode) => {
 		const view = mount();
 		const sessions = new Map(view.sessionsById);
 		sessions.set(ALPHA_1, { ...sessions.get(ALPHA_1)!, mode: "chat" });
-		await view.render({ sessionsById: sessions, chatSessionId: ALPHA_1 });
-		await view.render({ sessionsById: sessions, chatSessionId: BETA });
-		const chatIcon = view.container.querySelector('[role="tab"][aria-label="Alpha one"] > svg')!;
-		const codeIcon = view.container.querySelector('[role="tab"][aria-label="Beta"] > svg')!;
-		expect(chatIcon.getAttribute("data-mode")).toBe("chat");
-		expect(codeIcon.getAttribute("data-mode")).toBe("code");
-		expect(chatIcon.innerHTML).not.toBe(codeIcon.innerHTML);
-		expect(chatIcon.getAttribute("width")).toBe("13");
-		expect(codeIcon.getAttribute("width")).toBe("13");
+		await view.render({ sessionsById: sessions, chatSessionId: ALPHA_1, mode });
+		await view.render({ sessionsById: sessions, chatSessionId: BETA, mode });
+		expect(view.tabs()).toEqual(["Alpha one", "Beta*"]);
+		expect(view.container.querySelector('[role="tab"][aria-label="Alpha one"] > svg')).toBeNull();
+		expect(view.container.querySelector('[role="tab"][aria-label="Beta"] > svg')).toBeNull();
+		expect(view.container.querySelector('[role="tab"][aria-label="Beta"] .tool-tab-status')).not.toBeNull();
 	});
 
-	it("updates the new task icon with its mode without changing existing session icons", async () => {
+	it("keeps child and draft labels without mode icons across presentation switches", async () => {
 		const view = mount();
-		await view.render({});
-		await view.render({ chatSessionId: null, chatIsDraft: true, mode: "chat" });
-		const draftIcon = () => view.container.querySelector('[role="tab"][aria-label="New task"] > svg')!;
-		expect(draftIcon().getAttribute("data-mode")).toBe("chat");
-		expect(
-			view.container.querySelector('[role="tab"][aria-label="Alpha one"] > svg')?.getAttribute("data-mode"),
-		).toBe("code");
+		await view.render({
+			agentFocusRequest: { nonce: 1, target: { sessionId: ALPHA_1, agentId: "child", name: "Child task" } },
+		});
+		expect(view.container.querySelector('[role="tab"][aria-label="Child task"] > svg')).toBeNull();
+		await view.render({
+			chatSessionId: null,
+			chatIsDraft: true,
+			chatFocusRequest: { nonce: 1, sessionId: null },
+			mode: "chat",
+		});
+		expect(view.tabs()).toContain("New task*");
+		expect(view.container.querySelectorAll('[role="tab"] > svg')).toHaveLength(0);
 		await view.render({ chatSessionId: null, chatIsDraft: true, mode: "code" });
-		expect(draftIcon().getAttribute("data-mode")).toBe("code");
-	});
-
-	it("uses the workspace mode while a session summary is unavailable", async () => {
-		const view = mount();
-		await view.render({ sessionsById: new Map(), mode: "code" });
-		expect(view.container.querySelector('[role="tab"] > svg')?.getAttribute("data-mode")).toBe("code");
+		expect(view.tabs()).toContain("New task*");
+		expect(view.container.querySelectorAll('[role="tab"] > svg')).toHaveLength(0);
 	});
 
 	it("groups tabs by project and keeps a project's tabs together", async () => {

@@ -21,28 +21,16 @@ import {
 	createProjectionState,
 	derivedSyncStatus,
 	type MutableSessionProjection,
-	prependAgentItems,
 	prependProjectionItems,
 	type RendererNotification,
 	removeModeProjectSessions,
 	removePendingInteraction,
 	removeSession,
-	replaceAgentItems,
 	replaceProjectionSnapshot,
 	replaceSessionList,
 	requireProjectionResnapshot,
 	retireProjection,
-	selectAgentTranscript,
 } from "./reducer.ts";
-
-export interface AgentTranscriptState {
-	readonly agentId: string | null;
-	readonly taskId: string | null;
-	readonly itemsById: ReadonlyMap<string, ItemView>;
-	readonly itemOrder: readonly string[];
-	readonly nextBeforeItemId: string | null;
-	readonly journalRevision: number;
-}
 
 export interface AppStoreSnapshot {
 	readonly version: number;
@@ -74,14 +62,11 @@ export interface AppStoreSnapshot {
 	readonly model: SessionSnapshot["model"];
 	readonly availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	readonly agents: SessionSnapshot["agents"];
-	readonly nextAgentAfterId: string | null;
-	readonly agentCollectionRevision: number;
 	readonly tasks: SessionSnapshot["tasks"];
 	readonly deliveredFiles: SessionSnapshot["deliveredFiles"];
 	readonly goal: SessionSnapshot["goal"];
 	readonly process: SessionSnapshot["process"];
 	readonly queuedTurns: readonly QueuedTurnView[];
-	readonly agentTranscript: AgentTranscriptState;
 	readonly sessions: ReadonlyMap<string, MutableSessionProjection>;
 	readonly retiredSessions: ReadonlyMap<string, MutableSessionProjection>;
 	readonly supervisor: SupervisorView;
@@ -92,7 +77,6 @@ export class AppStore {
 	private readonly listeners = new Set<() => void>();
 	private version = 0;
 	private sidebarRevision = 0;
-	private agentCollectionRevision = 0;
 	private supervisor: SupervisorView = {
 		state: "stopped",
 		serverEpoch: null,
@@ -158,7 +142,6 @@ export class AppStore {
 
 	applySnapshot(snapshot: SessionSnapshot): void {
 		replaceProjectionSnapshot(this.state, snapshot);
-		this.agentCollectionRevision += 1;
 		this.sidebarRevision += 1;
 		this.commit();
 	}
@@ -166,9 +149,6 @@ export class AppStore {
 	applyBatch(batch: ConnectionEventsParams): BatchApplyResult {
 		const previousStatus = derivedSyncStatus(this.state);
 		const result = applyConnectionEvents(this.state, batch);
-		if (result === "applied" && batch.events.some((event) => event.type === "agent/deleted")) {
-			this.agentCollectionRevision += 1;
-		}
 		if (
 			result === "applied" &&
 			batch.events.some(
@@ -208,28 +188,6 @@ export class AppStore {
 
 	requireProjectionResnapshot(sessionId: string): void {
 		if (requireProjectionResnapshot(this.state, sessionId)) this.commit();
-	}
-
-	selectAgentTranscript(sessionId: string, agentId: string | null, taskId: string | null = null): void {
-		if (selectAgentTranscript(this.state, sessionId, agentId, taskId)) this.commit();
-	}
-
-	replaceAgentItems(
-		sessionId: string,
-		agentId: string,
-		taskId: string | null,
-		page: ClientResult<"agent/readItems">,
-	): void {
-		if (replaceAgentItems(this.state, sessionId, agentId, taskId, page)) this.commit();
-	}
-
-	prependAgentItems(
-		sessionId: string,
-		agentId: string,
-		taskId: string | null,
-		page: ClientResult<"agent/readItems">,
-	): void {
-		if (prependAgentItems(this.state, sessionId, agentId, taskId, page)) this.commit();
 	}
 
 	beginSubscription(sessionId: string, options?: { focus?: boolean }): number {
@@ -342,14 +300,11 @@ export class AppStore {
 			model: projection.model,
 			availableModels: projection.availableModels,
 			agents: projection.agents,
-			nextAgentAfterId: projection.nextAgentAfterId,
-			agentCollectionRevision: this.agentCollectionRevision,
 			tasks: projection.tasks,
 			deliveredFiles: projection.deliveredFiles,
 			goal: projection.goal,
 			process: projection.process,
 			queuedTurns: projection.queuedTurns,
-			agentTranscript: projection.agentTranscript,
 			sessions: this.state.sessions,
 			retiredSessions: this.state.retiredSessions,
 			supervisor: this.supervisor,

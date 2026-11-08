@@ -21,7 +21,6 @@ const generalPreferences: GeneralPreferences = {
 
 const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
-	vision: null,
 	defaultThinkingSelection: "high",
 	autoSessionTitle: true,
 	permissionReviewer: { config: null, status: "unconfigured" },
@@ -137,6 +136,46 @@ const memorySettings = {
 };
 
 describe("SettingsDialog", () => {
+	it("opens the image model editor directly from the conversation configuration action", async () => {
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () =>
+				root.render(
+					<SettingsDialog
+						api={api}
+						generalPreferences={generalPreferences}
+						onClose={vi.fn()}
+						onGeneralPreferencesChange={vi.fn()}
+						onThemeChange={vi.fn()}
+						serverReady
+						theme="dark"
+						focusImageGeneration
+					/>,
+				),
+			);
+			await flush();
+			const dialog = container.querySelector<HTMLDialogElement>(".image-generation-settings-dialog");
+			expect(dialog?.open).toBe(true);
+			expect(dialog?.textContent).toContain("Image generation model");
+			expect(document.activeElement).toBe(dialog?.querySelector("input"));
+			await act(async () => button(dialog!, "Cancel").click());
+			await act(async () => button(container, "Profile").click());
+			await act(async () => button(container, "Model").click());
+			expect(container.querySelector<HTMLDialogElement>(".image-generation-settings-dialog")?.open ?? false).toBe(
+				false,
+			);
+		} finally {
+			await act(async () => root.unmount());
+			container.remove();
+		}
+	});
+
 	it("reuses loaded model settings during a pending refresh without remounting the page shell", async () => {
 		let resolveRefresh!: (settings: ModelSettingsView) => void;
 		const getModelSettings = vi
@@ -200,7 +239,6 @@ describe("SettingsDialog", () => {
 			getMemorySettings: vi.fn().mockResolvedValue(memorySettings),
 			getModelSettings: vi.fn().mockResolvedValue({
 				defaultModel: null,
-				vision: null,
 				defaultThinkingSelection: "off",
 				autoSessionTitle: true,
 				providers: [],
@@ -412,7 +450,7 @@ describe("SettingsDialog", () => {
 		await flush();
 		await act(async () => button(container, "Configure approval model").click());
 		await flush();
-		expect(container.querySelector(".reviewer-model-section")).toBeNull();
+		expect(container.querySelector(".reviewer-model-card")).toBeNull();
 		const dialog = container.querySelector("dialog");
 		expect(dialog).not.toBeNull();
 		expect(dialog?.getAttribute("aria-label")).toBe("Approval model");
@@ -458,10 +496,10 @@ describe("SettingsDialog", () => {
 		expect(onThemeChange).toHaveBeenCalledWith("light");
 		await act(async () => button(container, "减少动效").click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, motion: "reduced" });
-		await act(async () => button(container, "Chat 回复字体").click());
+		await act(async () => button(container, "日常工作回复字体").click());
 		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]:last-of-type')!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, chatFont: "system-sans" });
-		await act(async () => button(container, "Code 回复字体").click());
+		await act(async () => button(container, "代码开发回复字体").click());
 		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
 		const contentFontSize = button(container, "内容字号");
@@ -786,16 +824,16 @@ describe("Model settings workflows", () => {
 	});
 	it("opens a compact approval model dialog without editing shared providers", async () => {
 		const { container, api } = await mount();
-		const reviewer = container.querySelector(".reviewer-model-section")!;
+		const reviewer = container.querySelector(".reviewer-model-card")!;
 		expect(reviewer.textContent).toContain("Approval model");
 		expect(reviewer.textContent).not.toMatch(/enable auto/i);
 		expect(reviewer.querySelector("input[role='switch']")).toBeNull();
 		expect(reviewer.querySelector("input[type='password']")).toBeNull();
 		expect(reviewer.textContent).not.toContain("Add provider");
 		expect(reviewer.textContent).not.toContain("Edit provider");
-		expect(button(reviewer, "Configure")).toBeTruthy();
+		expect(button(container, "Configure approval model")).toBe(reviewer);
 
-		await act(async () => button(reviewer, "Configure").click());
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 		const dialog = container.querySelector(".reviewer-model-dialog");
 		expect(dialog).not.toBeNull();
 		expect(dialog?.textContent).toContain("Connection type");
@@ -806,8 +844,7 @@ describe("Model settings workflows", () => {
 	});
 	it("routes reviewer dialog cancellation through the existing unsaved-changes flow", async () => {
 		const { container, api } = await mount();
-		const reviewer = container.querySelector(".reviewer-model-section")!;
-		await act(async () => button(reviewer, "Configure").click());
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 		await act(async () => button(container, "Approval reasoning").click());
 		await act(async () => {
 			Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'))
@@ -827,8 +864,7 @@ describe("Model settings workflows", () => {
 		expect(container.querySelector(".reviewer-model-dialog")).toBeNull();
 		expect(api.updateModelSettings).not.toHaveBeenCalled();
 
-		const reopened = container.querySelector(".reviewer-model-section")!;
-		await act(async () => button(reopened, "Configure").click());
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
 		expect(button(container, "Approval reasoning").textContent).toContain("Off");
 	});
 });
@@ -851,7 +887,7 @@ describe("ModelSettingsPanel", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
-		expect(container.textContent).toContain("Specialized models");
+		expect(container.textContent).toContain("Approval model");
 		await act(async () => button(container, "Add provider").click());
 		const catalog = container.querySelector(".model-provider-catalog-dialog")!;
 		expect(catalog.querySelectorAll(".model-provider-card")).toHaveLength(1);
@@ -948,22 +984,10 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("configures, edits, and removes the vision service", async () => {
-		const updateModelSettings = vi.fn();
-		updateModelSettings.mockImplementation(async ({ mutation }: { mutation: any }) => {
-			if (mutation.type === "set_vision") {
-				return {
-					...modelSettings,
-					vision: mutation.settings
-						? { ...mutation.settings, authConfigured: mutation.credential.action !== "remove" }
-						: null,
-				};
-			}
-			return modelSettings;
-		});
+	it("keeps chat providers and approval settings without a dedicated vision editor", async () => {
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
-			updateModelSettings,
+			updateModelSettings: vi.fn(),
 			testModelConnection: vi.fn(),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
@@ -972,47 +996,18 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		const visionPanel = [...container.querySelectorAll(".model-service-panel")].find((panel) =>
-			panel.textContent?.includes("Vision model"),
-		);
-		expect(visionPanel?.textContent).toContain("Not configured");
-		await act(async () => {
-			[...visionPanel!.querySelectorAll("button")].find((item) => item.textContent?.includes("Configure"))?.click();
-		});
-		await flush();
-
-		await act(async () =>
-			setValue(document.querySelector<HTMLInputElement>('input[placeholder="My vision"]')!, "My vision"),
-		);
-		await act(async () =>
-			setValue(
-				document.querySelector<HTMLInputElement>('input[placeholder="https://api.openai.com/v1"]')!,
-				"https://api.openai.com/v1",
-			),
-		);
-		await act(async () =>
-			setValue(document.querySelector<HTMLInputElement>('input[placeholder="gpt-4o"]')!, "gpt-4o"),
-		);
-		await act(async () =>
-			setValue(document.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"),
-		);
-		await act(async () => button(document.body as HTMLElement, "Save").click());
-		await flush();
-
-		expect(updateModelSettings).toHaveBeenCalledWith(
-			expect.objectContaining({
-				mutation: expect.objectContaining({
-					type: "set_vision",
-					settings: {
-						name: "My vision",
-						baseUrl: "https://api.openai.com/v1",
-						api: "openai-responses",
-						modelId: "gpt-4o",
-					},
-					credential: { action: "set", value: "sk-vision-key" },
-				}),
-			}),
-		);
+		expect(container.querySelector(".model-provider-card")?.textContent).toContain("OpenAI");
+		expect(container.textContent).toContain("GPT-5");
+		expect(container.textContent).not.toContain("Vision model");
+		expect(container.querySelector(".model-specialized-section")?.textContent).toContain("Specialized models");
+		expect(container.querySelectorAll(".model-specialized-section .model-settings-card")).toHaveLength(2);
+		const reviewerPanel = container.querySelector(".reviewer-model-card")!;
+		expect(reviewerPanel.textContent).toContain("Approval model");
+		await act(async () => container.querySelector<HTMLButtonElement>(".reviewer-model-card")!.click());
+		expect(container.querySelector('dialog[aria-label="Approval model"]')?.hasAttribute("open")).toBe(true);
+		expect(container.querySelector('dialog[aria-label="Vision model"]')).toBeNull();
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+		expect(api.testModelConnection).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 

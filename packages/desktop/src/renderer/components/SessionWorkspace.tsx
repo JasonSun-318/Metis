@@ -17,7 +17,7 @@ import {
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
-import { Books, ChatCircle, ClipboardText, Code, FileText, Globe, Plus, Robot, TerminalWindow, X } from "../icons.tsx";
+import { Books, ClipboardText, ClockCounterClockwise, FileText, Globe, Plus, TerminalWindow, X } from "../icons.tsx";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { useWorkspaceLayout } from "../use-workspace-layout.ts";
@@ -68,7 +68,6 @@ import {
 	workspaceTabs,
 } from "../workspace-tabs.ts";
 import { AgentConversation } from "./AgentConversation.tsx";
-import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { CodeChangesNavigationContext } from "./CodeChangesNavigationContext.ts";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
@@ -161,6 +160,17 @@ interface SessionWorkspaceViewProps {
 	readonly chat: ReactNode;
 	readonly chatCwd: string | null;
 	readonly agentFocusRequest?: { readonly nonce: number; readonly target: AgentConversationTarget } | null;
+	readonly agentRemovalRequest?: {
+		readonly nonce: number;
+		readonly rootSessionId: string;
+		readonly agentIds: readonly string[];
+	};
+	readonly agentRenameRequest?: {
+		readonly nonce: number;
+		readonly rootSessionId: string;
+		readonly agentId: string;
+		readonly name: string;
+	};
 	readonly onAgentConversationFocus?: (target: AgentConversationTarget | null) => void;
 	readonly chatFocusRequest: { readonly nonce: number; readonly sessionId: string | null } | null;
 	readonly chatIsDraft: boolean;
@@ -273,6 +283,8 @@ export function SessionWorkspaceView({
 	chatCwd,
 	chatFocusRequest,
 	agentFocusRequest,
+	agentRemovalRequest,
+	agentRenameRequest,
 	onAgentConversationFocus,
 	chatIsDraft,
 	chatSessionId,
@@ -497,14 +509,11 @@ export function SessionWorkspaceView({
 				const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
 				// Child chat tabs carry their owning root sessionId; keeping that root
 				// subscribed is what lets the visible child recover live updates.
-				return (tab?.kind === "chat" || tab?.kind === "agent") && tab.sessionId !== null ? [tab.sessionId] : [];
+				return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
 			}),
 		);
-		// An open Agents tool tab keeps its session live even off the chat pane.
-		const activeTool = toolsStrip.tabs.find((tab) => tab.id === toolsStrip.activeId);
-		if (sidebarOpen && activeTool?.kind === "agent" && focusedChatSession) live.add(focusedChatSession);
 		return [...live].sort().join("\n");
-	}, [workspace, sidebarOpen, toolsStrip, focusedChatSession]);
+	}, [workspace]);
 	// Sessions with a pane-active chat tab host their own modal interactions;
 	// the App-level host covers sessions without a visible chat pane.
 	const chatLiveKey = useMemo(
@@ -655,6 +664,43 @@ export function SessionWorkspaceView({
 		handledAgentFocus.current = agentFocusRequest.nonce;
 		openAgentConversation(agentFocusRequest.target);
 	}, [agentFocusRequest, openAgentConversation]);
+	const handledAgentRemoval = useRef(0);
+	useEffect(() => {
+		if (!agentRemovalRequest || handledAgentRemoval.current === agentRemovalRequest.nonce) return;
+		handledAgentRemoval.current = agentRemovalRequest.nonce;
+		const ids = new Set(agentRemovalRequest.agentIds);
+		updateWorkspace((current) =>
+			removeTabs(
+				current,
+				new Set(
+					workspaceTabs(current)
+						.filter(
+							(tab) =>
+								tab.kind === "chat" &&
+								tab.sessionId === agentRemovalRequest.rootSessionId &&
+								tab.agentId &&
+								ids.has(tab.agentId),
+						)
+						.map((tab) => tab.id),
+				),
+			),
+		);
+		for (const agentId of ids) previewBytesCache.deleteSession(agentId);
+	}, [agentRemovalRequest, updateWorkspace]);
+	const handledAgentRename = useRef(0);
+	useEffect(() => {
+		if (!agentRenameRequest || handledAgentRename.current === agentRenameRequest.nonce) return;
+		handledAgentRename.current = agentRenameRequest.nonce;
+		updateWorkspace((current) =>
+			mapTabs(current, (tab) =>
+				tab.kind === "chat" &&
+				tab.sessionId === agentRenameRequest.rootSessionId &&
+				tab.agentId === agentRenameRequest.agentId
+					? { ...tab, agentName: agentRenameRequest.name }
+					: tab,
+			),
+		);
+	}, [agentRenameRequest, updateWorkspace]);
 
 	// Collapsing a group animates its tab body shut like a drawer before the
 	// model commits; expanding commits first and the fresh body animates open.
@@ -1328,23 +1374,6 @@ export function SessionWorkspaceView({
 		[addReview, codeWorkspaceFor, showToolsSidebar],
 	);
 
-	const addAgent = (target: { sessionId: string | null; cwd: string | null }) => {
-		const { sessionId: ownerSessionId } = target;
-		if (!ownerSessionId) return;
-		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find(
-				(tab) => tab.kind === "agent" && tab.sessionId === ownerSessionId,
-			);
-			const tab: WorkspaceTab = existing ?? {
-				kind: "agent",
-				id: crypto.randomUUID(),
-				sessionId: ownerSessionId,
-				title: t("Agents"),
-			};
-			return existing ? activateTab(workspace, existing.id) : placeTab(workspace, tab);
-		});
-	};
-
 	const addKnowledge = useCallback(
 		(targetSessionId: string | null) => {
 			if (!targetSessionId) return;
@@ -1631,7 +1660,6 @@ export function SessionWorkspaceView({
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
 		else if (closing.kind === "browser")
 			void api.closeBrowser({ sessionId: closing.sessionId, browserId: id }).catch(onError);
-		else if (closing.kind === "agent") store.selectAgentTranscript(closing.sessionId, null);
 		setFileDrafts((current) => {
 			if (!current.has(id)) return current;
 			const next = new Map(current);
@@ -1839,10 +1867,6 @@ export function SessionWorkspaceView({
 						<span>{t("Files")}</span>
 					</button>
 				)}
-				<button disabled={!target.sessionId} onClick={() => addAgent(target)} type="button">
-					<Robot aria-hidden="true" size={18} />
-					<span>{t("Agents")}</span>
-				</button>
 				<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} type="button">
 					<Books aria-hidden="true" size={18} />
 					<span>{t("Knowledge")}</span>
@@ -1919,17 +1943,12 @@ export function SessionWorkspaceView({
 	}, [layoutPanels, workspace, chatSessionId, visible]);
 
 	const tabIcon = (tab: WorkspaceTab): ReactNode => {
-		if (tab.kind === "chat") {
-			const tabMode = (tab.sessionId === null ? undefined : sessionsById.get(tab.sessionId)?.mode) ?? mode;
-			return tabMode === "code" ? (
-				<Code aria-hidden="true" data-mode="code" size={13} />
-			) : (
-				<ChatCircle aria-hidden="true" data-mode="chat" size={13} />
-			);
-		}
+		if (tab.kind === "chat") return null;
 		return tab.kind === "knowledge" ? (
 			<Books aria-hidden="true" size={13} />
-		) : tab.kind === "terminal" || tab.kind === "process" ? (
+		) : tab.kind === "process" ? (
+			<ClockCounterClockwise aria-hidden="true" size={13} />
+		) : tab.kind === "terminal" ? (
 			<TerminalWindow aria-hidden="true" size={13} />
 		) : tab.kind === "browser" ? (
 			<Globe aria-hidden="true" size={13} />
@@ -1941,8 +1960,6 @@ export function SessionWorkspaceView({
 			)
 		) : tab.kind === "review" ? (
 			<ClipboardText aria-hidden="true" size={13} />
-		) : tab.kind === "agent" ? (
-			<Robot aria-hidden="true" size={13} />
 		) : tab.kind === "plan" ? (
 			<FileText aria-hidden="true" size={13} />
 		) : (
@@ -2362,6 +2379,7 @@ export function SessionWorkspaceView({
 									panelId={`process-panel-${tab.id}`}
 									process={tab.process}
 									theme={theme}
+									onError={onError}
 									visible={panelVisible(tab.id)}
 								/>,
 							)
@@ -2423,7 +2441,7 @@ export function SessionWorkspaceView({
 													visible={panelVisible(tab.id)}
 												/>,
 											)
-										: tab.kind === "agent"
+										: tab.kind === "plan"
 											? wrap(
 													tab.id,
 													<div
@@ -2434,35 +2452,24 @@ export function SessionWorkspaceView({
 														<PlanPreview plan={tab.plan} />
 													</div>,
 												)
-											: tab.kind === "plan"
+											: tab.kind === "preview"
 												? wrap(
 														tab.id,
 														<div
-															className="tool-panel plan-panel"
-															id={`plan-panel-${tab.id}`}
+															className="tool-panel preview-panel"
+															id={`preview-panel-${tab.id}`}
 															role="tabpanel"
 														>
-															<PlanPreview plan={tab.plan} />
+															<UniversalFilePreviewer
+																active={panelVisible(tab.id)}
+																api={api}
+																file={tab.file}
+																onClose={() => closeTab(tab.id)}
+																onError={onError}
+															/>
 														</div>,
 													)
-												: tab.kind === "preview"
-													? wrap(
-															tab.id,
-															<div
-																className="tool-panel preview-panel"
-																id={`preview-panel-${tab.id}`}
-																role="tabpanel"
-															>
-																<UniversalFilePreviewer
-																	active={panelVisible(tab.id)}
-																	api={api}
-																	file={tab.file}
-																	onClose={() => closeTab(tab.id)}
-																	onError={onError}
-																/>
-															</div>,
-														)
-													: [],
+												: [],
 				),
 				// All file tabs of one session share a single FilePanel (tree + editor).
 				fileTabs.length > 0

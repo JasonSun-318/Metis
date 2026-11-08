@@ -2558,6 +2558,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 			}
 			throw new AppServerError("SESSION_CORRUPT", { sessionId: this.sessionId });
 		}
+		this.manager = manager;
 		this.deliveredArtifacts = new SessionDeliveredArtifacts(agentDir, manager);
 		const deliveredFiles = this.deliveredArtifacts.list();
 		const deliveredFileMap = new Map(deliveredFiles.map((file) => [file.fileId, file]));
@@ -2597,8 +2598,9 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 					deliveredFiles: deliveredFileMap,
 					fallbackTimestamp: ref.summary.createdAt,
 				});
-			})
-			.filter((item): item is ItemView => item !== undefined);
+			},
+			historyCache,
+		);
 		this.projection = new SessionProjection({
 			session: ref.summary,
 			turns,

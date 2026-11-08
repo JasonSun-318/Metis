@@ -11,7 +11,8 @@ import {
 	SessionManager,
 } from "@metis/coding-agent/host";
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
-import { listAgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
+import { AgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
+import { ArchivedConversationCatalog, deleteArchivedAgent } from "./archived-conversations.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
@@ -119,6 +120,8 @@ export class Dispatcher {
 	private readonly knowledge: KnowledgeService;
 	private readonly replay = new Map<string, ReplayEntry>();
 	private readonly catalog: SessionCatalog;
+	private readonly agentCatalog: AgentCatalog;
+	private readonly archivedConversations: ArchivedConversationCatalog;
 	private readonly registry: SessionRegistry;
 	private readonly subscriptionHub: SessionSubscriptions;
 	private readonly interactions: InteractionBroker;
@@ -154,6 +157,8 @@ export class Dispatcher {
 		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
+		this.agentCatalog = new AgentCatalog(catalog.agentDir);
+		this.archivedConversations = new ArchivedConversationCatalog(catalog.agentDir);
 		this.knowledge = new KnowledgeService(catalog.agentDir);
 		this.registry = registry;
 		this.subscriptionHub = subscriptionHub;
@@ -964,7 +969,7 @@ export class Dispatcher {
 				const opened = await this.registry.withOpenRuntime(request.params.sessionId, (runtime) =>
 					runtime.listAgents(request.params),
 				);
-				return opened.open ? opened.result : listAgentCatalog(ref, this.catalog.agentDir, request.params);
+				return opened.open ? opened.result : this.agentCatalog.list(ref, request.params);
 			}
 			case "agent/send":
 			case "agent/control":

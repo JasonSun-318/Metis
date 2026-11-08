@@ -45,7 +45,6 @@ function reviewerSettings(permissionReviewer: {
 }) {
 	return {
 		defaultModel: null,
-		vision: null,
 		defaultThinkingSelection: "medium",
 		permissionReviewer,
 		providers: [

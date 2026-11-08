@@ -2,7 +2,7 @@ import type { SessionSummary } from "@metis/app-protocol";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
+import { Archive, CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
@@ -13,6 +13,8 @@ interface SessionActionsProps {
 	readonly disabled: boolean;
 	readonly displayName: string;
 	readonly onDelete: (session: SessionSummary) => Promise<void>;
+	readonly onArchive?: (session: SessionSummary) => Promise<void>;
+	readonly archiveDisabled?: boolean;
 	readonly onCopy?: (displayName: string) => Promise<void>;
 	readonly onPin?: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
@@ -25,24 +27,56 @@ function message(cause: unknown): string {
 	return cause instanceof Error ? cause.message : "The session could not be changed.";
 }
 
-export function SessionActions({
+export function SessionActions({ session, onDelete, onRename, onArchive, onPin, ...props }: SessionActionsProps) {
+	return (
+		<ConversationActions
+			{...props}
+			onDelete={() => onDelete(session)}
+			onRename={(name) => onRename(session, name)}
+			onArchive={onArchive ? () => onArchive(session) : undefined}
+			onPin={onPin ? (pinned) => onPin(session, pinned) : undefined}
+		/>
+	);
+}
+
+export interface ConversationActionsProps {
+	readonly allowRename?: boolean;
+	readonly archiveDisabled?: boolean;
+	readonly deleteDisabled: boolean;
+	readonly disabled: boolean;
+	readonly displayName: string;
+	readonly kind?: "session" | "agent";
+	readonly onArchive?: () => Promise<void>;
+	readonly onDelete: () => Promise<void>;
+	readonly onCopy?: (displayName: string) => Promise<void>;
+	readonly onPin?: (pinned: boolean) => void;
+	readonly onRename: (name: string) => Promise<void>;
+	readonly pinned?: boolean;
+	readonly variant?: "sidebar" | "header";
+}
+
+/** Both tree levels share the same menu, focus restoration, and mutation dialogs. */
+export function ConversationActions({
 	allowRename = true,
+	archiveDisabled = false,
 	deleteDisabled,
 	disabled,
 	displayName,
+	kind = "session",
+	onArchive,
 	onDelete,
 	onCopy,
 	onPin,
 	onRename,
 	pinned = false,
-	session,
 	variant = "sidebar",
-}: SessionActionsProps) {
+}: ConversationActionsProps) {
 	const { t } = useTranslation();
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [dialog, setDialog] = useState<"rename" | "delete" | null>(null);
 	const [name, setName] = useState(displayName);
 	const [pending, setPending] = useState(false);
+	const [archiving, setArchiving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [menuPosition, setMenuPosition] = useState<CSSProperties>({});
 	const root = useRef<HTMLDivElement>(null);
@@ -52,10 +86,11 @@ export function SessionActions({
 	const cancelButton = useRef<HTMLButtonElement>(null);
 	const updateMenuPosition = useCallback(() => {
 		if (trigger.current) {
-			const itemCount = Number(Boolean(onPin)) + Number(Boolean(onCopy)) + Number(allowRename) + 1;
+			const itemCount =
+				Number(Boolean(onPin)) + Number(Boolean(onCopy)) + Number(allowRename) + Number(Boolean(onArchive)) + 1;
 			setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 200, itemCount));
 		}
-	}, [allowRename, onCopy, onPin]);
+	}, [allowRename, onArchive, onCopy, onPin]);
 	useSidebarMotionPosition(trigger, menuOpen, updateMenuPosition);
 
 	const closeMenu = useCallback((restoreFocus = true) => {
@@ -73,11 +108,12 @@ export function SessionActions({
 		if (!menuOpen) return;
 		queueMicrotask(() => menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
 		const onPointerDown = (event: PointerEvent) => {
+			if (pending) return;
 			const node = event.target as Node;
 			if (!root.current?.contains(node) && !menu.current?.contains(node)) closeMenu(false);
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (event.key !== "Escape" || pending) return;
 			event.preventDefault();
 			closeMenu();
 		};
@@ -91,7 +127,7 @@ export function SessionActions({
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [closeMenu, menuOpen, updateMenuPosition]);
+	}, [closeMenu, menuOpen, updateMenuPosition, pending]);
 	useLayoutEffect(() => {
 		if (menuOpen) updateMenuPosition();
 	}, [menuOpen, updateMenuPosition]);
@@ -103,9 +139,9 @@ export function SessionActions({
 		setPending(true);
 		setError(null);
 		try {
-			await onRename(session, next);
+			await onRename(next);
 			setDialog(null);
-			setMenuOpen(false);
+			closeMenu();
 		} catch (cause) {
 			setError(message(cause));
 		} finally {
@@ -125,14 +161,29 @@ export function SessionActions({
 			setPending(false);
 		}
 	};
+	const archive = async () => {
+		if (!onArchive || archiveDisabled || pending) return;
+		setPending(true);
+		setArchiving(true);
+		setError(null);
+		try {
+			await onArchive();
+			closeMenu();
+		} catch (cause) {
+			setError(message(cause));
+		} finally {
+			setPending(false);
+			setArchiving(false);
+		}
+	};
 	const confirmDelete = async () => {
 		if (deleteDisabled || pending) return;
 		setPending(true);
 		setError(null);
 		try {
-			await onDelete(session);
+			await onDelete();
 			setDialog(null);
-			setMenuOpen(false);
+			closeMenu();
 		} catch (cause) {
 			setError(message(cause));
 		} finally {
@@ -150,7 +201,7 @@ export function SessionActions({
 				aria-expanded={menuOpen}
 				aria-haspopup="menu"
 				aria-label={t("Actions for {{name}}", { name: displayName })}
-				disabled={disabled}
+				disabled={disabled || pending}
 				onClick={() => {
 					setError(null);
 					setMenuOpen((open) => !open);
@@ -167,7 +218,9 @@ export function SessionActions({
 			{menuOpen &&
 				createPortal(
 					<div
-						aria-label={t("{{name}} session actions", { name: displayName })}
+						aria-label={t(kind === "agent" ? "{{name}} agent actions" : "{{name}} session actions", {
+							name: displayName,
+						})}
 						className="session-action-menu"
 						onKeyDown={(event) => {
 							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -194,7 +247,7 @@ export function SessionActions({
 							<button
 								disabled={pending}
 								onClick={() => {
-									onPin(session, !pinned);
+									onPin(!pinned);
 									closeMenu();
 								}}
 								role="menuitem"
@@ -215,6 +268,7 @@ export function SessionActions({
 						)}
 						{allowRename && (
 							<button
+								disabled={pending}
 								onClick={() => {
 									setName(displayName);
 									setError(null);
@@ -227,9 +281,29 @@ export function SessionActions({
 								<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
 							</button>
 						)}
+						{onArchive && (
+							<button
+								type="button"
+								role="menuitem"
+								disabled={archiveDisabled || pending}
+								title={
+									archiveDisabled
+										? t(
+												kind === "agent"
+													? "Stop this agent and its running subtasks before archiving."
+													: "Stop the current reply before archiving.",
+											)
+										: undefined
+								}
+								onClick={() => void archive()}
+							>
+								<Archive size={15} aria-hidden="true" />
+								{t(archiving ? "Archiving conversation…" : "Archive conversation")}
+							</button>
+						)}
 						<button
 							className="session-delete-menu-item"
-							disabled={deleteDisabled}
+							disabled={deleteDisabled || pending}
 							onClick={() => {
 								setError(null);
 								setMenuOpen(false);
@@ -256,7 +330,7 @@ export function SessionActions({
 					onCancel={cancelDialog}
 					titleId="session-rename-title"
 				>
-					<h2 id="session-rename-title">{t("Rename session")}</h2>
+					<h2 id="session-rename-title">{t(kind === "agent" ? "Rename agent conversation" : "Rename session")}</h2>
 					<p id="session-rename-description">
 						{t("Change the session name shown in Metis. Messages are unchanged.")}
 					</p>
@@ -265,7 +339,10 @@ export function SessionActions({
 						<input
 							autoComplete="off"
 							id="session-rename-input"
-							onChange={(event) => setName([...event.target.value].slice(0, 80).join(""))}
+							maxLength={kind === "agent" ? 128 : undefined}
+							onChange={(event) =>
+								setName(kind === "agent" ? event.target.value : [...event.target.value].slice(0, 80).join(""))
+							}
 							ref={renameInput}
 							value={name}
 						/>
@@ -289,19 +366,38 @@ export function SessionActions({
 					onCancel={cancelDialog}
 					titleId="session-delete-title"
 				>
-					<h2 id="session-delete-title">{t("Delete session?")}</h2>
+					<h2 id="session-delete-title">
+						{t(kind === "agent" ? "Delete agent conversation?" : "Delete session?")}
+					</h2>
 					<div id="session-delete-description">
-						<p>{t("{{name}} and its session-owned data will move to Trash.", { name: displayName })}</p>
-						<ul>
-							<li>
+						{kind === "agent" ? (
+							<p>
 								{t(
-									"Images, attachments, tool outputs, Subagents, document work, and recovery files are included.",
+									"Delete {{name}} and all its subtasks? Running tasks will be stopped and their conversation data will be removed.",
+									{ name: displayName },
 								)}
-							</li>
-							<li>{t("Project memory, Skills, schedules, other sessions, and source files are unchanged.")}</li>
-						</ul>
+							</p>
+						) : (
+							<>
+								<p>{t("{{name}} and its session-owned data will move to Trash.", { name: displayName })}</p>
+								<ul>
+									<li>
+										{t(
+											"Images, attachments, tool outputs, Subagents, document work, and recovery files are included.",
+										)}
+									</li>
+									<li>
+										{t("Project memory, Skills, schedules, other sessions, and source files are unchanged.")}
+									</li>
+								</ul>
+							</>
+						)}
 						{error && <p role="alert">{t(error)}</p>}
-						{pending && <output className="status-paragraph">{t("Moving session data to Trash…")}</output>}
+						{pending && (
+							<output className="status-paragraph">
+								{t(kind === "agent" ? "Deleting agent conversations…" : "Moving session data to Trash…")}
+							</output>
+						)}
 					</div>
 					<div className="project-dialog-actions">
 						<button
@@ -319,7 +415,7 @@ export function SessionActions({
 							onClick={() => void confirmDelete()}
 							type="button"
 						>
-							{t(pending ? "Deleting…" : "Move to Trash")}
+							{t(pending ? "Deleting…" : kind === "agent" ? "Delete" : "Move to Trash")}
 						</button>
 					</div>
 				</DialogFrame>

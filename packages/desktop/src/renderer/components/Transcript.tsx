@@ -47,8 +47,6 @@ interface TranscriptProps {
 	readonly onRevisePlan?: (plan: PlanView) => void;
 	readonly planActionsBusy?: boolean;
 	readonly ariaLabel?: string;
-	readonly latestLabel?: string;
-	readonly olderLabel?: string;
 }
 
 interface TranscriptRow {
@@ -126,7 +124,6 @@ export function Transcript({
 	hasOlder,
 	itemIds,
 	itemsById,
-	latestLabel,
 	loadingOlder,
 	onCancelPlan,
 	onCopy,
@@ -137,7 +134,6 @@ export function Transcript({
 	onLoadOlder,
 	onRevisePlan,
 	onStartPlan,
-	olderLabel = "Load older messages",
 	planActionsBusy = false,
 }: TranscriptProps) {
 	const { t } = useTranslation();
@@ -370,7 +366,7 @@ export function Transcript({
 		const scroll = scrollRef.current;
 		if (!scroll || !lastItem || transcript.length === 0) return;
 		if (!followLatest.current || railDragging.current) {
-			if (activeTurnId != null || latestLabel || boundInteractions?.requests.length) setHasNewItems(true);
+			if (activeTurnId != null || boundInteractions?.requests.length) setHasNewItems(true);
 			return;
 		}
 		const frame = requestAnimationFrame(() => {
@@ -380,7 +376,6 @@ export function Transcript({
 		return () => cancelAnimationFrame(frame);
 	}, [
 		lastItem,
-		latestLabel,
 		activeTurnId,
 		transcript.length,
 		virtualizer,
@@ -589,7 +584,7 @@ export function Transcript({
 						}}
 						type="button"
 					>
-						{loadingOlder ? t("Loading…") : t(olderLabel)}
+						{loadingOlder ? t("Loading…") : t("Load older messages")}
 					</button>
 				)}
 				{/* biome-ignore lint/a11y/noStaticElementInteractions: Observe bubbled native scroll intent without changing the scroller's default behavior or focus order. */}
@@ -825,11 +820,11 @@ export function Transcript({
 						{t("View pending request")}
 					</button>
 				) : (
-					(activeTurnId != null || latestLabel) &&
+					activeTurnId != null &&
 					hasNewItems && (
 						<button className="transcript-latest" onClick={scrollToLatest} type="button">
 							<ArrowDown aria-hidden="true" size={14} />
-							{t(latestLabel ?? "Scroll to bottom")}
+							{t("Scroll to bottom")}
 						</button>
 					)
 				)}
