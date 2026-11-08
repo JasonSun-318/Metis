@@ -1,5 +1,10 @@
 name: Desktop package
 
+# Coverage tiers:
+# - quick (pull requests, main pushes, default manual runs): one macOS job with
+#   the smoke E2E subset, so PR feedback stays inside a few minutes.
+# - full (tags, nightly schedule, manual runner=all): all three platforms, full
+#   packaged E2E suite, native artifacts uploaded.
 on:
   pull_request:
     paths:
@@ -14,6 +19,8 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  schedule:
+    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       runner:
@@ -25,20 +32,34 @@ on:
           - macos-26
           - windows-2025
           - ubuntu-26.04
+      e2e:
+        description: E2E coverage
+        type: choice
+        default: auto
+        options:
+          - auto
+          - smoke
+          - full
 
 permissions:
   contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   package:
     strategy:
       fail-fast: false
       matrix:
-        # Push/PR keeps all platforms; manual follow-ups can target one failure.
-        os: ${{ fromJSON(inputs.runner && inputs.runner != 'all' && format('["{0}"]', inputs.runner) || '["macos-26","windows-2025","ubuntu-26.04"]') }}
+        # Full tier covers all platforms; quick tier is one macOS job. Manual
+        # runs can target a single platform for failure follow-ups.
+        os: ${{ fromJSON((github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v') || inputs.runner == 'all') && '["macos-26","windows-2025","ubuntu-26.04"]' || (inputs.runner && inputs.runner != 'all' && format('["{0}"]', inputs.runner)) || '["macos-26"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
+      METIS_CI_E2E: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v') || inputs.runner == 'all' || inputs.e2e == 'full') && 'full' || 'smoke' }}
       METIS_UPDATE_BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.METIS_UPDATE_BASE_URL || '' }}
       MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_SIGN_IDENTITY || '' }}
       APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_ID || '' }}
@@ -78,7 +99,7 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
       - name: Materialize Windows signing certificate
@@ -111,12 +132,12 @@ jobs:
         if: runner.os == 'Windows'
         run: node packages/desktop/scripts/prepare-windows-ci-sandbox.mjs
 
-      - name: Probe packaged sandbox health
-        if: runner.os != 'Linux'
-        run: npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
+      - name: Run packaged E2E smoke (quick tier)
+        if: runner.os != 'Linux' && env.METIS_CI_E2E == 'smoke'
+        run: npm run test:e2e --workspace @metis/desktop -- packaged-smoke.spec.ts permission-performance.spec.ts
 
-      - name: Run packaged E2E (macOS and Windows)
-        if: runner.os != 'Linux'
+      - name: Run packaged E2E (full tier)
+        if: runner.os != 'Linux' && env.METIS_CI_E2E == 'full'
         run: npm run test:e2e --workspace @metis/desktop
 
       - name: Upload E2E failure diagnostics
@@ -129,7 +150,7 @@ jobs:
           retention-days: 7
 
       - name: Upload native artifacts
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && env.METIS_CI_E2E == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: metis-${{ runner.os }}-${{ runner.arch }}
