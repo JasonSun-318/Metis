@@ -25,7 +25,9 @@ function check(t, script, file, source) {
 						? { ".": "./dist/index.js", "./compat": "./dist/compat.js", "./providers/*": "./dist/providers/*.js" }
 						: pkg === "coding-agent"
 							? { ".": "./dist/index.js", "./host": "./dist/host.js" }
-							: { ".": "./dist/index.js" },
+							: pkg === "agent"
+								? { ".": "./dist/index.js", "./harness": "./dist/harness.js" }
+								: { ".": "./dist/index.js" },
 			}),
 		);
 	}
@@ -37,6 +39,8 @@ function check(t, script, file, source) {
 
 const forbiddenImports = [
 	["packages/agent/src/example.ts", 'import type { Model } from "@metis/ai/src/types";'],
+	["packages/agent/src/agent-loop.ts", 'import { harness } from "@metis/agent-core/harness";'],
+	["packages/coding-agent/src/core/example.ts", 'export { harness } from "@metis/agent-core/harness";'],
 	["packages/agent/src/example.mts", 'import { server } from "@metis/app-server";'],
 	["packages/agent/src/example.cts", 'export { server } from "@metis/app-server";'],
 	["packages/desktop/src/renderer/example.tsx", 'const server = require("@metis/app-server");'],
@@ -73,6 +77,8 @@ for (const [file, source] of forbiddenImports) {
 const allowedImports = [
 	["packages/agent/src/example.ts", 'import { getModel } from "@metis/ai/compat";'],
 	["packages/agent/src/example.ts", 'import { fauxProvider } from "@metis/ai/providers/faux";'],
+	["packages/agent/src/harness.ts", 'export * from "./harness/index.ts";'],
+	["packages/agent/test/public-api-types.test.ts", 'import type { Harness } from "@metis/agent-core/harness";'],
 	["packages/ai/src/example.ts", 'import { local } from "../..hidden/local.ts";'],
 	["packages/app-server/src/example.ts", 'import { createRuntime } from "@metis/coding-agent/host";'],
 	["packages/desktop/src/renderer/example.tsx", 'import type { ClientResult } from "@metis/app-protocol";'],

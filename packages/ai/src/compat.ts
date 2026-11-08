@@ -6,8 +6,8 @@
  *
  * Existing apps switch imports from "@metis/ai" to
  * "@metis/ai/compat" unchanged; new code uses `createModels()`
- * and the provider factories. This module is deleted with the coding-agent
- * ModelManager migration.
+ * and the provider factories. This module is frozen for compatibility; the
+ * migration to the new API is deferred to the Phase 3 cleanup.
  */
 
 export * from "./api/anthropic-messages.lazy.ts";

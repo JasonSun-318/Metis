@@ -71,6 +71,18 @@ function violates(file, specifier) {
 	const renderer = path.startsWith("packages/desktop/src/renderer/");
 	const shared = path.startsWith("packages/desktop/src/shared/");
 	const protocol = path.startsWith("packages/app-protocol/src/");
+	// Frozen compat surface: the harness exists only for published-API
+	// compatibility. New production consumers are rejected; tests and the
+	// frozen entrypoints themselves may still reference it.
+	if (specifier === "@metis/agent-core/harness") {
+		const frozenOwner =
+			path === "packages/agent/src/index.ts" ||
+			path === "packages/agent/src/harness.ts" ||
+			path.startsWith("packages/agent/src/harness/") ||
+			path.includes("/test/") ||
+			path.startsWith("packages/agent/test/");
+		if (!frozenOwner) return true;
+	}
 	if (
 		(renderer || shared || protocol) &&
 		(isBuiltin(specifier) ||

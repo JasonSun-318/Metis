@@ -1,3 +1,11 @@
+/**
+ * @deprecated Frozen compatibility surface.
+ *
+ * The harness is kept only for the published `@metis/agent-core/harness`
+ * API contract. New production consumers are rejected by the architecture
+ * gate; use the provider factories / `createModels()` or the documented
+ * `@metis/agent-core` host APIs instead.
+ */
 export * from "./harness/agent-harness.ts";
 export {
 	type BranchPreparation,

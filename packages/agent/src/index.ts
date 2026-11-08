@@ -2,7 +2,8 @@
 export * from "./agent.ts";
 // Loop functions
 export * from "./agent-loop.ts";
-// Harness compatibility surface; prefer @metis/agent-core/harness for new consumers.
+// @deprecated Frozen compat surface: published API compatibility only.
+// New production consumers must use createModels()/provider factories or host APIs.
 export * from "./harness.ts";
 // Proxy utilities
 export * from "./proxy.ts";
