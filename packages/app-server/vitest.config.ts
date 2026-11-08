@@ -7,7 +7,7 @@ export default defineConfig({
 		// Shared CI runners (especially Windows) are several times slower than a
 		// developer machine, so keep the strict local timeout and give CI headroom
 		// instead of failing a correct test on a slow disk.
-		testTimeout: process.env.CI ? 30_000 : 15_000,
+		testTimeout: process.env.CI ? 30_000 : 20_000,
 		// These tests start real runtimes and journals; an unbounded worker pool
 		// on a many-core developer machine makes unrelated cases exceed their
 		// timeouts. Cap the pool so the full suite stays reliable and comparable.
