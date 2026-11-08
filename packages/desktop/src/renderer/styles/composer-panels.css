@@ -39,7 +39,7 @@
 .queued-turn-count { font: inherit; color: var(--text-14); }
 .queued-turn-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; border-top: 1px solid var(--border); }
 .queued-turn-disabled-reason { display: block; padding: 0 11px 7px; color: var(--text-14); font-size: 11px; line-height: 1.4; }
-.composer-panels .queued-turn-row { min-height: 44px; }
+.composer-panels .queued-turn-row { padding-block: 9px; }
 .composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11px; }
 
 .composer-panels .slash-command-menu { max-height: min(248px, var(--composer-panels-limit)); animation: none; scrollbar-width: thin; overscroll-behavior: contain; }

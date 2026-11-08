@@ -1785,7 +1785,8 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 :root[data-motion="reduced"] :is(.ask-user-slot, .ask-user-panel, .ask-user-content, .ask-user-resume) { animation: none; transition: none; }
 
 .queued-turn-list { max-height: min(240px, 32vh); overflow-y: auto; margin: 0 16px; border: 1px solid var(--border); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--panel); box-shadow: var(--shadow); scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
-.queued-turn-row { display: grid; min-height: 38px; min-width: 0; align-items: center; gap: 9px; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--border); color: var(--text-22); padding: 5px 7px 5px 11px; font-size: 11px; }
+/* Padding sets the fieldset height; min-height leaves extra space below its inner grid. */
+.queued-turn-row { display: grid; min-width: 0; align-items: center; gap: 9px; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--border); color: var(--text-22); padding: 6px 7px 6px 11px; font-size: 11px; }
 .queued-turn-row:last-child { border-bottom: 0; }
 .queued-turn-row.is-sending { color: var(--text-14); }
 .queued-turn-copy { display: flex; min-width: 0; align-items: center; gap: 7px; }
