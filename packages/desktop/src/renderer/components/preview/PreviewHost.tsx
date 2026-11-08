@@ -287,7 +287,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	if (kind === "pptx") return <PptxViewer {...viewerProps} />;
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
 	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
-	if (kind === "html") return <HtmlViewer {...viewerProps} />;
+	if (kind === "html") return <HtmlViewer {...viewerProps} sourceOnly={file.source === "delivered"} />;
 	if (kind === "markdown" || kind === "text")
 		return <TextViewer key={JSON.stringify(input)} api={api} kind={kind} {...viewerProps} />;
 

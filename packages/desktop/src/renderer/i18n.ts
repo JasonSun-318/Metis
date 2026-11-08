@@ -1998,6 +1998,7 @@ const zhCN = {
 	Forward: "前进",
 	Reload: "重新加载",
 	"Open in default browser": "在默认浏览器中打开",
+	"Open in browser": "在浏览器中打开",
 	"More browser actions": "更多浏览器操作",
 	"Find in page": "在页面中查找",
 	Print: "打印",

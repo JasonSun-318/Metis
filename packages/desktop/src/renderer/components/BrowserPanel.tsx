@@ -7,6 +7,7 @@ import type {
 	DesktopBrowserProfile,
 	DesktopBrowserSourceId,
 	DesktopBrowserState,
+	DesktopDeliveredHtmlTarget,
 	DesktopDownloadControlType,
 	DesktopDownloadItem,
 	DesktopHistoryEntry,
@@ -23,6 +24,7 @@ import {
 	ArrowUp,
 	Camera,
 	ClockCounterClockwise,
+	Code,
 	DotsThreeVertical,
 	DownloadSimple,
 	Folder,
@@ -51,10 +53,12 @@ interface BrowserPanelProps {
 	readonly sessionId: string;
 	readonly browserId: string;
 	readonly controlState: "idle" | "agent" | "handoff";
+	readonly deliveredHtml?: DesktopDeliveredHtmlTarget;
 	readonly handoffReason?: DesktopBrowserHandoffReason;
 	readonly onError: (cause: unknown) => void;
 	readonly onOpenProfile?: (profile: BrowserProfileChoice) => void;
 	readonly onProfileImported: (profile: DesktopBrowserProfile) => void;
+	readonly onShowSource?: () => void;
 	readonly onState: (state: DesktopBrowserState) => void;
 	readonly profile: BrowserProfileChoice;
 	readonly profiles?: readonly BrowserProfileChoice[];
@@ -178,10 +182,12 @@ export function BrowserPanel({
 	sessionId,
 	browserId,
 	controlState,
+	deliveredHtml,
 	handoffReason,
 	onError,
 	onOpenProfile,
 	onProfileImported,
+	onShowSource,
 	onState,
 	profile,
 	profiles,
@@ -606,7 +612,18 @@ export function BrowserPanel({
 		historyRetryBusyRef.current = false;
 		beginDownloadsRead();
 		beginHistoryRead(profile.profileId);
-		creationRef.current ??= api.createBrowser({ sessionId, browserId, profileId: profile.profileId });
+		const target = deliveredHtml && {
+			source: deliveredHtml.source,
+			sessionId: deliveredHtml.sessionId,
+			fileId: deliveredHtml.fileId,
+			...(deliveredHtml.rootSessionId ? { rootSessionId: deliveredHtml.rootSessionId } : {}),
+		};
+		creationRef.current ??= api.createBrowser({
+			sessionId,
+			browserId,
+			profileId: profile.profileId,
+			...(target ? { deliveredHtml: target } : {}),
+		});
 		void creationRef.current.then(
 			(created) => {
 				if (!active) return;
@@ -626,7 +643,7 @@ export function BrowserPanel({
 			previewRequestRef.current += 1;
 			removeBrowserListener();
 		};
-	}, [api, sessionId, browserId, profile.profileId, beginDownloadsRead, beginHistoryRead]);
+	}, [api, sessionId, browserId, profile.profileId, deliveredHtml, beginDownloadsRead, beginHistoryRead]);
 
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
 
@@ -942,15 +959,27 @@ export function BrowserPanel({
 							spellCheck={false}
 							value={address}
 						/>
-						<button
-							aria-label={t("Open in default browser")}
-							className="browser-address-open"
-							disabled={state.url === ""}
-							onClick={() => control("open-external")}
-							type="button"
-						>
-							<ArrowSquareOut aria-hidden="true" size={13} />
-						</button>
+						{onShowSource && (state.url === "" || state.url.startsWith("file:")) ? (
+							<button
+								aria-label={t("Source code")}
+								className="browser-address-open"
+								onClick={onShowSource}
+								title={t("Source code")}
+								type="button"
+							>
+								<Code aria-hidden="true" size={13} />
+							</button>
+						) : (
+							<button
+								aria-label={t("Open in default browser")}
+								className="browser-address-open"
+								disabled={state.url === ""}
+								onClick={() => control("open-external")}
+								type="button"
+							>
+								<ArrowSquareOut aria-hidden="true" size={13} />
+							</button>
+						)}
 					</div>
 				</form>
 				<div className="browser-history" ref={historyRef}>

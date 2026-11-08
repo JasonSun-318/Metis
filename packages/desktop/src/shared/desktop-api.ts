@@ -185,10 +185,13 @@ export interface DesktopBrowserBounds {
 	readonly height: number;
 }
 
+export type DesktopDeliveredHtmlTarget = Extract<DesktopPreviewFileInput, { source: "delivered" }>;
+
 export interface DesktopCreateBrowserInput {
 	readonly sessionId: string;
 	readonly browserId: string;
 	readonly profileId: string;
+	readonly deliveredHtml?: DesktopDeliveredHtmlTarget;
 }
 
 export interface DesktopCloseBrowserInput {
@@ -1327,12 +1330,26 @@ export function validateListBrowserHistoryInput(value: unknown): DesktopListBrow
 }
 
 export function validateCreateBrowserInput(value: unknown): DesktopCreateBrowserInput {
-	const input = exactRecord(value, ["sessionId", "browserId", "profileId"], "browser create input");
-	return {
-		sessionId: browserSessionId(input.sessionId),
-		browserId: browserId(input.browserId),
-		profileId: browserProfileId(input.profileId),
-	};
+	const input = exactRecord(
+		value,
+		value && typeof value === "object" && Object.hasOwn(value, "deliveredHtml")
+			? ["sessionId", "browserId", "profileId", "deliveredHtml"]
+			: ["sessionId", "browserId", "profileId"],
+		"browser create input",
+	);
+	const sessionId = browserSessionId(input.sessionId);
+	const profileId = browserProfileId(input.profileId);
+	const id = browserId(input.browserId);
+	if (!Object.hasOwn(input, "deliveredHtml")) return { sessionId, browserId: id, profileId };
+	const deliveredHtml = validateReadPreviewFileInput(input.deliveredHtml);
+	if (
+		deliveredHtml.source !== "delivered" ||
+		(deliveredHtml.rootSessionId ?? deliveredHtml.sessionId) !== sessionId ||
+		profileId !== DEFAULT_BROWSER_PROFILE_ID
+	) {
+		throw new TypeError("Invalid delivered HTML browser owner");
+	}
+	return { sessionId, browserId: id, profileId, deliveredHtml };
 }
 
 export function validateCloseBrowserInput(value: unknown): DesktopCloseBrowserInput {

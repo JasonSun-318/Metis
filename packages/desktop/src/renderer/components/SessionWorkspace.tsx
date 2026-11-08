@@ -76,7 +76,7 @@ import { KnowledgePanel } from "./KnowledgePanel.tsx";
 import { PlanPreview } from "./PlanPreview.tsx";
 import { ProcessPanel } from "./ProcessPanel.tsx";
 import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
-import type { UniversalPreviewTarget } from "./preview/preview-kinds.ts";
+import { classifyPreviewKind, type UniversalPreviewTarget } from "./preview/preview-kinds.ts";
 import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { SessionChatView, type SessionChatViewContext } from "./SessionChatView.tsx";
@@ -1069,31 +1069,63 @@ export function SessionWorkspaceView({
 		return () => document.removeEventListener("keydown", cancel);
 	}, [pendingFileClose]);
 
+	const openPreviewTab = useCallback(
+		(file: UniversalPreviewTarget) => {
+			showToolsSidebar();
+			const ownerSessionId = file.rootSessionId ?? file.sessionId;
+			updateWorkspace((workspace) => {
+				const existing = workspaceTabs(workspace).find(
+					(tab) =>
+						tab.kind === "preview" &&
+						tab.sessionId === ownerSessionId &&
+						tab.file.sessionId === file.sessionId &&
+						tab.file.source === file.source &&
+						(file.fileId ? tab.file.fileId === file.fileId : tab.file.relativePath === file.relativePath),
+				);
+				if (existing) return activateTab(workspace, existing.id);
+				return placeTab(workspace, {
+					kind: "preview",
+					id: crypto.randomUUID(),
+					sessionId: ownerSessionId,
+					title: file.name,
+					file,
+				});
+			});
+		},
+		[placeTab, showToolsSidebar, updateWorkspace],
+	);
+
 	useEffect(() => {
 		if (!previewRequest) return;
+		const { source, sessionId, rootSessionId, fileId, name } = previewRequest;
+		if (source !== "delivered" || !fileId || classifyPreviewKind(name) !== "html") {
+			openPreviewTab(previewRequest);
+			return;
+		}
+		const ownerSessionId = rootSessionId ?? sessionId;
+		const deliveredHtml = { source, sessionId, ...(rootSessionId ? { rootSessionId } : {}), fileId, name };
 		showToolsSidebar();
 		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find(
-				(tab): tab is Extract<WorkspaceTab, { kind: "preview" }> =>
-					tab.kind === "preview" &&
-					tab.sessionId === (previewRequest.rootSessionId ?? previewRequest.sessionId) &&
-					tab.file.sessionId === previewRequest.sessionId &&
-					tab.file.source === previewRequest.source &&
-					(previewRequest.fileId
-						? tab.file.fileId === previewRequest.fileId
-						: tab.file.relativePath === previewRequest.relativePath),
+			const existing = toolStripOf(workspace, ownerSessionId).tabs.find(
+				(tab) =>
+					tab.kind === "browser" &&
+					tab.deliveredHtml?.sessionId === sessionId &&
+					tab.deliveredHtml.fileId === fileId,
 			);
 			if (existing) return activateTab(workspace, existing.id);
-			const tab: WorkspaceTab = {
-				kind: "preview",
+			return placeTab(workspace, {
+				kind: "browser",
 				id: crypto.randomUUID(),
-				sessionId: previewRequest.rootSessionId ?? previewRequest.sessionId,
-				title: previewRequest.name,
-				file: previewRequest,
-			};
-			return placeTab(workspace, tab);
+				sessionId: ownerSessionId,
+				title: name,
+				url: "",
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+				profileName: t("Default profile"),
+				controlState: "idle",
+				deliveredHtml,
+			});
 		});
-	}, [placeTab, previewRequest, showToolsSidebar, updateWorkspace]);
+	}, [openPreviewTab, placeTab, previewRequest, showToolsSidebar, t, updateWorkspace]);
 
 	useEffect(() => {
 		if (!planPreviewRequest) return;
@@ -1707,8 +1739,9 @@ export function SessionWorkspaceView({
 			let changed = false;
 			const next = mapTabs(workspace, (tab) => {
 				if (tab.kind !== "browser" || tab.id !== state.browserId) return tab;
-				changed = tab.title !== state.title || tab.url !== state.url;
-				return changed ? { ...tab, title: state.title, url: state.url } : tab;
+				const title = tab.deliveredHtml && state.title === "New tab" ? tab.deliveredHtml.name : state.title;
+				changed = tab.title !== title || tab.url !== state.url;
+				return changed ? { ...tab, title, url: state.url } : tab;
 			});
 			return changed ? next : workspace;
 		});
@@ -2343,6 +2376,7 @@ export function SessionWorkspaceView({
 											browserId={tab.id}
 											controlState={tab.controlState}
 											covered={tabMenu !== null || resizingAxis !== null}
+											deliveredHtml={tab.deliveredHtml}
 											handoffReason={tab.handoffReason}
 											sessionId={tab.sessionId}
 											onError={onError}
@@ -2353,6 +2387,11 @@ export function SessionWorkspaceView({
 												if (selected) addBrowser(ownerTarget, selected);
 											}}
 											onProfileImported={browserProfileImported}
+											onShowSource={
+												tab.deliveredHtml
+													? () => tab.deliveredHtml && openPreviewTab(tab.deliveredHtml)
+													: undefined
+											}
 											onState={updateBrowserState}
 											profile={{ profileId: tab.profileId, name: tab.profileName }}
 											profiles={browserProfiles}

@@ -107,6 +107,7 @@ interface ClientBrokerOptions {
 		| "attach"
 		| "suspendRenderer"
 		| "create"
+		| "createDeliveredHtml"
 		| "capturePreview"
 		| "control"
 		| "close"
@@ -219,6 +220,7 @@ export class ClientBroker {
 		| "attach"
 		| "suspendRenderer"
 		| "create"
+		| "createDeliveredHtml"
 		| "capturePreview"
 		| "control"
 		| "close"
@@ -335,6 +337,9 @@ export class ClientBroker {
 			attach: () => undefined,
 			suspendRenderer: () => undefined,
 			create: () => {
+				throw new Error("Browser is unavailable");
+			},
+			createDeliveredHtml: async () => {
 				throw new Error("Browser is unavailable");
 			},
 			capturePreview: async () => {
@@ -740,9 +745,21 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.closeTerminal, 1, async (_event, [input]) => {
 			this.terminalManager.close(validateCloseTerminalInput(input).terminalId);
 		});
-		this.register(DESKTOP_IPC_CHANNELS.createBrowser, 1, async (_event, [input]) =>
-			this.browserManager.create(validateCreateBrowserInput(input)),
-		);
+		this.register(DESKTOP_IPC_CHANNELS.createBrowser, 1, async (_event, [input]) => {
+			const params = validateCreateBrowserInput(input);
+			const file = params.deliveredHtml;
+			if (!file) return this.browserManager.create(params);
+			return this.browserManager.createDeliveredHtml(params, async () => {
+				const metadata = await this.clientCall("session/readDeliveredFile", {
+					sessionId: file.sessionId,
+					...(file.rootSessionId ? { rootSessionId: file.rootSessionId } : {}),
+					fileId: file.fileId,
+					metadataOnly: true,
+				});
+				if (!metadata.absolutePath) throw new Error("Delivered HTML file was not found");
+				return metadata.absolutePath;
+			});
+		});
 		this.register(DESKTOP_IPC_CHANNELS.captureBrowserPreview, 1, async (_event, [input]) => {
 			const target = validateCloseBrowserInput(input);
 			return this.browserManager.capturePreview(target.sessionId, target.browserId);

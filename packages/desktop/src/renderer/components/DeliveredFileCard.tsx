@@ -25,6 +25,7 @@ import {
 	type Icon,
 } from "../icons.tsx";
 import { actionMenuPosition } from "./action-menu-position.ts";
+import { classifyPreviewKind } from "./preview/preview-kinds.ts";
 
 interface DeliveredFileCardProps {
 	readonly file: SessionDeliveredFileView;
@@ -122,7 +123,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 	};
 
 	return (
-		/* biome-ignore lint/a11y/useKeyWithClickEvents: The card forwards clicks to its native Preview button, which supplies the same keyboard action. */
+		/* biome-ignore lint/a11y/useKeyWithClickEvents: The card forwards clicks to its native action button, which supplies the same keyboard action. */
 		<article
 			aria-disabled={!available}
 			className={`transcript-delivered-file-card${available ? "" : " is-unavailable"}`}
@@ -153,7 +154,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 					onClick={handleMainAction}
 					type="button"
 				>
-					{t("Preview")}
+					{onPreview && classifyPreviewKind(file.name) === "html" ? t("Open in browser") : t("Preview")}
 				</button>
 				<button
 					aria-expanded={menuOpen}

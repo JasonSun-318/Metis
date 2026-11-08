@@ -57,6 +57,7 @@ import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-stor
 import { BrowserTabRuntime } from "./browser-tab-runtime.ts";
 import { type ChromiumBrowserImporter, createChromiumBrowserImporter } from "./chromium-browser-import.ts";
 import { isCloseTabShortcut } from "./close-tab-shortcut.ts";
+import { DeliveredHtmlPage } from "./delivered-html.ts";
 
 const BLANK_URL = "about:blank";
 const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024, height: 768 };
@@ -82,6 +83,7 @@ interface BrowserRecord {
 	readonly controller: BrowserControllerLike;
 	readonly runtime: BrowserTabRuntime;
 	readonly cleanup: (() => void)[];
+	readonly localHtml?: { opening?: Promise<void> };
 	host?: BrowserViewHost;
 	state: DesktopBrowserState;
 	presentationKey: string;
@@ -330,6 +332,8 @@ export class BrowserManager {
 	private readonly records = new Map<string, BrowserRecord>();
 	private readonly downloads = new Map<string, DownloadRecord>();
 	private readonly sessions = new Map<string, Session>();
+	private readonly localPages = new Map<number, DeliveredHtmlPage>();
+	private localSession?: Session;
 	private readonly histories = new Map<string, DesktopHistoryEntry[]>();
 	private readonly listeners = new Set<(event: DesktopBrowserEvent) => void>();
 	private downloadEmitTimer?: NodeJS.Timeout;
@@ -443,7 +447,11 @@ export class BrowserManager {
 	create(input: DesktopCreateBrowserInput): DesktopBrowserState {
 		const existing = this.records.get(input.browserId);
 		if (existing) {
-			if (existing.sessionId === input.sessionId && existing.profileId === input.profileId) {
+			if (
+				existing.sessionId === input.sessionId &&
+				existing.profileId === input.profileId &&
+				Boolean(existing.localHtml) === Boolean(input.deliveredHtml)
+			) {
 				return structuredClone(existing.state);
 			}
 			throw new Error("Browser already belongs to another task or profile");
@@ -454,7 +462,9 @@ export class BrowserManager {
 		) {
 			throw new BrowserToolError("OVERLOADED", "This task already has the maximum number of browser tabs");
 		}
-		const browserSession = this.sessionForProfile(input.profileId);
+		const browserSession = input.deliveredHtml
+			? this.sessionForLocalPages()
+			: this.sessionForProfile(input.profileId);
 		const view = this.dependencies.createView({
 			webPreferences: {
 				backgroundThrottling: false,
@@ -466,6 +476,28 @@ export class BrowserManager {
 			},
 		});
 		return this.registerView(input, view);
+	}
+
+	async createDeliveredHtml(
+		input: DesktopCreateBrowserInput,
+		resolvePath: () => Promise<string>,
+	): Promise<DesktopBrowserState> {
+		this.create(input);
+		const record = this.recordForSession(input.sessionId, input.browserId);
+		if (!record.localHtml) throw new Error("Browser is not a delivered HTML tab");
+		record.localHtml.opening ??= this.loadDeliveredHtml(record, resolvePath);
+		await record.localHtml.opening;
+		return structuredClone(record.state);
+	}
+
+	private async loadDeliveredHtml(record: BrowserRecord, resolvePath: () => Promise<string>): Promise<void> {
+		const path = await resolvePath();
+		if (this.records.get(record.browserId) !== record) return;
+		const page = new DeliveredHtmlPage(path);
+		const contentsId = record.contents.id;
+		this.localPages.set(contentsId, page);
+		record.cleanup.push(() => this.localPages.delete(contentsId));
+		await this.navigateRecord(record, page.url);
 	}
 
 	private registerView(input: DesktopCreateBrowserInput, view: WebContentsView): DesktopBrowserState {
@@ -531,6 +563,7 @@ export class BrowserManager {
 			controller,
 			runtime,
 			cleanup,
+			...(input.deliveredHtml ? { localHtml: {} } : {}),
 			state: initialState(input.browserId, input.profileId),
 			presentationKey: "",
 			findRequestId: 0,
@@ -719,7 +752,10 @@ export class BrowserManager {
 			return;
 		}
 		if (input.type === "clear-data") {
-			await this.sessionForProfile(record.profileId).clearData({
+			const browserSession = record.localHtml
+				? this.sessionForLocalPages()
+				: this.sessionForProfile(record.profileId);
+			await browserSession.clearData({
 				dataTypes: ["cache", "cookies", "indexedDB", "localStorage", "serviceWorkers"],
 			});
 			return;
@@ -1034,8 +1070,17 @@ export class BrowserManager {
 		};
 	}
 
+	private navigationUrl(record: BrowserRecord, value: string): string {
+		if (value.trim().toLowerCase().startsWith("file:")) {
+			const url = new URL(value);
+			if (this.localPages.get(record.contents.id)?.contains(url)) return url.href;
+			throw new Error("Local page does not belong to this browser tab");
+		}
+		return normalizeBrowserUrl(value);
+	}
+
 	private async navigateRecord(record: BrowserRecord, value: string, signal?: AbortSignal): Promise<void> {
-		const url = normalizeBrowserUrl(value);
+		const url = this.navigationUrl(record, value);
 		record.controller.invalidate();
 		record.state = { ...record.state, url, loading: true };
 		this.emitState(record);
@@ -1151,6 +1196,24 @@ export class BrowserManager {
 		record.view.setVisible(true);
 	}
 
+	private sessionForLocalPages(): Session {
+		if (this.localSession) return this.localSession;
+		const created = this.dependencies.sessionForPartition("metis-delivered-html");
+		created.setPermissionCheckHandler(() => false);
+		created.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+		created.on("will-download", (event, item) => this.onWillDownload(DEFAULT_BROWSER_PROFILE_ID, event, item));
+		created.webRequest.onBeforeRequest({ urls: ["file:///*"] }, ({ url, webContentsId }, callback) => {
+			const page = webContentsId === undefined ? undefined : this.localPages.get(webContentsId);
+			if (!page) {
+				callback({ cancel: true });
+				return;
+			}
+			void page.canRead(new URL(url)).then((allowed) => callback({ cancel: !allowed }));
+		});
+		this.localSession = created;
+		return created;
+	}
+
 	private sessionForProfile(profileId: string): Session {
 		if (!this.dependencies.profileStore.listProfiles().some((profile) => profile.profileId === profileId)) {
 			throw new Error("Browser profile does not exist");
@@ -1236,7 +1299,7 @@ export class BrowserManager {
 			event: Event<WebContentsWillNavigateEventParams | WebContentsWillRedirectEventParams>,
 		) => {
 			try {
-				normalizeBrowserUrl(event.url);
+				this.navigationUrl(record, event.url);
 			} catch {
 				event.preventDefault();
 			}

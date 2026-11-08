@@ -348,7 +348,7 @@ describe("UniversalFilePreviewer", () => {
 		expect(container.textContent).toContain("Hello from delivered text");
 	});
 
-	it("renders delivered HTML in a script-only sandbox", async () => {
+	it("renders delivered HTML as source without mounting a frame", async () => {
 		const readPreviewFile = vi.fn().mockResolvedValue({
 			ok: true,
 			name: "page.html",
@@ -375,9 +375,8 @@ describe("UniversalFilePreviewer", () => {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		});
-		const frame = container.querySelector<HTMLIFrameElement>("iframe.preview-html-frame");
-		expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
-		expect(frame?.getAttribute("srcdoc") ?? "").toContain("Delivered page");
+		expect(container.querySelector("iframe.preview-html-frame")).toBeNull();
+		expect(container.querySelector(".preview-html-source")?.textContent).toContain("<h1>Delivered page</h1>");
 	});
 
 	it("loads markdown workspace file and renders formatted markdown", async () => {

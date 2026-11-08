@@ -56,17 +56,27 @@ export interface HtmlViewerProps {
 	readonly fileName: string;
 	readonly byteLength?: number;
 	readonly bytes: Uint8Array;
+	readonly sourceOnly?: boolean;
 	readonly onClose?: () => void;
 	readonly onOpenDefault?: () => void;
 	readonly onReveal?: () => void;
 }
 
-export function HtmlViewer({ fileName, byteLength, bytes, onClose, onOpenDefault, onReveal }: HtmlViewerProps) {
+export function HtmlViewer({
+	fileName,
+	byteLength,
+	bytes,
+	sourceOnly,
+	onClose,
+	onOpenDefault,
+	onReveal,
+}: HtmlViewerProps) {
 	const { t } = useTranslation();
 	const [mode, setMode] = useState<"preview" | "source">("preview");
+	const rendered = !sourceOnly && mode === "preview";
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const source = useMemo(() => decodePreviewText(bytes), [bytes]);
-	const documentSource = useMemo(() => withThemeBridge(source), [source]);
+	const documentSource = useMemo(() => (rendered ? withThemeBridge(source) : undefined), [rendered, source]);
 
 	const postTheme = useCallback(() => {
 		const frame = frameRef.current?.contentWindow;
@@ -85,7 +95,7 @@ export function HtmlViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 	}, []);
 
 	useEffect(() => {
-		if (mode !== "preview") return;
+		if (!rendered) return;
 		const observer = new MutationObserver(postTheme);
 		observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 		const onMessage = (event: MessageEvent) => {
@@ -97,7 +107,7 @@ export function HtmlViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 			observer.disconnect();
 			window.removeEventListener("message", onMessage);
 		};
-	}, [mode, postTheme]);
+	}, [rendered, postTheme]);
 
 	const modeActions = (
 		<fieldset aria-label={t("Preview mode")} className="control-group settings-segmented preview-html-modes">
@@ -114,13 +124,13 @@ export function HtmlViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 		<div className="universal-previewer preview-html-viewer">
 			<PreviewToolbar
 				byteLength={byteLength}
-				extraActions={modeActions}
+				extraActions={sourceOnly ? undefined : modeActions}
 				fileName={fileName}
 				onClose={onClose}
 				onOpenDefault={onOpenDefault}
 				onReveal={onReveal}
 			/>
-			{mode === "preview" ? (
+			{rendered ? (
 				<iframe
 					className="preview-html-frame"
 					onLoad={postTheme}

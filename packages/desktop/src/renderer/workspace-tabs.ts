@@ -1,5 +1,5 @@
 import type { PlanView, SessionProcessView } from "@metis/app-protocol";
-import type { DesktopBrowserHandoffReason } from "../shared/desktop-api.ts";
+import type { DesktopBrowserHandoffReason, DesktopDeliveredHtmlTarget } from "../shared/desktop-api.ts";
 import type { UniversalPreviewTarget } from "./components/preview/preview-kinds.ts";
 
 export interface ChatTab {
@@ -28,6 +28,7 @@ export interface BrowserTab {
 	readonly profileName: string;
 	readonly controlState: "idle" | "agent" | "handoff";
 	readonly handoffReason?: DesktopBrowserHandoffReason;
+	readonly deliveredHtml?: DesktopDeliveredHtmlTarget & { readonly name: string };
 }
 
 export interface FileTab {
