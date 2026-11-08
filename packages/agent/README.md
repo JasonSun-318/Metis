@@ -12,7 +12,7 @@ npm install @metis/agent-core
 
 ```typescript
 import { Agent } from "@metis/agent-core";
-import { getModel } from "@metis/ai";
+import { getModel } from "@metis/ai/compat";
 
 const agent = new Agent({
   initialState: {

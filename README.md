@@ -41,20 +41,25 @@ Requires Node.js 22.19 or newer.
 
 ```bash
 npm ci --ignore-scripts
-./metis-test.sh
+./test.sh          # full test suite with an isolated agent directory
+./metis-test.sh    # run the interactive CLI from source
 ```
 
-Run static checks with:
+Static checks have two tiers:
 
 ```bash
-npm run check
+npm run check:fast   # pre-commit: staged files only, path-scoped
+npm run check        # full repository gate (pre-push hook and CI)
 ```
 
-This includes architecture and native TypeScript import checks, regression
+`npm run check` includes architecture and native TypeScript import checks, regression
 tests for the check scripts, generated protocol schema validation, dependency
 lock checks, strict source/test type checks (including desktop TSX tests and browser fixtures), and
-a browser bundle smoke check. Run `npm run check:scripts` for the check-script
-regressions alone.
+a browser bundle smoke check. `check:fast` keeps the staged-file subset, the
+path-scoped desktop type check and the check-script regressions; whole-repository
+analyses such as runtime cycles, public API surfaces, duplicate/dead-export
+reports and type debt run in the full gate only. Run `npm run check:scripts` for
+the check-script regressions alone.
 
 Biome checks source and test `.ts`/`.tsx` files, desktop browser TSX fixtures,
 and explicitly listed check scripts. Keep Hook dependencies complete; explain
