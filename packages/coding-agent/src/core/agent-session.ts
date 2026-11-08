@@ -63,6 +63,7 @@ import {
 	retryDelayMs,
 	retryProgress,
 } from "./agent-retry-policy.ts";
+import { isAssistantBeforeCompaction, isSameModel } from "./agent-session-compaction-policy.ts";
 import { AgentSessionContextUsage } from "./agent-session-context-usage.ts";
 import {
 	createMessageEndExtensionEvent,
@@ -70,6 +71,14 @@ import {
 	createTurnStartExtensionEvent,
 	mapAgentEventToExtensionEvent,
 } from "./agent-session-extension-events.ts";
+import {
+	findLastAssistantMessage,
+	getLastAssistantText,
+	getUserMessageText,
+	normalizePromptGuidelines,
+	normalizePromptSnippet,
+	replaceMessageInPlace,
+} from "./agent-session-messages.ts";
 import {
 	buildSessionStats,
 	extractUserMessageText,
@@ -2803,7 +2812,7 @@ export class AgentSession {
 		if (event.type === "message_start" && event.message.role === "user") {
 			this._codeChangeTurnId = randomUUID();
 			this._overflowRecoveryAttempted = false;
-			const messageText = this._getUserMessageText(event.message);
+			const messageText = getUserMessageText(event.message);
 			if (messageText) {
 				// Check steering queue first
 				const steeringIndex = this._steeringMessages.indexOf(messageText);
@@ -3103,43 +3112,6 @@ export class AgentSession {
 		return false;
 	}
 
-	/** Extract text content from a message */
-	private _getUserMessageText(message: Message): string {
-		if (message.role !== "user") return "";
-		const content = message.content;
-		if (typeof content === "string") return content;
-		const textBlocks = content.filter((c) => c.type === "text");
-		return textBlocks.map((c) => (c as TextContent).text).join("");
-	}
-
-	/** Find the last assistant message in agent state (including aborted ones) */
-	private _findLastAssistantMessage(): AssistantMessage | undefined {
-		const messages = this.agent.state.messages;
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const msg = messages[i];
-			if (msg.role === "assistant") {
-				return msg as AssistantMessage;
-			}
-		}
-		return undefined;
-	}
-
-	private _replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
-		// Agent-core stores the finalized message object in its state before emitting message_end.
-		// SessionManager persistence happens later in _handleAgentEvent() with event.message.
-		// Mutating this object in place keeps agent state, later turn/agent events, listeners,
-		// and the eventual SessionManager.appendMessage(event.message) persistence in sync.
-		if (target === replacement) {
-			return;
-		}
-
-		const targetRecord = target as unknown as Record<string, unknown>;
-		for (const key of Object.keys(targetRecord)) {
-			delete targetRecord[key];
-		}
-		Object.assign(targetRecord, replacement);
-	}
-
 	/** Emit extension events based on agent events */
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "agent_start") {
@@ -3173,7 +3145,7 @@ export class AgentSession {
 					replacement.content == null
 						? ({ ...replacement, content: [] } as AgentMessage)
 						: replacement;
-				this._replaceMessageInPlace(event.message, normalized);
+				replaceMessageInPlace(event.message, normalized);
 			}
 			return;
 		}
@@ -3932,30 +3904,6 @@ export class AgentSession {
 		return this._resourceLoader.getPrompts().prompts;
 	}
 
-	private _normalizePromptSnippet(text: string | undefined): string | undefined {
-		if (!text) return undefined;
-		const oneLine = text
-			.replace(/[\r\n]+/g, " ")
-			.replace(/\s+/g, " ")
-			.trim();
-		return oneLine.length > 0 ? oneLine : undefined;
-	}
-
-	private _normalizePromptGuidelines(guidelines: string[] | undefined): string[] {
-		if (!guidelines || guidelines.length === 0) {
-			return [];
-		}
-
-		const unique = new Set<string>();
-		for (const guideline of guidelines) {
-			const normalized = guideline.trim();
-			if (normalized.length > 0) {
-				unique.add(normalized);
-			}
-		}
-		return Array.from(unique);
-	}
-
 	private _rebuildSystemPrompt(toolNames: string[]): string {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -4618,7 +4566,7 @@ export class AgentSession {
 
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
-			const lastAssistant = this._findLastAssistantMessage();
+			const lastAssistant = findLastAssistantMessage(this.agent.state.messages);
 			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
 			}
@@ -5583,15 +5531,16 @@ export class AgentSession {
 		// This handles the case where user switched from a smaller-context model (e.g. opus)
 		// to a larger-context model (e.g. codex) - the overflow error from the old model
 		// shouldn't trigger compaction for the new model.
-		const sameModel =
-			this.model && assistantMessage.provider === this.model.provider && assistantMessage.model === this.model.id;
+		const sameModel = isSameModel(assistantMessage, this.model);
 
 		// Skip compaction checks if this assistant message is older than the latest
 		// compaction boundary. This prevents a stale pre-compaction usage/error
 		// from retriggering compaction on the first prompt after compaction.
 		const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
-		const assistantIsFromBeforeCompaction =
-			compactionEntry !== null && assistantMessage.timestamp <= new Date(compactionEntry.timestamp).getTime();
+		const assistantIsFromBeforeCompaction = isAssistantBeforeCompaction(
+			assistantMessage.timestamp,
+			compactionEntry === null ? undefined : new Date(compactionEntry.timestamp).getTime(),
+		);
 		if (assistantIsFromBeforeCompaction) {
 			return false;
 		}
@@ -6179,7 +6128,7 @@ export class AgentSession {
 		this._toolPromptSnippets = new Map(
 			Array.from(definitionRegistry.values())
 				.map(({ definition }) => {
-					const snippet = this._normalizePromptSnippet(definition.promptSnippet);
+					const snippet = normalizePromptSnippet(definition.promptSnippet);
 					return snippet ? ([definition.name, snippet] as const) : undefined;
 				})
 				.filter((entry): entry is readonly [string, string] => entry !== undefined),
@@ -6187,7 +6136,7 @@ export class AgentSession {
 		this._toolPromptGuidelines = new Map(
 			Array.from(definitionRegistry.values())
 				.map(({ definition }) => {
-					const guidelines = this._normalizePromptGuidelines(definition.promptGuidelines);
+					const guidelines = normalizePromptGuidelines(definition.promptGuidelines);
 					return guidelines.length > 0 ? ([definition.name, guidelines] as const) : undefined;
 				})
 				.filter((entry): entry is readonly [string, string[]] => entry !== undefined),
@@ -7017,27 +6966,7 @@ export class AgentSession {
 	 * @returns Text content, or undefined if no assistant message exists
 	 */
 	getLastAssistantText(): string | undefined {
-		const lastAssistant = this.messages
-			.slice()
-			.reverse()
-			.find((m) => {
-				if (m.role !== "assistant") return false;
-				const msg = m as AssistantMessage;
-				// Skip aborted messages with no content
-				if (msg.stopReason === "aborted" && msg.content.length === 0) return false;
-				return true;
-			});
-
-		if (!lastAssistant) return undefined;
-
-		let text = "";
-		for (const content of (lastAssistant as AssistantMessage).content) {
-			if (content.type === "text") {
-				text += content.text;
-			}
-		}
-
-		return text.trim() || undefined;
+		return getLastAssistantText(this.messages);
 	}
 
 	createReplacedSessionContext(): ReplacedSessionContext {
