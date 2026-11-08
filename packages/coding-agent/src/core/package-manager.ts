@@ -22,13 +22,13 @@ function getEnv(): NodeJS.ProcessEnv {
 	}
 }
 
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
-import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
+import { maxSatisfying, rcompare, satisfies } from "semver";
 import { getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
-import { type GitSource, parseGitUrl } from "../utils/git.ts";
-import { isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
+import type { GitSource } from "../utils/git.ts";
+import { markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
 import { addAutoDiscoveredResources, resolveLocalEntries } from "./package-manager/auto-discovery.ts";
 import { collectPackageResources, type PackageFilter, RESOURCE_TYPES } from "./package-manager/resource-collection.ts";
@@ -40,6 +40,14 @@ import {
 	type ResourceAccumulator,
 	toResolvedPaths,
 } from "./package-manager/resource-results.ts";
+import {
+	buildNoMatchingPackageMessage,
+	getPackageSourceString,
+	normalizePackageSourceForSettings,
+	packageSourcesMatch,
+	parseSource,
+	type SourcePathHelpers,
+} from "./package-manager/source-syntax.ts";
 import type { PackageSource, SettingsManager } from "./settings-manager.ts";
 
 const NETWORK_TIMEOUT_MS = 10000;
@@ -50,14 +58,6 @@ function isOfflineModeEnabled(): boolean {
 	const value = getMetisEnv("OFFLINE", getEnv());
 	if (!value) return false;
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
-}
-
-function isExactNpmVersion(version: string | undefined): boolean {
-	return valid(version ?? "") !== null;
-}
-
-function getNpmVersionRange(version: string | undefined): string | undefined {
-	return version ? (validRange(version) ?? undefined) : undefined;
 }
 
 export interface PathMetadata {
@@ -129,9 +129,9 @@ interface PackageManagerOptions {
 	settingsManager: SettingsManager;
 }
 
-type SourceScope = "user" | "project" | "temporary";
+export type SourceScope = "user" | "project" | "temporary";
 
-type NpmSource = {
+export type NpmSource = {
 	type: "npm";
 	spec: string;
 	name: string;
@@ -140,12 +140,12 @@ type NpmSource = {
 	pinned: boolean;
 };
 
-type LocalSource = {
+export type LocalSource = {
 	type: "local";
 	path: string;
 };
 
-type ParsedSource = NpmSource | GitSource | LocalSource;
+export type ParsedSource = NpmSource | GitSource | LocalSource;
 
 type InstalledSourceScope = Exclude<SourceScope, "temporary">;
 
@@ -738,107 +738,31 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private getPackageSourceString(pkg: PackageSource): string {
-		return typeof pkg === "string" ? pkg : pkg.source;
-	}
-
-	private getSourceMatchKeyForInput(source: string): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			return `npm:${parsed.name}`;
-		}
-		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
-		}
-		return `local:${this.resolvePath(parsed.path)}`;
-	}
-
-	private getSourceMatchKeyForSettings(source: string, scope: SourceScope): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type === "npm") {
-			return `npm:${parsed.name}`;
-		}
-		if (parsed.type === "git") {
-			return `git:${parsed.host}/${parsed.path}`;
-		}
-		const baseDir = this.getBaseDirForScope(scope);
-		return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
+		return getPackageSourceString(pkg);
 	}
 
 	private buildNoMatchingPackageMessage(source: string, configuredPackages: PackageSource[]): string {
-		const suggestion = this.findSuggestedConfiguredSource(source, configuredPackages);
-		if (!suggestion) {
-			return `No matching package found for ${source}`;
-		}
-		return `No matching package found for ${source}. Did you mean ${suggestion}?`;
-	}
-
-	private findSuggestedConfiguredSource(source: string, configuredPackages: PackageSource[]): string | undefined {
-		const trimmedSource = source.trim();
-		const suggestions = new Set<string>();
-
-		for (const pkg of configuredPackages) {
-			const sourceStr = this.getPackageSourceString(pkg);
-			const parsed = this.parseSource(sourceStr);
-			if (parsed.type === "npm") {
-				if (trimmedSource === parsed.name || trimmedSource === parsed.spec) {
-					suggestions.add(sourceStr);
-				}
-				continue;
-			}
-			if (parsed.type === "git") {
-				const shorthand = `${parsed.host}/${parsed.path}`;
-				const shorthandWithRef = parsed.ref ? `${shorthand}@${parsed.ref}` : undefined;
-				if (trimmedSource === shorthand || (shorthandWithRef && trimmedSource === shorthandWithRef)) {
-					suggestions.add(sourceStr);
-				}
-			}
-		}
-
-		return suggestions.values().next().value;
+		return buildNoMatchingPackageMessage(source, configuredPackages);
 	}
 
 	private packageSourcesMatch(existing: PackageSource, inputSource: string, scope: SourceScope): boolean {
-		const left = this.getSourceMatchKeyForSettings(this.getPackageSourceString(existing), scope);
-		const right = this.getSourceMatchKeyForInput(inputSource);
-		return left === right;
+		return packageSourcesMatch(existing, inputSource, scope, this.sourcePathHelpers());
 	}
 
 	private normalizePackageSourceForSettings(source: string, scope: SourceScope): string {
-		const parsed = this.parseSource(source);
-		if (parsed.type !== "local") {
-			return source;
-		}
-		const baseDir = this.getBaseDirForScope(scope);
-		const resolved = this.resolvePath(parsed.path);
-		const rel = relative(baseDir, resolved);
-		return rel || ".";
+		return normalizePackageSourceForSettings(source, scope, this.sourcePathHelpers());
 	}
 
 	private parseSource(source: string): ParsedSource {
-		if (source.startsWith("npm:")) {
-			const spec = source.slice("npm:".length).trim();
-			const { name, version } = this.parseNpmSpec(spec);
-			return {
-				type: "npm",
-				spec,
-				name,
-				version,
-				range: getNpmVersionRange(version),
-				pinned: isExactNpmVersion(version),
-			};
-		}
+		return parseSource(source);
+	}
 
-		if (isLocalPath(source)) {
-			return { type: "local", path: source };
-		}
-
-		// Try parsing as git URL
-		const gitParsed = parseGitUrl(source);
-		if (gitParsed) {
-			return gitParsed;
-		}
-
-		return { type: "local", path: source };
+	private sourcePathHelpers(): SourcePathHelpers {
+		return {
+			resolvePath: (input) => this.resolvePath(input),
+			resolvePathFromBase: (input, baseDir) => this.resolvePathFromBase(input, baseDir),
+			getBaseDirForScope: (scope) => this.getBaseDirForScope(scope),
+		};
 	}
 
 	private async installedNpmMatchesConfiguredVersion(source: NpmSource, installedPath: string): Promise<boolean> {
@@ -1097,16 +1021,6 @@ export class DefaultPackageManager implements PackageManager {
 			}
 		}
 		return result;
-	}
-
-	private parseNpmSpec(spec: string): { name: string; version?: string } {
-		const match = spec.match(/^(@?[^@]+(?:\/[^@]+)?)(?:@(.+))?$/);
-		if (!match) {
-			return { name: spec };
-		}
-		const name = match[1] ?? spec;
-		const version = match[2];
-		return { name, version };
 	}
 
 	private assertProjectTrustedForScope(scope: SourceScope): void {
