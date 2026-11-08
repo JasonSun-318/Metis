@@ -48,7 +48,6 @@ import {
 	cleanupSessionResources,
 	getSupportedThinkingLevels,
 	isContextOverflow,
-	isRetryableAssistantError,
 	modelsAreEqual,
 	streamSimple,
 } from "@metis/ai/compat";
@@ -58,6 +57,12 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
+import {
+	canRetryAssistantMessage,
+	isRetryableAssistantMessage,
+	retryDelayMs,
+	retryProgress,
+} from "./agent-retry-policy.ts";
 import { AgentSessionContextUsage } from "./agent-session-context-usage.ts";
 import {
 	createMessageEndExtensionEvent,
@@ -6501,33 +6506,25 @@ export class AgentSession {
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
 	 */
 	private _isRetryableError(message: AssistantMessage): boolean {
-		// Context overflow is handled by compaction, not retry.
-		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
-		return isRetryableAssistantError(message);
+		return isRetryableAssistantMessage(message, this.model?.contextWindow ?? 0);
 	}
 
 	private _canRetryMessage(message: AssistantMessage): boolean {
-		const settings = this.settingsManager.getRetrySettings();
-		return (
-			settings.enabled &&
-			this._retryAttempt < settings.maxRetries &&
-			!this._activeRunAbortController?.signal.aborted &&
-			!this._stopCurrentRunAfterAbort &&
-			!this._runtimeTeardownRequested &&
-			!this._durableRecoveryRequired &&
-			this._isRetryableError(message)
-		);
+		return canRetryAssistantMessage({
+			message,
+			contextWindow: this.model?.contextWindow ?? 0,
+			settings: this.settingsManager.getRetrySettings(),
+			attempt: this._retryAttempt,
+			signalAborted: this._activeRunAbortController?.signal.aborted ?? false,
+			stopAfterAbort: this._stopCurrentRunAfterAbort,
+			runtimeTeardownRequested: this._runtimeTeardownRequested,
+			durableRecoveryRequired: this._durableRecoveryRequired,
+		});
 	}
 
 	/** Active retry progress, including the request after its backoff has ended. */
 	get retryState(): { readonly attempt: number; readonly maxAttempts: number; readonly delayMs: number } | undefined {
-		if (this._retryAttempt === 0) return undefined;
-		const settings = this.settingsManager.getRetrySettings();
-		return {
-			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
-			delayMs: Math.min(30_000, settings.baseDelayMs * 2 ** (this._retryAttempt - 1)),
-		};
+		return retryProgress(this._retryAttempt, this.settingsManager.getRetrySettings());
 	}
 
 	/**
@@ -6548,7 +6545,7 @@ export class AgentSession {
 			return false;
 		}
 
-		const delayMs = Math.min(30_000, settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+		const delayMs = retryDelayMs(this._retryAttempt, settings.baseDelayMs);
 		this._retryAbortController = new AbortController();
 
 		this._emit({
