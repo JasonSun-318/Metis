@@ -1,5 +1,5 @@
 import { ClientRequestMethods, type ClientRpcRequest } from "@metis/app-protocol";
-import type { ModelRegistry } from "@metis/coding-agent/host";
+import type { ModelRegistry, ScheduleManager } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentCatalog } from "../src/agent-catalog.ts";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "../src/dispatch/agent-types.ts";
@@ -13,6 +13,7 @@ import { dispatchPersonalizationRequest, isPersonalizationRequest } from "../src
 import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "../src/dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
+import { dispatchScheduleRequest, isScheduleRequest } from "../src/dispatch/schedule.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
 import { dispatchTurnsRequest, isTurnsRequest } from "../src/dispatch/turns.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
@@ -28,7 +29,7 @@ import type { ProfileSummaryCache } from "../src/profile-summary.ts";
 import type { SessionCatalog } from "../src/session-catalog.ts";
 import type { SessionRegistry } from "../src/session-registry.ts";
 import type { SessionRef } from "../src/session-runtime-host.ts";
-import type { ConnectionSubscriptions } from "../src/subscriptions.ts";
+import type { ConnectionSubscriptions, SessionSubscriptions } from "../src/subscriptions.ts";
 import type { WebSearchService } from "../src/web-search.ts";
 
 function request(method: string, params: unknown = {}): ClientRpcRequest {
@@ -349,6 +350,59 @@ function turnsContext() {
 	};
 }
 
+function scheduleContext() {
+	const scheduleManager = {
+		create: vi.fn(async (input: unknown) => input),
+		list: vi.fn(async () => ({ tasks: [], nextAfterTaskId: null })),
+		get: vi.fn(async () => ({ taskId: "t1", unreadCount: 0, target: { workspace: "task" } })),
+		update: vi.fn(async (taskId: string, input: unknown) => ({ taskId, ...(input as object) })),
+		pause: vi.fn(async () => ({ taskId: "t1" })),
+		resume: vi.fn(async () => ({ taskId: "t1" })),
+		delete: vi.fn(async () => ({ deleted: true })),
+		runNow: vi.fn(async () => ({ runId: "r1" })),
+		listRuns: vi.fn(async () => ({ runs: [], nextBeforeRunId: null })),
+		getRun: vi.fn(async () => ({ runId: "r1" })),
+		markRunRead: vi.fn(async () => ({ runId: "r1" })),
+		unreadCount: vi.fn(() => 0),
+	} as unknown as ScheduleManager;
+	const modelRegistry = {
+		refresh: vi.fn(),
+		find: vi.fn(() => ({ id: "m1" })),
+		hasConfiguredAuth: vi.fn(() => true),
+	} as unknown as ModelRegistry;
+	const catalog = {
+		get: vi.fn(() => ({
+			scheduled: undefined,
+			summary: { archived: false, state: "idle", cwd: "/work", mode: "code", cwdOrigin: "project" },
+		})),
+		scheduledSessionIds: vi.fn(() => []),
+		registerScheduledRun: vi.fn(async () => ({ changed: false })),
+		refresh: vi.fn(async () => undefined),
+	} as unknown as SessionCatalog;
+	const registry = { has: vi.fn(() => false), close: vi.fn(async () => undefined) } as unknown as SessionRegistry;
+	const subscriptionHub = {
+		serverEpoch: "epoch-1",
+		publishSessionUpdated: vi.fn(),
+		removeSession: vi.fn(),
+	} as unknown as SessionSubscriptions;
+	const subscriptions = {
+		subscribeSchedule: vi.fn(async () => ({ tasks: [] })),
+		unsubscribeSchedule: vi.fn(),
+	} as unknown as ConnectionSubscriptions;
+	return {
+		scheduleManager,
+		context: {
+			scheduleManager,
+			modelRegistry,
+			catalog,
+			registry,
+			subscriptionHub,
+			subscriptions,
+			...replayTracker(),
+		},
+	};
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -427,6 +481,12 @@ const DOMAINS = [
 		recognized: isAgentsRequest,
 		dispatch: dispatchAgentsRequest,
 		context: agentsContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("schedule/"),
+		recognized: isScheduleRequest,
+		dispatch: dispatchScheduleRequest,
+		context: scheduleContext,
 	},
 	{
 		owns: (method: string) => method.startsWith("turn/"),
@@ -600,5 +660,18 @@ describe("dispatcher domain matrix", () => {
 		expect(turns.runtime.queueTurn).toHaveBeenCalledWith({ sessionId: "s1", text: "next" });
 		expect(turns.context.mutations).toEqual(["turn/start", "turn/queue"]);
 		expect(turns.startTitleJob).not.toHaveBeenCalled();
+	});
+	it("lists schedules and routes schedule mutations through replay", async () => {
+		const schedule = scheduleContext();
+		await dispatchScheduleRequest(request("schedule/list", {}), schedule.context);
+		await dispatchScheduleRequest(request("schedule/run/list", { taskId: "t1" }), schedule.context);
+		await dispatchScheduleRequest(
+			request("schedule/delete", { taskId: "t1", deleteSessions: false }),
+			schedule.context,
+		);
+		expect(schedule.scheduleManager.list).toHaveBeenCalledOnce();
+		expect(schedule.scheduleManager.listRuns).toHaveBeenCalledWith("t1", {});
+		expect(schedule.scheduleManager.delete).toHaveBeenCalledWith("t1", { deleteSessions: false });
+		expect(schedule.context.mutations).toEqual(["schedule/delete"]);
 	});
 });

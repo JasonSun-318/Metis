@@ -1,13 +1,6 @@
 import { createHash } from "node:crypto";
 import { type ClientParams, type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
-import {
-	type ModelRegistry,
-	resolveScheduleCreateTarget,
-	type ScheduleCreateTarget,
-	ScheduleError,
-	type ScheduleManager,
-	SessionManager,
-} from "@metis/coding-agent/host";
+import { type ModelRegistry, ScheduleError, type ScheduleManager, SessionManager } from "@metis/coding-agent/host";
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
 import { AgentCatalog } from "./agent-catalog.ts";
 import { ArchivedConversationCatalog } from "./archived-conversations.ts";
@@ -23,6 +16,12 @@ import { dispatchPersonalizationRequest, isPersonalizationRequest } from "./disp
 import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "./dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
+import {
+	dispatchScheduleRequest,
+	isScheduleRequest,
+	reconcileScheduledTaskSessions as reconcileScheduledSessions,
+	type ScheduleCoreContext,
+} from "./dispatch/schedule.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "./dispatch/skills.ts";
 import { dispatchTurnsRequest, isTurnsRequest } from "./dispatch/turns.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "./dispatch/web-search.ts";
@@ -37,7 +36,6 @@ import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
 import type { PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
-import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
 import type { SessionRegistry } from "./session-registry.ts";
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
@@ -231,85 +229,19 @@ export class Dispatcher {
 			.finally(() => this.titleJobs.delete(sessionId));
 	}
 
-	private availableModel(model: { provider: string; modelId: string }): void {
-		this.modelRegistry.refresh();
-		const found = this.modelRegistry.find(model.provider, model.modelId);
-		if (!found || !this.modelRegistry.hasConfiguredAuth(found)) {
-			throw new ScheduleError(
-				"MODEL_UNAVAILABLE",
-				`Configured model is unavailable: ${model.provider}/${model.modelId}`,
-			);
-		}
-	}
-
-	private scheduleTarget(
-		sourceSessionId?: string,
-		additionalWorkspaceCwd?: string,
-	): {
-		target: ScheduleCreateTarget;
-	} {
-		if (!sourceSessionId) {
-			return {
-				target: {
-					kind: "general",
-					workspace: "task",
-					...(additionalWorkspaceCwd === undefined ? {} : { additionalWorkspaceCwd }),
-				},
-			};
-		}
-		if (additionalWorkspaceCwd !== undefined) throw new AppServerError("INVALID_REQUEST");
-		const ref = this.catalog.get(sourceSessionId);
-		if (
-			ref.scheduled ||
-			ref.summary.archived ||
-			ref.summary.state === "corrupt" ||
-			ref.summary.state === "unsupported" ||
-			!ref.summary.cwd
-		) {
-			throw new AppServerError("NOT_FOUND", { sessionId: sourceSessionId });
-		}
-		const target = resolveScheduleCreateTarget({
-			mode: ref.summary.mode,
-			cwdOrigin: ref.summary.cwdOrigin,
-			cwd: ref.summary.cwd,
-		});
-		if (!target)
-			throw new AppServerError("INVALID_REQUEST", {
-				sessionId: sourceSessionId,
-			});
-		return { target };
-	}
-
-	private async scheduleSnapshot(cursor: number) {
-		const page = await this.scheduleManager.list({ limit: 200 });
+	private scheduleCoreContext(): ScheduleCoreContext {
 		return {
-			serverEpoch: this.subscriptionHub.serverEpoch,
-			tasks: page.tasks.map(scheduleTaskView),
-			unreadCount: this.scheduleManager.unreadCount(),
-			cursor,
+			scheduleManager: this.scheduleManager,
+			modelRegistry: this.modelRegistry,
+			catalog: this.catalog,
+			registry: this.registry,
+			subscriptionHub: this.subscriptionHub,
+			replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 		};
 	}
 
 	async reconcileScheduledTaskSessions(taskId: string): Promise<void> {
-		const previous = this.catalog.scheduledSessionIds(taskId);
-		await this.catalog.refresh();
-		const retained = new Set(this.catalog.scheduledSessionIds(taskId));
-		for (const sessionId of previous) {
-			if (retained.has(sessionId)) continue;
-			this.subscriptionHub.removeSession(sessionId, {
-				type: "session/invalidated",
-				sessionId,
-				reason: "deleted",
-			});
-			await this.registry.close(sessionId);
-		}
-	}
-
-	private async closeScheduledTaskSessions(taskId: string): Promise<void> {
-		for (const sessionId of this.catalog.scheduledSessionIds(taskId)) {
-			this.subscriptionHub.removeSession(sessionId);
-			if (this.registry.has(sessionId)) await this.registry.close(sessionId);
-		}
+		await reconcileScheduledSessions(this.scheduleCoreContext(), taskId);
 	}
 
 	private runtimeRef(sessionId: string): SessionRef {
@@ -592,6 +524,12 @@ export class Dispatcher {
 				assertMutableSession: (sessionId) => this.assertMutableSession(sessionId),
 				startTitleJob: (sessionId, input) => this.startTitleJob(sessionId, input),
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isScheduleRequest(request)) {
+			return await dispatchScheduleRequest(request, {
+				...this.scheduleCoreContext(),
+				subscriptions: connection.subscriptions,
 			});
 		}
 		switch (request.method) {
@@ -985,131 +923,6 @@ export class Dispatcher {
 				connection.subscriptions.unsubscribe(request.params.sessionId);
 				this.interactions.release(request.params.sessionId, connection.interactionPeer);
 				return { sessionId: request.params.sessionId, unsubscribed: true };
-			case "schedule/create":
-				return await this.replayMutation(request, async () => {
-					this.availableModel(request.params.model);
-					const source = this.scheduleTarget(
-						request.params.sourceSessionId,
-						request.params.additionalWorkspaceCwd,
-					);
-					return {
-						task: scheduleTaskView(
-							await this.scheduleManager.create({
-								id: request.params.requestId,
-								name: request.params.name,
-								...(request.params.description === undefined
-									? {}
-									: { description: request.params.description }),
-								instruction: request.params.instruction,
-								model: request.params.model,
-								schedule: request.params.schedule,
-								timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-								...source,
-							}),
-						),
-					};
-				});
-			case "schedule/list": {
-				const page = await this.scheduleManager.list({
-					...(request.params.afterTaskId ? { afterTaskId: request.params.afterTaskId } : {}),
-					...(request.params.limit === undefined ? {} : { limit: request.params.limit }),
-					...(request.params.unreadOnly === undefined ? {} : { unreadOnly: request.params.unreadOnly }),
-					...(request.params.query === undefined ? {} : { query: request.params.query }),
-					...(request.params.sort === undefined ? {} : { sort: request.params.sort }),
-				});
-				return {
-					tasks: page.tasks.map(scheduleTaskView),
-					nextAfterTaskId: page.nextAfterTaskId,
-					unreadCount: this.scheduleManager.unreadCount(),
-				};
-			}
-			case "schedule/get":
-				return {
-					task: scheduleTaskView(await this.scheduleManager.get(request.params.taskId)),
-				};
-			case "schedule/update":
-				return await this.replayMutation(request, async () => {
-					if (request.params.model) this.availableModel(request.params.model);
-					let target: ScheduleCreateTarget | undefined;
-					if (request.params.sourceSessionId !== undefined) {
-						target =
-							request.params.sourceSessionId === null
-								? this.scheduleTarget(undefined, request.params.additionalWorkspaceCwd ?? undefined).target
-								: this.scheduleTarget(request.params.sourceSessionId).target;
-					} else if (request.params.additionalWorkspaceCwd !== undefined) {
-						const current = await this.scheduleManager.get(request.params.taskId);
-						if (current.target.workspace !== "task") throw new AppServerError("INVALID_REQUEST");
-						target = this.scheduleTarget(undefined, request.params.additionalWorkspaceCwd ?? undefined).target;
-					}
-					return {
-						task: scheduleTaskView(
-							await this.scheduleManager.update(request.params.taskId, {
-								...(request.params.name === undefined ? {} : { name: request.params.name }),
-								...(request.params.description === undefined
-									? {}
-									: { description: request.params.description }),
-								...(request.params.instruction === undefined
-									? {}
-									: { instruction: request.params.instruction }),
-								...(request.params.model === undefined ? {} : { model: request.params.model }),
-								...(request.params.schedule === undefined ? {} : { schedule: request.params.schedule }),
-								...(target === undefined ? {} : { target }),
-							}),
-						),
-					};
-				});
-			case "schedule/pause":
-				return await this.replayMutation(request, async () => ({
-					task: scheduleTaskView(await this.scheduleManager.pause(request.params.taskId)),
-				}));
-			case "schedule/resume":
-				return await this.replayMutation(request, async () => ({
-					task: scheduleTaskView(await this.scheduleManager.resume(request.params.taskId)),
-				}));
-			case "schedule/delete":
-				return await this.replayMutation(request, async () => {
-					if (request.params.deleteSessions) await this.closeScheduledTaskSessions(request.params.taskId);
-					const result = await this.scheduleManager.delete(request.params.taskId, {
-						deleteSessions: request.params.deleteSessions,
-					});
-					await this.reconcileScheduledTaskSessions(request.params.taskId);
-					return result;
-				});
-			case "schedule/run-now":
-				return await this.replayMutation(request, async () => ({
-					run: scheduleRunView(await this.scheduleManager.runNow(request.params.taskId, request.params.requestId)),
-				}));
-			case "schedule/run/list": {
-				const page = await this.scheduleManager.listRuns(request.params.taskId, {
-					...(request.params.beforeRunId ? { beforeRunId: request.params.beforeRunId } : {}),
-					...(request.params.limit === undefined ? {} : { limit: request.params.limit }),
-				});
-				return {
-					runs: page.runs.map(scheduleRunView),
-					nextBeforeRunId: page.nextBeforeRunId,
-				};
-			}
-			case "schedule/run/get": {
-				const run = await this.scheduleManager.getRun(request.params.taskId, request.params.runId);
-				const registered = await this.catalog.registerScheduledRun(run);
-				if (registered?.changed) this.subscriptionHub.publishSessionUpdated(registered.session);
-				return { run: scheduleRunView(run) };
-			}
-			case "schedule/run/mark-read":
-				return await this.replayMutation(request, async () => {
-					const run = await this.scheduleManager.markRunRead(request.params.taskId, request.params.runId);
-					const registered = await this.catalog.registerScheduledRun(run);
-					if (registered?.changed) this.subscriptionHub.publishSessionUpdated(registered.session);
-					const task = await this.scheduleManager.get(request.params.taskId);
-					return { run: scheduleRunView(run), unreadCount: task.unreadCount };
-				});
-			case "schedule/subscribe":
-				return {
-					snapshot: await connection.subscriptions.subscribeSchedule((cursor) => this.scheduleSnapshot(cursor)),
-				};
-			case "schedule/unsubscribe":
-				connection.subscriptions.unsubscribeSchedule();
-				return { unsubscribed: true };
 			case "connection/ack":
 				return {
 					acknowledgedCursor: connection.subscriptions.acknowledge(
