@@ -1,7 +1,9 @@
 import { ClientRequestMethods, type ClientRpcRequest } from "@metis/app-protocol";
 import type { ModelRegistry } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
+import type { AgentCatalog } from "../src/agent-catalog.ts";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "../src/dispatch/agent-types.ts";
+import { dispatchAgentsRequest, isAgentsRequest } from "../src/dispatch/agents.ts";
 import { dispatchHooksRequest, isHooksRequest } from "../src/dispatch/hooks.ts";
 import { dispatchMcpRequest, isMcpRequest } from "../src/dispatch/mcp.ts";
 import { dispatchMemoryRequest, isMemoryRequest } from "../src/dispatch/memory.ts";
@@ -12,8 +14,10 @@ import { dispatchPlanRequest, isPlanRequest } from "../src/dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "../src/dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "../src/dispatch/profile.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "../src/dispatch/skills.ts";
+import { dispatchTurnsRequest, isTurnsRequest } from "../src/dispatch/turns.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "../src/dispatch/web-search.ts";
 import type { HooksService } from "../src/hooks.ts";
+import type { InteractionBroker, InteractionPeer } from "../src/interactions.ts";
 import type { MemoryService } from "../src/memory-settings.ts";
 import type { ModelSettingsService } from "../src/model-settings.ts";
 import type { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
@@ -21,8 +25,10 @@ import type { PermissionRulesService } from "../src/permission-rules.ts";
 import type { PersonalizationService } from "../src/personalization.ts";
 import type { PluginService } from "../src/plugins.ts";
 import type { ProfileSummaryCache } from "../src/profile-summary.ts";
+import type { SessionCatalog } from "../src/session-catalog.ts";
 import type { SessionRegistry } from "../src/session-registry.ts";
 import type { SessionRef } from "../src/session-runtime-host.ts";
+import type { ConnectionSubscriptions } from "../src/subscriptions.ts";
 import type { WebSearchService } from "../src/web-search.ts";
 
 function request(method: string, params: unknown = {}): ClientRpcRequest {
@@ -259,6 +265,90 @@ function pluginsContext() {
 	return { plugins, registry, context: { plugins, registry, ...replayTracker() } };
 }
 
+function agentsContext() {
+	const runtime = {
+		sessionId: "s1",
+		readAgentItems: vi.fn(async (input: unknown) => input),
+		listAgents: vi.fn(async (input: unknown) => input),
+		sendAgentMessage: vi.fn(async (input: unknown) => input),
+		controlAgent: vi.fn(async (input: unknown) => input),
+		readAgentQueuedMessages: vi.fn(async (input: unknown) => input),
+		deleteAgentQueuedMessage: vi.fn(async (input: unknown) => input),
+		sendAgentQueuedMessage: vi.fn(async (input: unknown) => input),
+		interruptAgent: vi.fn(async (input: unknown) => input),
+		archiveAgent: vi.fn(async (input: unknown) => input),
+		renameAgent: vi.fn(async (input: unknown) => input),
+		deleteAgent: vi.fn(async (input: unknown) => input),
+	};
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+		withOpenRuntime: vi.fn(async (_sessionId: string, run: (runtime: unknown) => Promise<unknown>) => ({
+			open: true,
+			result: await run(runtime),
+		})),
+		assertClosed: vi.fn(),
+	} as unknown as SessionRegistry;
+	const catalog = {
+		agentDir: "/nonexistent-metis-agent-dir",
+		get: vi.fn(() => ({ summary: { archived: false } })),
+		withSessionProjectMutable: vi.fn(
+			async (_id: string, run: (ref: SessionRef) => Promise<unknown>) => await run(ref),
+		),
+	} as unknown as SessionCatalog;
+	const agentCatalog = { list: vi.fn(async () => ({ agents: [] })) } as unknown as AgentCatalog;
+	const connectionSubscriptions = {
+		has: vi.fn(() => true),
+		subscribe: vi.fn(async () => undefined),
+	} as unknown as ConnectionSubscriptions;
+	const interactions = { assign: vi.fn() } as unknown as InteractionBroker;
+	return {
+		runtime,
+		registry,
+		catalog,
+		context: {
+			registry,
+			catalog,
+			agentCatalog,
+			connectionSubscriptions,
+			interactions,
+			interactionPeer: { request: vi.fn(async () => ({})) } as unknown as InteractionPeer,
+			runtimeRef: () => ref,
+			assertMutableSession: vi.fn(),
+			...replayTracker(),
+		},
+	};
+}
+
+function turnsContext() {
+	const runtime = {
+		getSummary: vi.fn(() => ({ name: "named" })),
+		startTurn: vi.fn(async (input: unknown) => input),
+		steer: vi.fn(async (input: unknown) => input),
+		queueTurn: vi.fn(async (input: unknown) => input),
+		updateQueuedTurn: vi.fn(async (input: unknown) => input),
+		deleteQueuedTurn: vi.fn(async (input: unknown) => input),
+		sendQueuedTurn: vi.fn(async (input: unknown) => input),
+		interrupt: vi.fn(async (input: unknown) => input),
+	};
+	const ref = { summary: { sessionId: "s1" } } as unknown as SessionRef;
+	const registry = {
+		run: vi.fn(async (_ref: SessionRef, run: (runtime: unknown) => Promise<unknown>) => await run(runtime)),
+	} as unknown as SessionRegistry;
+	const startTitleJob = vi.fn();
+	return {
+		runtime,
+		startTitleJob,
+		context: {
+			registry,
+			runtimeRef: () => ref,
+			assertMutableSession: vi.fn(),
+			startTitleJob,
+			...replayTracker(),
+		},
+	};
+}
+
 const DOMAINS = [
 	{
 		owns: (method: string) => method.startsWith("profile/") || method.startsWith("usage/"),
@@ -331,6 +421,18 @@ const DOMAINS = [
 		recognized: isPluginsRequest,
 		dispatch: dispatchPluginsRequest,
 		context: pluginsContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("agent/"),
+		recognized: isAgentsRequest,
+		dispatch: dispatchAgentsRequest,
+		context: agentsContext,
+	},
+	{
+		owns: (method: string) => method.startsWith("turn/"),
+		recognized: isTurnsRequest,
+		dispatch: dispatchTurnsRequest,
+		context: turnsContext,
 	},
 ] as const;
 
@@ -479,5 +581,24 @@ describe("dispatcher domain matrix", () => {
 		expect(plugins.plugins.install).toHaveBeenCalledWith({ pluginId: "p1" });
 		expect(plugins.plugins.listInstalled).toHaveBeenCalledOnce();
 		expect(plugins.context.mutations).toEqual(["plugin/market/add", "plugin/install"]);
+	});
+	it("subscribes open agent runtimes and falls back to catalog reads", async () => {
+		const agents = agentsContext();
+		await dispatchAgentsRequest(request("agent/readItems", { sessionId: "s1" }), agents.context);
+		await dispatchAgentsRequest(request("agent/send", { sessionId: "s1", message: "hi" }), agents.context);
+		expect(agents.registry.withOpenRuntime).toHaveBeenCalledOnce();
+		expect(agents.runtime.readAgentItems).toHaveBeenCalledOnce();
+		expect(agents.runtime.sendAgentMessage).toHaveBeenCalledWith({ sessionId: "s1", message: "hi" });
+		expect(agents.context.mutations).toEqual(["agent/send"]);
+	});
+
+	it("starts turns through the runtime and keeps the title job hook", async () => {
+		const turns = turnsContext();
+		await dispatchTurnsRequest(request("turn/start", { sessionId: "s1", text: "hello" }), turns.context);
+		await dispatchTurnsRequest(request("turn/queue", { sessionId: "s1", text: "next" }), turns.context);
+		expect(turns.runtime.startTurn).toHaveBeenCalledWith({ sessionId: "s1", text: "hello" });
+		expect(turns.runtime.queueTurn).toHaveBeenCalledWith({ sessionId: "s1", text: "next" });
+		expect(turns.context.mutations).toEqual(["turn/start", "turn/queue"]);
+		expect(turns.startTitleJob).not.toHaveBeenCalled();
 	});
 });

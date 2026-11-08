@@ -9,9 +9,10 @@ import {
 	SessionManager,
 } from "@metis/coding-agent/host";
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
-import { AgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
-import { ArchivedConversationCatalog, deleteArchivedAgent } from "./archived-conversations.ts";
+import { AgentCatalog } from "./agent-catalog.ts";
+import { ArchivedConversationCatalog } from "./archived-conversations.ts";
 import { dispatchAgentTypeRequest, isAgentTypeRequest } from "./dispatch/agent-types.ts";
+import { dispatchAgentsRequest, isAgentsRequest } from "./dispatch/agents.ts";
 import { dispatchHooksRequest, isHooksRequest } from "./dispatch/hooks.ts";
 import { dispatchKnowledgeRequest, isKnowledgeRequest } from "./dispatch/knowledge.ts";
 import { dispatchMcpRequest, isMcpRequest } from "./dispatch/mcp.ts";
@@ -23,6 +24,7 @@ import { dispatchPlanRequest, isPlanRequest } from "./dispatch/plan.ts";
 import { dispatchPluginsRequest, isPluginsRequest } from "./dispatch/plugins.ts";
 import { dispatchProfileRequest, isProfileRequest } from "./dispatch/profile.ts";
 import { dispatchSkillsRequest, isSkillsRequest } from "./dispatch/skills.ts";
+import { dispatchTurnsRequest, isTurnsRequest } from "./dispatch/turns.ts";
 import { dispatchWebSearchRequest, isWebSearchRequest } from "./dispatch/web-search.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
@@ -570,6 +572,28 @@ export class Dispatcher {
 				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
 			});
 		}
+		if (isAgentsRequest(request)) {
+			return await dispatchAgentsRequest(request, {
+				registry: this.registry,
+				catalog: this.catalog,
+				agentCatalog: this.agentCatalog,
+				connectionSubscriptions: connection.subscriptions,
+				interactions: this.interactions,
+				interactionPeer: connection.interactionPeer,
+				runtimeRef: (sessionId) => this.runtimeRef(sessionId),
+				assertMutableSession: (sessionId) => this.assertMutableSession(sessionId),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
+		if (isTurnsRequest(request)) {
+			return await dispatchTurnsRequest(request, {
+				registry: this.registry,
+				runtimeRef: (sessionId) => this.runtimeRef(sessionId),
+				assertMutableSession: (sessionId) => this.assertMutableSession(sessionId),
+				startTitleJob: (sessionId, input) => this.startTitleJob(sessionId, input),
+				replayMutation: (replayRequest, run) => this.replayMutation(replayRequest, run),
+			});
+		}
 		switch (request.method) {
 			case "initialize":
 				throw new AppServerError("INVALID_REQUEST");
@@ -726,85 +750,6 @@ export class Dispatcher {
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.clearGoal(request.params));
-				});
-			case "agent/readItems": {
-				const ref = this.runtimeRef(request.params.sessionId);
-				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) => {
-					if (!connection.subscriptions.has(runtime.sessionId)) await connection.subscriptions.subscribe(runtime);
-					return runtime.readAgentItems(request.params);
-				});
-				return opened.open ? opened.result : readAgentCatalogItems(ref, this.catalog.agentDir, request.params);
-			}
-			case "agent/list": {
-				const ref = this.runtimeRef(request.params.sessionId);
-				const opened = await this.registry.withOpenRuntime(request.params.sessionId, (runtime) =>
-					runtime.listAgents(request.params),
-				);
-				return opened.open ? opened.result : this.agentCatalog.list(ref, request.params);
-			}
-			case "agent/send":
-			case "agent/control":
-				return await this.replayMutation(request, async () => {
-					this.assertMutableSession(request.params.sessionId);
-					const ref = this.runtimeRef(request.params.sessionId);
-					this.interactions.assign(request.params.sessionId, connection.interactionPeer);
-					return await this.registry.run(ref, async (runtime) => {
-						if (!connection.subscriptions.has(runtime.sessionId))
-							await connection.subscriptions.subscribe(runtime);
-						return request.method === "agent/send"
-							? runtime.sendAgentMessage(request.params)
-							: runtime.controlAgent(request.params);
-					});
-				});
-			case "agent/queue/read": {
-				const ref = this.runtimeRef(request.params.sessionId);
-				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) => {
-					if (!connection.subscriptions.has(runtime.sessionId)) await connection.subscriptions.subscribe(runtime);
-					return runtime.readAgentQueuedMessages(request.params);
-				});
-				return opened.open ? opened.result : readAgentCatalogQueue(ref, this.catalog.agentDir, request.params);
-			}
-			case "agent/queue/delete":
-			case "agent/queue/send":
-				return await this.replayMutation(request, async () => {
-					this.assertMutableSession(request.params.sessionId);
-					const ref = this.runtimeRef(request.params.sessionId);
-					this.interactions.assign(request.params.sessionId, connection.interactionPeer);
-					return await this.registry.run(ref, async (runtime) => {
-						if (!connection.subscriptions.has(runtime.sessionId))
-							await connection.subscriptions.subscribe(runtime);
-						return request.method === "agent/queue/delete"
-							? runtime.deleteAgentQueuedMessage(request.params)
-							: runtime.sendAgentQueuedMessage(request.params);
-					});
-				});
-			case "agent/interrupt":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.interruptAgent(request.params));
-				});
-			case "agent/archive":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.archiveAgent(request.params));
-				});
-			case "agent/rename":
-				return await this.replayMutation(request, async () => {
-					this.assertMutableSession(request.params.sessionId);
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.renameAgent(request.params));
-				});
-			case "agent/delete":
-				return await this.replayMutation(request, async () => {
-					if (this.catalog.get(request.params.sessionId).summary.archived) {
-						this.assertMutableSession(request.params.sessionId);
-						return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
-							this.registry.assertClosed(ref.summary.sessionId);
-							return await deleteArchivedAgent(ref, this.catalog.agentDir, request.params);
-						});
-					}
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.deleteAgent(request.params));
 				});
 			case "session/setThinkingSelection":
 				return await this.replayMutation(request, async () => {
@@ -1040,54 +985,6 @@ export class Dispatcher {
 				connection.subscriptions.unsubscribe(request.params.sessionId);
 				this.interactions.release(request.params.sessionId, connection.interactionPeer);
 				return { sessionId: request.params.sessionId, unsubscribed: true };
-			case "turn/start":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, async (runtime) => {
-						const unnamed = !runtime.getSummary().name;
-						const result = await runtime.startTurn(request.params);
-						if (unnamed) this.startTitleJob(request.params.sessionId, request.params);
-						return result;
-					});
-				});
-			case "turn/steer":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.steer(request.params));
-				});
-			case "turn/queue":
-				return await this.replayMutation(request, () => {
-					this.assertMutableSession(request.params.sessionId);
-					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
-						runtime.queueTurn(request.params),
-					);
-				});
-			case "turn/queue/update":
-				return await this.replayMutation(request, () => {
-					this.assertMutableSession(request.params.sessionId);
-					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
-						runtime.updateQueuedTurn(request.params),
-					);
-				});
-			case "turn/queue/delete":
-				return await this.replayMutation(request, () => {
-					this.assertMutableSession(request.params.sessionId);
-					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
-						runtime.deleteQueuedTurn(request.params),
-					);
-				});
-			case "turn/queue/send":
-				return await this.replayMutation(request, () => {
-					this.assertMutableSession(request.params.sessionId);
-					return this.registry.run(this.runtimeRef(request.params.sessionId), (runtime) =>
-						runtime.sendQueuedTurn(request.params),
-					);
-				});
-			case "turn/interrupt":
-				return await this.replayMutation(request, async () => {
-					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.interrupt(request.params));
-				});
 			case "schedule/create":
 				return await this.replayMutation(request, async () => {
 					this.availableModel(request.params.model);
