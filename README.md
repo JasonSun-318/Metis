@@ -71,8 +71,12 @@ Native Windows acceptance has a dedicated probe script; it refuses to run off
 Windows so a pass always means native evidence:
 
 ```bash
+npm run build            # probes load staged grammar/native assets
 npm run verify:windows   # native Windows only: paths/journal/native addon/editors/child processes
 ```
+
+The nightly `Architecture checks` workflow runs the same probes on a Windows
+runner; push and pull-request runs stay on Linux so per-push cost is unchanged.
 
 The desktop dev runtime hashes its build inputs and skips the six package builds
 when nothing changed; set `METIS_FORCE_DEV_REBUILD=1` to force a rebuild.

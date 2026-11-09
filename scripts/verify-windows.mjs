@@ -113,7 +113,11 @@ await probe("session-journal: append, strict read and atomic replace", () =>
 await probe("shell-analysis: native addon loads and parses a trusted command", async () => {
 	await shellParser.initializeShellAnalysis();
 	const status = shellParser.getShellParserStatus();
-	assert(status.ready === true, `shell analysis unavailable: ${status.reason ?? "unknown reason"}`);
+	assert(
+		status.ready === true,
+		`shell analysis unavailable: ${status.reason ?? "unknown reason"}; ` +
+			"run `npm run build` first so the grammar assets are staged in dist/vendor",
+	);
 	// The product analyses commands with the Bash grammar regardless of host, so
 	// this probe validates the native addon rather than cmd.exe syntax.
 	const parsed = shellParser.parseShellSyntax("echo hello", "bash");

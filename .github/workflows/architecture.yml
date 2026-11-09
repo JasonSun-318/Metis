@@ -18,6 +18,10 @@ on:
       - "tsconfig*.json"
       - "scripts/**"
       - "packages/**"
+  schedule:
+    # Nightly only: native Windows probes need a Windows runner, which is not
+    # worth a per-push cost. Push/PR runs stay on the Linux architecture job.
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 permissions:
@@ -67,3 +71,27 @@ jobs:
       - name: Report presentation boundary regressions
         continue-on-error: true
         run: npm run check:presentation-boundaries
+
+  windows-native:
+    # Native Windows acceptance probes (W19). These cannot be proven by the
+    # cross-platform suites, so they run on a real Windows runner. Scheduled and
+    # manual only to keep per-push cost at zero; see npm run verify:windows.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.13.0
+          cache: npm
+      - name: Install dependencies for native probes
+        run: npm ci --ignore-scripts
+      - name: Build runtime assets for native probes
+        # The shell-analysis grammar and native tools load from staged build
+        # assets, so probes need a build before they can run.
+        env:
+          METIS_SKIP_MODEL_REGENERATION: "1"
+        run: npm run build
+      - name: Run native Windows acceptance probes
+        run: npm run verify:windows
