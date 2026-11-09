@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import {
+	DEFAULT_SPREADSHEET_LIMITS,
 	excelSelectionContext,
 	expandExcelSelection,
 	mergesInRowRange,
 	paintedCellsForRow,
 	parseExcelBytes,
+	parseSheetView,
+	parseWorkbook,
+	SpreadsheetTooLargeError,
 } from "../src/renderer/components/preview/excel-grid.ts";
 
 describe("parseExcelBytes", () => {
@@ -82,5 +86,61 @@ describe("parseExcelBytes", () => {
 		expect(view.sheets.Data.merges).toEqual([{ row: 0, col: 0, rowSpan: 3, colSpan: 1, formatted: "Title" }]);
 		expect(mergesInRowRange(view.sheets.Data.merges, 2, 2)).toHaveLength(1);
 		expect(paintedCellsForRow(view.sheets.Data, 2)[0]).toMatchObject({ covered: true, formatted: "" });
+	});
+});
+
+describe("spreadsheet preview limits", () => {
+	const sheetOf = (values: Record<string, unknown>): XLSX.WorkSheet => values as unknown as XLSX.WorkSheet;
+	const cell = (value: string | number): XLSX.CellObject => ({ t: typeof value === "number" ? "n" : "s", v: value });
+
+	it("ignores a whole-sheet dimension left behind by formatting", () => {
+		const view = parseSheetView("Data", sheetOf({ "!ref": "A1:XFD1048576", A1: cell("hi"), B2: cell(1) }));
+		expect([view.startRow, view.startCol, view.rowCount, view.colCount]).toEqual([0, 0, 2, 2]);
+		expect(view.cells.size).toBe(2);
+	});
+
+	it("rejects ranges that would stall rendering", () => {
+		const wide = sheetOf({ A1: cell("a"), XFD10: cell("b") });
+		expect(() => parseSheetView("Data", wide)).toThrow(SpreadsheetTooLargeError);
+		const tall = sheetOf({ A1: cell("a"), A200001: cell("b") });
+		expect(() => parseSheetView("Data", tall)).toThrow(SpreadsheetTooLargeError);
+	});
+
+	it("reports which limit a sheet exceeded", () => {
+		const wide = sheetOf({ A1: cell("a"), XFD10: cell("b") });
+		expect(() => parseSheetView("Data", wide)).toThrow(
+			expect.objectContaining({ name: "SpreadsheetTooLargeError", reason: "columns" }),
+		);
+		const area = sheetOf({ A1: cell("a"), A50: cell("b") });
+		expect(() => parseSheetView("Data", area, { ...DEFAULT_SPREADSHEET_LIMITS, maxArea: 40 })).toThrow(
+			expect.objectContaining({ reason: "area" }),
+		);
+	});
+
+	it("rejects sheets with more populated cells than the preview budget", () => {
+		const dense = sheetOf({ A1: cell("a"), B1: cell("b"), C1: cell("c") });
+		expect(() => parseSheetView("Data", dense, { ...DEFAULT_SPREADSHEET_LIMITS, maxCells: 2 })).toThrow(
+			expect.objectContaining({ reason: "cells" }),
+		);
+	});
+
+	it("skips oversized merge ranges that come from whole-sheet formatting", () => {
+		const sheet = sheetOf({
+			A1: cell("title"),
+			"!merges": [{ s: { r: 0, c: 0 }, e: { r: 2_000_000, c: 0 } }],
+		});
+		const view = parseSheetView("Data", sheet);
+		expect(view.rowCount).toBe(1);
+		expect(view.merges).toEqual([]);
+	});
+
+	it("rejects a workbook whose sheets together exceed the cell budget", () => {
+		const workbook = {
+			SheetNames: ["A", "B"],
+			Sheets: { A: sheetOf({ A1: cell("a"), B1: cell("b") }), B: sheetOf({ A1: cell("c") }) },
+		} as unknown as XLSX.WorkBook;
+		expect(() => parseWorkbook(workbook, { ...DEFAULT_SPREADSHEET_LIMITS, maxCells: 2 })).toThrow(
+			expect.objectContaining({ reason: "cells" }),
+		);
 	});
 });

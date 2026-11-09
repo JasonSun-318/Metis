@@ -11,6 +11,7 @@ import {
 	mergesInRowRange,
 	paintedCellsForRow,
 	parseExcelBytes,
+	SpreadsheetTooLargeError,
 } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import type { UniversalPreviewTarget } from "./preview-kinds.ts";
@@ -71,7 +72,13 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 			setActiveSheetName(view.activeSheet);
 			setLoading(false);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : t("Failed to parse Excel spreadsheet"));
+			setError(
+				cause instanceof SpreadsheetTooLargeError
+					? t("Spreadsheet is too large to preview")
+					: cause instanceof Error
+						? cause.message
+						: t("Failed to parse Excel spreadsheet"),
+			);
 			setLoading(false);
 		}
 	}, [bytes, fileName, t]);

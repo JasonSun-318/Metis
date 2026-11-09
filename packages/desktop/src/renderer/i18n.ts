@@ -1999,6 +1999,7 @@ const zhCN = {
 	"Filter cells": "筛选单元格",
 	"Filter cells…": "筛选单元格…",
 	"Empty sheet": "空白工作表",
+	"Spreadsheet is too large to preview": "表格过大，无法预览",
 	Sheets: "工作表",
 	"Rendering Word document…": "正在渲染 Word 文档…",
 	"Failed to render Word document": "无法渲染 Word 文档",

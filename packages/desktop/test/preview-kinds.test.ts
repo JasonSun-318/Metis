@@ -15,6 +15,14 @@ describe("classifyPreviewKind", () => {
 		expect(classifyPreviewKind("data.csv")).toBe("csv");
 	});
 
+	it("routes the spreadsheet formats SheetJS reads to the spreadsheet viewer", () => {
+		expect(classifyPreviewKind("macro.xlsm")).toBe("xlsx");
+		expect(classifyPreviewKind("binary.xlsb")).toBe("xlsx");
+		expect(classifyPreviewKind("legacy.XLS")).toBe("xlsx");
+		expect(classifyPreviewKind("open.ods")).toBe("xlsx");
+		expect(isEnginePreviewKind(classifyPreviewKind("open.ods"))).toBe(true);
+	});
+
 	it("keeps images and text as light kinds", () => {
 		expect(classifyPreviewKind("photo.png")).toBe("image");
 		expect(classifyPreviewKind("photo.JPG")).toBe("image");
@@ -33,7 +41,7 @@ describe("classifyPreviewKind", () => {
 	it("rejects legacy office and unknown binaries", () => {
 		expect(classifyPreviewKind("old.ppt")).toBe("unsupported");
 		expect(classifyPreviewKind("old.doc")).toBe("unsupported");
-		expect(classifyPreviewKind("old.xls")).toBe("unsupported");
+		expect(classifyPreviewKind("old.rtf")).toBe("unsupported");
 		expect(classifyPreviewKind("archive.zip")).toBe("unsupported");
 		expect(fileExtension("noext")).toBe("");
 		expect(isEnginePreviewKind("pdf")).toBe(true);
