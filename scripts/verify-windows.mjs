@@ -19,9 +19,15 @@ import childProcess, { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+
+// Windows absolute paths (D:\...) are not valid ESM specifiers; always import
+// through file URLs so the probes load identically on every platform.
+function sourceModule(relativePath) {
+	return import(pathToFileURL(join(repoRoot, relativePath)).href);
+}
 
 if (process.platform !== "win32") {
 	console.error(
@@ -63,11 +69,11 @@ async function withTempDir(run) {
 	}
 }
 
-const paths = await import(join(repoRoot, "packages/coding-agent/src/utils/paths.ts"));
-const durable = await import(join(repoRoot, "packages/coding-agent/src/core/durable-file.ts"));
-const journal = await import(join(repoRoot, "packages/coding-agent/src/core/session-journal.ts"));
-const shellParser = await import(join(repoRoot, "packages/coding-agent/src/core/permissions/shell-parser.ts"));
-const promptTemplates = await import(join(repoRoot, "packages/coding-agent/src/core/prompt-templates.ts"));
+const paths = await sourceModule("packages/coding-agent/src/utils/paths.ts");
+const durable = await sourceModule("packages/coding-agent/src/core/durable-file.ts");
+const journal = await sourceModule("packages/coding-agent/src/core/session-journal.ts");
+const shellParser = await sourceModule("packages/coding-agent/src/core/permissions/shell-parser.ts");
+const promptTemplates = await sourceModule("packages/coding-agent/src/core/prompt-templates.ts");
 
 await probe("paths: spaces and non-ASCII survive canonicalization", () =>
 	withTempDir((dir) => {
