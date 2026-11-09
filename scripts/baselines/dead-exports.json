@@ -1752,11 +1752,6 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/PermissionDecisionLabel.tsx",
-			"export": "PermissionDecisionLabel",
-			"category": "zero-reference"
-		},
-		{
 			"file": "packages/desktop/src/renderer/components/PlanCard.tsx",
 			"export": "PlanCardProps",
 			"category": "same-file-only"
