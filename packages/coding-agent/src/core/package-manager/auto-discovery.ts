@@ -13,21 +13,6 @@ import {
 import { applyPatterns, isEnabledByOverrides, splitPatterns } from "./resource-patterns.ts";
 import { addResource, getTargetMap, type ResourceAccumulator } from "./resource-results.ts";
 
-/** Explicit contract for local-entry and auto-discovery resolution. */
-export interface AutoDiscoveryContract {
-	/** Settings snapshots are read by the caller once per resolve pass. */
-	readonly globalSettings: ReturnType<SettingsManager["getGlobalSettings"]>;
-	readonly projectSettings: ReturnType<SettingsManager["getProjectSettings"]>;
-	/** Project trust is decided by the caller; discovery never re-reads it. */
-	readonly projectTrusted: boolean;
-	/** Home and cwd are captured by the caller at the same time as base dirs. */
-	readonly cwd: string;
-	readonly homeDir: string;
-	readonly globalBaseDir: string;
-	readonly projectBaseDir: string;
-	readonly accumulator: ResourceAccumulator;
-}
-
 export function resolveLocalEntries(input: {
 	readonly entries: string[];
 	readonly resourceType: ResourceType;
@@ -53,6 +38,13 @@ export function resolveLocalEntries(input: {
 	}
 }
 
+/**
+ * Resolves `.metis/` and `.agents/` auto-discovered resources.
+ *
+ * The caller owns the read contract: settings snapshots, project-trust, cwd,
+ * home and both base dirs are captured once per resolve pass, so discovery never
+ * re-reads settings or re-evaluates trust mid-scan.
+ */
 export function addAutoDiscoveredResources(input: {
 	readonly accumulator: ResourceAccumulator;
 	readonly globalSettings: ReturnType<SettingsManager["getGlobalSettings"]>;

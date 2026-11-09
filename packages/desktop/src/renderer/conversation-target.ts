@@ -4,7 +4,3 @@ export interface AgentConversationTarget {
 	readonly agentId: string;
 	readonly name: string;
 }
-
-export function conversationTargetKey(target: { readonly sessionId: string; readonly agentId?: string }): string {
-	return JSON.stringify([target.sessionId, target.agentId ?? null]);
-}
