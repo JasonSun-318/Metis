@@ -63,6 +63,11 @@ jobs:
       - name: Report unused dependency candidates
         continue-on-error: true
         run: npm run check:unused-deps
+      - name: Report production dependency advisories
+        # Needs registry access, so it stays out of the local gate. Accepted
+        # advisories carry a reviewed reason in scripts/baselines/security-audit.json.
+        continue-on-error: true
+        run: npm run check:audit
       - name: Test architecture guards
         run: npm run check:scripts
       - name: Report type debt and suppression increases

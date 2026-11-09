@@ -38,6 +38,7 @@
 			"scripts/check-public-api.mjs",
 			"scripts/check-duplicates.mjs",
 			"scripts/check-unused-deps.mjs",
+			"scripts/check-audit.mjs",
 			"scripts/check-dead-exports.mjs",
 			"scripts/check-type-debt.mjs",
 			"scripts/check-presentation-boundaries.mjs",

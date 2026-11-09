@@ -115,6 +115,29 @@ node scripts/check-unused-deps.mjs --update
 An incomplete scan refuses baseline updates. Normal commands never rewrite
 either advisory baseline; pruning old entries also requires an explicit update.
 
+## Advisory production dependency audit
+
+`npm run check:audit` runs `npm audit --omit=dev`, then compares the reported
+advisories with `security-audit.json`. It is a `continue-on-error` architecture CI
+step and is not part of `npm run check`, because it needs registry access. The
+checker never installs, upgrades or rewrites manifests or lockfiles.
+
+Advisories are grouped per package and keyed by GitHub advisory id, so a new
+advisory on an already accepted package is still reported. A severity increase on
+an accepted advisory is reported too. Each baseline package records why its
+remaining advisories are accepted; the update command fails when a reason is
+missing. Reports also name baseline entries that npm no longer reports, so a
+fixed advisory can be pruned.
+
+```sh
+node scripts/check-audit.mjs --update
+```
+
+Before updating, review the new entries and prefer fixing the dependency over
+baselining it. Reachability matters: several accepted advisories sit in server
+transports or example workspaces that the shipped runtime never loads, and the
+reason field records that reasoning.
+
 ## Advisory internal export report
 
 `npm run check:dead-exports` reports internal export candidates and changes against

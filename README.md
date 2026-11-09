@@ -63,6 +63,10 @@ analyses such as runtime cycles, public API surfaces, duplicate/dead-export
 reports and type debt run in the full gate only. Run `npm run check:scripts` for
 the check-script regressions alone.
 
+`npm run check:audit` compares production dependency advisories with
+`scripts/baselines/security-audit.json`; it needs registry access, so the full
+local gate skips it and CI runs it as an advisory step.
+
 `npm run build` refreshes the AI model catalog through `generate-models`; set
 `METIS_SKIP_MODEL_REGENERATION=1` to use the offline build when model data files
 should not be rewritten.

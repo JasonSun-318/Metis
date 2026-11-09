@@ -1,0 +1,211 @@
+{
+	"version": 1,
+	"packages": [
+		{
+			"package": "node-forge",
+			"reason": "No patched npm release exists: every published version carries these advisories. It arrives through @anthropic-ai/sandbox-runtime's TLS helper. Re-check when forge publishes a fix or sandbox-runtime drops it.",
+			"advisories": [
+				{
+					"id": "GHSA-4487-j8r4-4g2f",
+					"severity": "low",
+					"title": "Forge: verifyCertificateChain() removes trusted CA certificates with the same subject from the CA store",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-4487-j8r4-4g2f"
+				},
+				{
+					"id": "GHSA-4642-5mcj-2rqw",
+					"severity": "low",
+					"title": "Forge: ASN.1 OID first arc truncation in asn1.oidToDer",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-4642-5mcj-2rqw"
+				},
+				{
+					"id": "GHSA-525v-9gp9-w22h",
+					"severity": "moderate",
+					"title": "Forge: TLS client crash when the server sends no certificate",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-525v-9gp9-w22h"
+				},
+				{
+					"id": "GHSA-5cwg-6vw7-rj6p",
+					"severity": "moderate",
+					"title": "Forge: AES-GCM authentication bypass via unvalidated tagLength option",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-5cwg-6vw7-rj6p"
+				},
+				{
+					"id": "GHSA-5x38-2vff-x55p",
+					"severity": "high",
+					"title": "Forge: X.509 basicConstraints bypass in verifyCertificateChain() via deprecated extension OIDs 2.5.29.10 and 2.5.29.13",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-5x38-2vff-x55p"
+				},
+				{
+					"id": "GHSA-6wvx-3r32-xmcg",
+					"severity": "moderate",
+					"title": "Forge: Prototype Pollution in forge.http cookie handling via a malicious Set-Cookie",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-6wvx-3r32-xmcg"
+				},
+				{
+					"id": "GHSA-7wch-p9px-956x",
+					"severity": "high",
+					"title": "Forge: Regular expression denial of service in PEM decoding (pem.decode)",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-7wch-p9px-956x"
+				},
+				{
+					"id": "GHSA-86w9-cpqp-85rv",
+					"severity": "high",
+					"title": "node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-86w9-cpqp-85rv"
+				},
+				{
+					"id": "GHSA-8hrf-8g6f-7xwp",
+					"severity": "high",
+					"title": "Forge: Denial of service in TLS record processing via a record interleaved with a fragmented handshake message",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-8hrf-8g6f-7xwp"
+				},
+				{
+					"id": "GHSA-h6cr-wjv9-3cpp",
+					"severity": "low",
+					"title": "Forge: Denial of Service via infinite loop in BigInteger.modInverse() with negative input (incomplete fix of CVE-2026-33891)",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-h6cr-wjv9-3cpp"
+				},
+				{
+					"id": "GHSA-hqq3-7jhf-c5jx",
+					"severity": "high",
+					"title": "Forge: Denial of service in TLS record processing via call stack exhaustion",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-hqq3-7jhf-c5jx"
+				},
+				{
+					"id": "GHSA-jc66-7q78-782g",
+					"severity": "high",
+					"title": "Forge: PKCS#12 MAC forgery and constant-key PBE via zero iteration count",
+					"range": "<=1.4.0",
+					"url": "https://github.com/advisories/GHSA-jc66-7q78-782g"
+				}
+			]
+		},
+		{
+			"package": "undici",
+			"reason": "The nested 6.x copy belongs to the gondolin example extension (packages/coding-agent/examples/extensions/gondolin), not the shipped runtime. gondolin ^0.14 fixes it but requires Node >=23.6, so the example upgrade stays separate.",
+			"advisories": [
+				{
+					"id": "GHSA-2m5v-pch6-74hx",
+					"severity": "high",
+					"title": "undici vulnerable to TLS certificate validation bypass via dropped tls options in Agent",
+					"range": ">=4.0.0 <6.29.1",
+					"url": "https://github.com/advisories/GHSA-2m5v-pch6-74hx"
+				},
+				{
+					"id": "GHSA-3wwx-pv8p-q78v",
+					"severity": "moderate",
+					"title": "undici vulnerable to Denial of Service via unhandled error in WebSocket permessage-deflate decompression",
+					"range": ">=6.25.0 <6.28.1",
+					"url": "https://github.com/advisories/GHSA-3wwx-pv8p-q78v"
+				},
+				{
+					"id": "GHSA-4qv8-2p9j-2685",
+					"severity": "moderate",
+					"title": "undici vulnerable to Denial of Service via unbounded memory in the EventSource parser",
+					"range": ">=6.5.0 <6.29.1",
+					"url": "https://github.com/advisories/GHSA-4qv8-2p9j-2685"
+				},
+				{
+					"id": "GHSA-8xcm-r25x-g524",
+					"severity": "moderate",
+					"title": "undici vulnerable to downstream response desynchronization via retry interceptor",
+					"range": "<6.28.0",
+					"url": "https://github.com/advisories/GHSA-8xcm-r25x-g524"
+				},
+				{
+					"id": "GHSA-9fm3-97px-rjf6",
+					"severity": "moderate",
+					"title": "undici WebSocket client vulnerable to Denial of Service via unbounded automatic PONG buffering",
+					"range": ">=5.15.0 <6.29.1",
+					"url": "https://github.com/advisories/GHSA-9fm3-97px-rjf6"
+				},
+				{
+					"id": "GHSA-m8rv-5g2x-5cg5",
+					"severity": "moderate",
+					"title": "undici vulnerable to CRLF Injection via blob-like body 'type' property",
+					"range": "<6.28.0",
+					"url": "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5"
+				},
+				{
+					"id": "GHSA-qrxm-fqhp-jwvm",
+					"severity": "high",
+					"title": "undici vulnerable to Denial of Service via TLS 1.2 certificate-changing renegotiation",
+					"range": ">=4.2.1 <6.29.1",
+					"url": "https://github.com/advisories/GHSA-qrxm-fqhp-jwvm"
+				},
+				{
+					"id": "GHSA-r53p-7pc4-xj5r",
+					"severity": "low",
+					"title": "undici vulnerable to downstream response splitting via retry interceptor",
+					"range": "<6.28.1",
+					"url": "https://github.com/advisories/GHSA-r53p-7pc4-xj5r"
+				},
+				{
+					"id": "GHSA-rfgv-xxqx-mfg5",
+					"severity": "high",
+					"title": "undici vulnerable to Denial of Service via unrequested WebSocket subprotocol",
+					"range": ">=6.7.0 <6.28.1",
+					"url": "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5"
+				},
+				{
+					"id": "GHSA-v3r7-h72x-cjcm",
+					"severity": "moderate",
+					"title": "undici vulnerable to cookie attribute injection via unsanitized domain and unparsed setCookie fields",
+					"range": "<6.28.0",
+					"url": "https://github.com/advisories/GHSA-v3r7-h72x-cjcm"
+				},
+				{
+					"id": "GHSA-xjj6-f33q-929c",
+					"severity": "high",
+					"title": "undici vulnerable to Denial of Service via unhandled error on excessive content-encodings",
+					"range": ">=6.23.0 <6.29.1",
+					"url": "https://github.com/advisories/GHSA-xjj6-f33q-929c"
+				}
+			]
+		},
+		{
+			"package": "xlsx",
+			"reason": "npm's last SheetJS release is 0.18.5; the fixed 0.20.x is published on SheetJS's CDN only. The desktop spreadsheet preview reads user-opened files under the 50 MiB preview cap.",
+			"advisories": [
+				{
+					"id": "GHSA-4r6h-8v6p-xvw6",
+					"severity": "high",
+					"title": "Prototype Pollution in sheetJS",
+					"range": "<0.19.3",
+					"url": "https://github.com/advisories/GHSA-4r6h-8v6p-xvw6"
+				},
+				{
+					"id": "GHSA-5pgg-2g8v-p4x9",
+					"severity": "high",
+					"title": "SheetJS Regular Expression Denial of Service (ReDoS)",
+					"range": "<0.20.2",
+					"url": "https://github.com/advisories/GHSA-5pgg-2g8v-p4x9"
+				}
+			]
+		},
+		{
+			"package": "zod",
+			"reason": "Pinned transitively by @anthropic-ai/sandbox-runtime (^3.24) and the provider SDKs; the fix requires zod >=4.6.6, a cross-package major upgrade.",
+			"advisories": [
+				{
+					"id": "GHSA-mrhx-c7xc-m3w5",
+					"severity": "high",
+					"title": "Zod can exhaust memory while validating oversized constrained collections",
+					"range": "<4.6.6",
+					"url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5"
+				}
+			]
+		}
+	]
+}
