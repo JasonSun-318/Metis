@@ -67,6 +67,13 @@ the check-script regressions alone.
 `METIS_SKIP_MODEL_REGENERATION=1` to use the offline build when model data files
 should not be rewritten.
 
+Native Windows acceptance has a dedicated probe script; it refuses to run off
+Windows so a pass always means native evidence:
+
+```bash
+npm run verify:windows   # native Windows only: paths/journal/native addon/editors/child processes
+```
+
 The desktop dev runtime hashes its build inputs and skips the six package builds
 when nothing changed; set `METIS_FORCE_DEV_REBUILD=1` to force a rebuild.
 `npm run clean:artifacts` reports regenerable desktop build/test artifacts (add

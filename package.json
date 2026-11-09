@@ -13,6 +13,7 @@
 		"build": "node scripts/build-packages.mjs",
 		"check": "node scripts/run-checks.mjs",
 		"check:biome": "biome check --error-on-warnings .",
+		"verify:windows": "node scripts/verify-windows.mjs",
 		"check:fast": "node scripts/check-fast.mjs",
 		"check:format": "biome check --write --error-on-warnings .",
 		"check:structure": "node scripts/check-structure.mjs",
