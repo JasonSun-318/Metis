@@ -175,26 +175,6 @@
 			]
 		},
 		{
-			"package": "xlsx",
-			"reason": "npm's last SheetJS release is 0.18.5; the fixed 0.20.x is published on SheetJS's CDN only. The desktop spreadsheet preview reads user-opened files under the 50 MiB preview cap.",
-			"advisories": [
-				{
-					"id": "GHSA-4r6h-8v6p-xvw6",
-					"severity": "high",
-					"title": "Prototype Pollution in sheetJS",
-					"range": "<0.19.3",
-					"url": "https://github.com/advisories/GHSA-4r6h-8v6p-xvw6"
-				},
-				{
-					"id": "GHSA-5pgg-2g8v-p4x9",
-					"severity": "high",
-					"title": "SheetJS Regular Expression Denial of Service (ReDoS)",
-					"range": "<0.20.2",
-					"url": "https://github.com/advisories/GHSA-5pgg-2g8v-p4x9"
-				}
-			]
-		},
-		{
 			"package": "zod",
 			"reason": "Pinned transitively by @anthropic-ai/sandbox-runtime (^3.24) and the provider SDKs; the fix requires zod >=4.6.6, a cross-package major upgrade.",
 			"advisories": [

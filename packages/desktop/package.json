@@ -48,7 +48,7 @@
 		"react-i18next": "17.0.11",
 		"reicon": "1.2.5",
 		"reicon-react": "1.2.6",
-		"xlsx": "0.18.5"
+		"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
 	},
 	"devDependencies": {
 		"@electron-forge/cli": "7.11.2",
