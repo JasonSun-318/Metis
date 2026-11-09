@@ -79,6 +79,19 @@ jobs:
           node-version: 24.13.0
           cache: npm
 
+      - name: Cache Electron downloads
+        # `npm ci` and `npm run make` both fetch the Electron zip. Both read the
+        # @electron/get cache, so caching it saves the per-run download.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         # Linux covers runtime builds, types and foundation tests only.
