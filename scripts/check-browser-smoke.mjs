@@ -14,6 +14,11 @@ try {
 		format: "esm",
 		logLevel: "silent",
 		outfile: outputPath,
+		// @mistralai/mistralai imports its tracing peer unconditionally in ESM, but
+		// treats a missing module as "tracing disabled" at runtime; see
+		// packages/ai/test/mistral-optional-tracing.test.ts. The package is not a
+		// dependency, so leave it unresolved instead of failing the build.
+		external: ["@opentelemetry/api"],
 	});
 	process.exit(0);
 } catch (error) {
