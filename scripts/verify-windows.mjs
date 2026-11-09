@@ -146,6 +146,31 @@ await probe("external-editor: quoted command with spaces parses into argv", () =
 });
 
 await probe(
+	"child-process: aborting a running child settles with a non-zero status",
+	() =>
+		new Promise((resolve, reject) => {
+			// Mirrors Esc-cancelling a running bash tool: the child must terminate
+			// and the close handler must observe a failure status rather than hang.
+			const child = childProcess.spawn("cmd.exe", ["/d", "/s", "/c", "ping -n 30 127.0.0.1"], {
+				stdio: "ignore",
+				windowsHide: true,
+			});
+			const timer = setTimeout(() => {
+				child.kill();
+			}, 250);
+			child.once("error", (error) => {
+				clearTimeout(timer);
+				reject(error);
+			});
+			child.once("close", (code, signal) => {
+				clearTimeout(timer);
+				if (code === 0) reject(new Error("aborted child reported a clean exit"));
+				else resolve({ code, signal });
+			});
+		}),
+);
+
+await probe(
 	"child-process: exit code propagates through a spawned shell",
 	() =>
 		new Promise((resolve, reject) => {
