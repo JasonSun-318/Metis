@@ -197,6 +197,14 @@ async function createFixture(options: { readonly prefillMailbox?: number } = {})
 	};
 }
 
+// Child runtimes finish on real timers; the default 1s poll is too tight when
+// the full suite runs in parallel, so give these waits a load-tolerant budget.
+const WAIT_TIMEOUT_MS = 10_000;
+
+function waitFor<T>(callback: () => T | Promise<T>, options?: { timeout?: number }): Promise<T> {
+	return vi.waitFor(callback, { timeout: options?.timeout ?? WAIT_TIMEOUT_MS, interval: 20 });
+}
+
 describe("subagent mailbox recovery", () => {
 	it.each([true, false])(
 		"consumes a cold child mailbox (explicit resume: %s) without waking the root",
@@ -207,21 +215,21 @@ describe("subagent mailbox recovery", () => {
 				task: "coordinate a grandchild",
 				agentType: "worker",
 			});
-			await vi.waitFor(() => expect(fixture.childRuntimes).toHaveLength(1));
-			await vi.waitFor(() => expect(fixture.contexts.get(child.agentId)).toHaveLength(1));
+			await waitFor(() => expect(fixture.childRuntimes).toHaveLength(1));
+			await waitFor(() => expect(fixture.contexts.get(child.agentId)).toHaveLength(1));
 
 			const grandchild = await fixture.manager.spawn(child.agentId, {
 				name: "leaf",
 				task: "finish later",
 				agentType: "explorer",
 			});
-			await vi.waitFor(() => expect(fixture.childRuntimes).toHaveLength(2));
-			await vi.waitFor(() => expect(fixture.contexts.get(grandchild.agentId)).toHaveLength(1));
+			await waitFor(() => expect(fixture.childRuntimes).toHaveLength(2));
+			await waitFor(() => expect(fixture.contexts.get(grandchild.agentId)).toHaveLength(1));
 
 			// The child finishes first. Its runtime is disposed while the grandchild is
 			// still running, so the later terminal event has to be journaled cold.
 			fixture.release(1);
-			await vi.waitFor(() =>
+			await waitFor(() =>
 				expect(fixture.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)?.status).toBe(
 					"done",
 				),
@@ -234,13 +242,13 @@ describe("subagent mailbox recovery", () => {
 			const childCallCount = fixture.contexts.get(child.agentId)!.length;
 			const rootCallCount = fixture.rootHarness.faux.state.callCount;
 			fixture.release(2);
-			await vi.waitFor(() =>
+			await waitFor(() =>
 				expect(
 					fixture.manager.listTasks(grandchild.agentId).find((task) => task.taskId === grandchild.taskId)?.status,
 				).toBe("done"),
 			);
 			const grandchildEventId = `agent:${grandchild.agentId}:${grandchild.taskId}:terminal`;
-			await vi.waitFor(async () => {
+			await waitFor(async () => {
 				const journal = await fixture.manager.readJournal(ROOT_ID, child.agentId);
 				expect(
 					journal.some(
@@ -269,7 +277,7 @@ describe("subagent mailbox recovery", () => {
 
 			// Explicit resume must rehydrate the child conversation and let its model
 			// consume the pending event. The root must not be resumed as a substitute.
-			await vi.waitFor(
+			await waitFor(
 				() => {
 					expect(fixture.contexts.get(child.agentId)?.length ?? 0).toBeGreaterThan(childCallCount);
 					expect(fixture.rootHarness.faux.state.callCount).toBe(rootCallCount);
@@ -297,8 +305,8 @@ describe("subagent mailbox recovery", () => {
 				task: "wait for a human",
 				agentType: "worker",
 			});
-			await vi.waitFor(() => expect(fixture.childRuntimes).toHaveLength(1));
-			await vi.waitFor(() => expect(fixture.contexts.get(child.agentId)).toHaveLength(1));
+			await waitFor(() => expect(fixture.childRuntimes).toHaveLength(1));
+			await waitFor(() => expect(fixture.contexts.get(child.agentId)).toHaveLength(1));
 
 			if (failure === "mailbox capacity") {
 				fixture.rootHarness.setResponses([fauxAssistantMessage("drained two events")]);
@@ -330,7 +338,7 @@ describe("subagent mailbox recovery", () => {
 					input: { text: "Human guidance while the task is running" },
 				},
 			);
-			await vi.waitFor(() => expect(events.some((event) => event.type === "notification_failed")).toBe(true));
+			await waitFor(() => expect(events.some((event) => event.type === "notification_failed")).toBe(true));
 
 			if (failure === "mailbox capacity") {
 				// Reserve room for both the intervention and terminal notifications.
@@ -344,7 +352,7 @@ describe("subagent mailbox recovery", () => {
 			}
 
 			fixture.release(1);
-			await vi.waitFor(() => expect(fixture.manager.listTasks(child.agentId)[0]?.status).toBe("done"));
+			await waitFor(() => expect(fixture.manager.listTasks(child.agentId)[0]?.status).toBe("done"));
 
 			// Reattaching the actor is the durable recovery path: terminal events are
 			// republished, and the human intervention must be republished as well.
@@ -352,7 +360,7 @@ describe("subagent mailbox recovery", () => {
 				fixture.detachRoot();
 				fixture.manager.attachActor(fixture.rootHarness.session);
 			}
-			await vi.waitFor(
+			await waitFor(
 				() => {
 					const journal = fixture.rootHarness.sessionManager.getDurableJournalSnapshot();
 					// Positive control: the terminal notification is not lost either.
