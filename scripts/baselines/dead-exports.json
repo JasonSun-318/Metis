@@ -47,6 +47,16 @@
 			"category": "test-only"
 		},
 		{
+			"file": "packages/app-server/src/agent-host-tools.ts",
+			"export": "AgentHostToolsOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/agent-summary-projection.ts",
+			"export": "agentTaskView",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/app-server/src/browser-permission-audit.ts",
 			"export": "BrowserPermissionAuditRequest",
 			"category": "test-only"
@@ -67,73 +77,93 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "ArchiveOptions",
+			"file": "packages/app-server/src/dispatch/agent-types.ts",
+			"export": "AgentTypeDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "DEFAULT_MAX_IMPORT_ENTRIES",
+			"file": "packages/app-server/src/dispatch/agents.ts",
+			"export": "AgentsDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "DEFAULT_MAX_IMPORT_FILE_BYTES",
+			"file": "packages/app-server/src/dispatch/hooks.ts",
+			"export": "HooksDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "DEFAULT_MAX_IMPORT_SOURCE_BYTES",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "DEFAULT_MAX_IMPORT_UNCOMPRESSED_BYTES",
+			"file": "packages/app-server/src/dispatch/knowledge.ts",
+			"export": "KnowledgeDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "GitHubSource",
+			"file": "packages/app-server/src/dispatch/mcp.ts",
+			"export": "McpDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "importedFileMode",
+			"file": "packages/app-server/src/dispatch/memory.ts",
+			"export": "MemoryDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "MAX_GITHUB_JSON_BYTES",
+			"file": "packages/app-server/src/dispatch/model.ts",
+			"export": "ModelDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "MAX_PLUGIN_PROBE_DEPTH",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "openZip",
+			"file": "packages/app-server/src/dispatch/permission.ts",
+			"export": "PermissionDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "readZipEntry",
+			"file": "packages/app-server/src/dispatch/personalization.ts",
+			"export": "PersonalizationDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "regularZipEntry",
+			"file": "packages/app-server/src/dispatch/plan.ts",
+			"export": "PlanDispatchContext",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/app-server/src/github-archive.ts",
-			"export": "RETRYABLE_HTTP_STATUS",
+			"file": "packages/app-server/src/dispatch/plugins.ts",
+			"export": "PluginsDispatchContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/dispatch/profile.ts",
+			"export": "ProfileDispatchContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/dispatch/schedule.ts",
+			"export": "ScheduleDispatchContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/dispatch/skills.ts",
+			"export": "SkillsDispatchContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/dispatch/turns.ts",
+			"export": "TurnsDispatchContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/dispatch/web-search.ts",
+			"export": "WebSearchDispatchContext",
 			"category": "same-file-only"
 		},
 		{
 			"file": "packages/app-server/src/item-projection.ts",
 			"export": "MessageProjectionInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "PermissionDecisionSource",
 			"category": "same-file-only"
 		},
 		{
@@ -153,7 +183,22 @@
 		},
 		{
 			"file": "packages/app-server/src/item-projection.ts",
-			"export": "textPrefixWithinBytes",
+			"export": "ProjectedPermissionDecision",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/knowledge-resource.ts",
+			"export": "matchesDeclaredType",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/knowledge-resource.ts",
+			"export": "ResolvedKnowledgeResource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/knowledge-resource.ts",
+			"export": "ResolveKnowledgeResourceInput",
 			"category": "same-file-only"
 		},
 		{
@@ -179,6 +224,21 @@
 		{
 			"file": "packages/app-server/src/mcp-projection.ts",
 			"export": "publicMcpServer",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/model-discovery.ts",
+			"export": "buildModelListUrl",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/model-discovery.ts",
+			"export": "ModelDiscoveryOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/permission-rules.ts",
+			"export": "permissionRuleView",
 			"category": "same-file-only"
 		},
 		{
@@ -215,16 +275,6 @@
 			"file": "packages/app-server/src/plugin-sources.ts",
 			"export": "resolveCommitSha",
 			"category": "test-only"
-		},
-		{
-			"file": "packages/app-server/src/plugins.ts",
-			"export": "makeComponentId",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/app-server/src/plugins.ts",
-			"export": "PluginMarketCatalogCache",
-			"category": "zero-reference"
 		},
 		{
 			"file": "packages/app-server/src/profile-summary.ts",
@@ -277,13 +327,28 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/config.ts",
-			"export": "expandTildePath",
+			"file": "packages/coding-agent/src/core/agent-retry-policy.ts",
+			"export": "RetryDecisionInput",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/config.ts",
-			"export": "getPackageJsonPath",
+			"file": "packages/coding-agent/src/core/agent-retry-policy.ts",
+			"export": "RetryPolicySettings",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-retry-policy.ts",
+			"export": "RetryProgress",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session-context-budget.ts",
+			"export": "compactionHighWatermark",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session-context-budget.ts",
+			"export": "MicrocompactionPressureInput",
 			"category": "same-file-only"
 		},
 		{
@@ -343,17 +408,7 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
-			"export": "CONTEXT_USAGE_CATEGORY_ORDER",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
 			"export": "EstimateContextUsageBreakdownInput",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
-			"export": "FIXED_CONTEXT_USAGE_CATEGORIES",
 			"category": "same-file-only"
 		},
 		{
@@ -397,46 +452,6 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "CreateGoalInput",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "CreateGoalParams",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "GetGoalInput",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "GetGoalParams",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "GoalToolDetails",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "resolveGoalToolOptions",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "UpdateGoalInput",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/goal/tools.ts",
-			"export": "UpdateGoalParams",
-			"category": "same-file-only"
-		},
-		{
 			"file": "packages/coding-agent/src/core/hooks/declarative-hooks.ts",
 			"export": "createHookId",
 			"category": "test-only"
@@ -457,23 +472,23 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/interactive-bash-boundary.ts",
-			"export": "workspaceSandboxProfileKey",
+			"file": "packages/coding-agent/src/core/image-generation/provider.ts",
+			"export": "ImageGenerationInput",
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/keybindings.ts",
-			"export": "KEYBINDINGS",
+			"file": "packages/coding-agent/src/core/image-generation/provider.ts",
+			"export": "MAX_GENERATED_IMAGE_BYTES",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/knowledge-context.ts",
-			"export": "buildKnowledgeContext",
-			"category": "test-only"
+			"file": "packages/coding-agent/src/core/image-generation/provider.ts",
+			"export": "ProviderImage",
+			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/knowledge-context.ts",
-			"export": "latestKnowledgeContext",
+			"file": "packages/coding-agent/src/core/interactive-bash-boundary.ts",
+			"export": "workspaceSandboxProfileKey",
 			"category": "test-only"
 		},
 		{
@@ -494,11 +509,6 @@
 		{
 			"file": "packages/coding-agent/src/core/large-tool-output.ts",
 			"export": "LARGE_TOOL_OUTPUT_MAX_CHARS",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/large-tool-output.ts",
-			"export": "persistToolOutputText",
 			"category": "test-only"
 		},
 		{
@@ -603,23 +613,8 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
-			"export": "MemoryReadParams",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
 			"export": "MemorySearchDetails",
 			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
-			"export": "MemorySearchParams",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
-			"export": "MemoryWriteParams",
-			"category": "zero-reference"
 		},
 		{
 			"file": "packages/coding-agent/src/core/memory/vault-types.ts",
@@ -644,7 +639,7 @@
 		{
 			"file": "packages/coding-agent/src/core/messages.ts",
 			"export": "bashExecutionToText",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/messages.ts",
@@ -697,14 +692,69 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "findSuggestedConfiguredSource",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "getNpmVersionRange",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "getSourceMatchKeyForInput",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "getSourceMatchKeyForSettings",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "isExactNpmVersion",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager/source-syntax.ts",
+			"export": "parseNpmSpec",
+			"category": "test-only"
+		},
+		{
 			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
-			"export": "MAX_AUTO_COMMAND_LENGTH",
+			"export": "compileAutoCommandRules",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "CompiledAutoCommandRule",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "matchAutoCommandRule",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "matchingAutoCommandRules",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "matchingCompiledAutoCommandRules",
 			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
 			"export": "MAX_AUTO_COMMAND_RULES",
 			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/git-curl-semantics.ts",
+			"export": "GitCurlAnalysisContext",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/permissions/grant-store.ts",
@@ -732,33 +782,38 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
-			"export": "ModelPermissionReviewerOptions",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
-			"export": "ModelReviewTransport",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
-			"export": "ModelReviewTransportError",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
-			"export": "ModelReviewTransportRequest",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
-			"export": "ModelReviewVerdict",
-			"category": "test-only"
-		},
-		{
 			"file": "packages/coding-agent/src/core/permissions/normalize.ts",
 			"export": "assertCompleteAction",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/option-scanner.ts",
+			"export": "ParsedOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/permission-rules.ts",
+			"export": "DEFAULT_PERMISSION_RULE_IDS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/permission-rules.ts",
+			"export": "isKnownCompatibilityRule",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/permission-rules.ts",
+			"export": "isSupportedToolRuleName",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/permission-rules.ts",
+			"export": "MAX_PERMISSION_RULE_ID_LENGTH",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/policy.ts",
+			"export": "PermissionDecisionRule",
 			"category": "test-only"
 		},
 		{
@@ -785,6 +840,21 @@
 			"file": "packages/coding-agent/src/core/permissions/sensitive-paths.ts",
 			"export": "getSensitiveFilesystemPaths",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/shell-analysis.ts",
+			"export": "mergeShellDisposition",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/shell-parser.ts",
+			"export": "ParsedShellSyntax",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/shell-parser.ts",
+			"export": "ShellParserStatus",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/permissions/user-reviewer.ts",
@@ -817,18 +887,8 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/resolve-config-value.ts",
-			"export": "getMissingConfigValueEnvVarNames",
-			"category": "same-file-only"
-		},
-		{
 			"file": "packages/coding-agent/src/core/runtime-recovery-materializer.ts",
 			"export": "MaterializedRuntimeRecovery",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/runtime-recovery.ts",
-			"export": "RuntimeToolResultMessageEvidence",
 			"category": "same-file-only"
 		},
 		{
@@ -838,33 +898,8 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/session-attachments.ts",
-			"export": "collectSessionDeliverableRoots",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-attachments.ts",
-			"export": "deliveredFileStorageName",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-attachments.ts",
-			"export": "getOwnedSessionDeliveredDir",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-attachments.ts",
 			"export": "SESSION_DELIVERED_DIR_NAME",
 			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-attachments.ts",
-			"export": "SESSION_WORK_MAX_AGE_MS",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-cwd.ts",
-			"export": "formatMissingSessionCwdError",
-			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/session-journal.ts",
@@ -893,11 +928,6 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/session-manager.ts",
-			"export": "computeCompactionTasksCarry",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/session-manager.ts",
 			"export": "findMostRecentSession",
 			"category": "test-only"
 		},
@@ -919,7 +949,7 @@
 		{
 			"file": "packages/coding-agent/src/core/set-tasks.ts",
 			"export": "SetTasksDetails",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/set-tasks.ts",
@@ -928,13 +958,8 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/set-tasks.ts",
-			"export": "SetTasksParams",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/set-tasks.ts",
 			"export": "TaskItem",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/settings-manager.ts",
@@ -969,7 +994,7 @@
 		{
 			"file": "packages/coding-agent/src/core/subagents/prompts.ts",
 			"export": "buildCommonAgentContract",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/subagents/scheduler.ts",
@@ -1014,11 +1039,6 @@
 		{
 			"file": "packages/coding-agent/src/core/submit-plan.ts",
 			"export": "SubmitPlanInput",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/submit-plan.ts",
-			"export": "SubmitPlanParams",
 			"category": "same-file-only"
 		},
 		{
@@ -1067,26 +1087,6 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
-			"export": "createDescribeImageTool",
-			"category": "barrel-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
-			"export": "DescribeImageToolDetails",
-			"category": "barrel-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
-			"export": "DescribeImageToolInput",
-			"category": "barrel-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
-			"export": "VISION_DESCRIPTION_PROMPT",
-			"category": "test-only"
-		},
-		{
 			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
 			"export": "AppliedEditsResult",
 			"category": "same-file-only"
@@ -1113,23 +1113,8 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "allToolNames",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/index.ts",
 			"export": "createAllTools",
 			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "createCodingToolDefinitions",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "createReadOnlyToolDefinitions",
-			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/tools/index.ts",
@@ -1138,18 +1123,8 @@
 		},
 		{
 			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "createToolDefinition",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "GOAL_TOOL_NAMES",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/index.ts",
-			"export": "ToolDef",
-			"category": "same-file-only"
+			"export": "ToolName",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/tools/output-accumulator.ts",
@@ -1167,33 +1142,33 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/core/tools/render-utils.ts",
-			"export": "linkPath",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/core/tools/render-utils.ts",
-			"export": "ToolRenderResultLike",
-			"category": "zero-reference"
-		},
-		{
-			"file": "packages/coding-agent/src/core/trust-manager.ts",
-			"export": "getProjectTrustParentPath",
-			"category": "same-file-only"
-		},
-		{
 			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
 			"export": "createWorkspaceSandboxHealthProbe",
 			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
-			"export": "SANDBOX_RUNTIME_VERSION",
+			"export": "SandboxHealthReportInput",
 			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
 			"export": "WorkspaceSandboxHealthDependencies",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox.ts",
+			"export": "createWorkspaceSandboxSelfTest",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox.ts",
+			"export": "WorkspaceSandboxNetworkTarget",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox.ts",
+			"export": "WorkspaceSandboxSelfTestDependencies",
 			"category": "test-only"
 		},
 		{
@@ -1215,11 +1190,6 @@
 			"file": "packages/coding-agent/src/modes/interactive/components/footer.ts",
 			"export": "formatCwdForFooter",
 			"category": "test-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts",
-			"export": "KeyTextFormatOptions",
-			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts",
@@ -1272,9 +1242,29 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-loaded-resources.ts",
+			"export": "LoadedResourcesFormatters",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-loaded-resources.ts",
+			"export": "LoadedResourcesView",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
 			"export": "formatResumeCommand",
 			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-resource-display.ts",
+			"export": "findSourceInfoForPath",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-resource-display.ts",
+			"export": "formatPathWithSource",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/coding-agent/src/modes/interactive/model-search.ts",
@@ -1297,54 +1287,14 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "getDefaultTheme",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "getThemeForRgbColor",
+			"file": "packages/coding-agent/src/modes/interactive/slash-command.ts",
+			"export": "SlashCommandId",
 			"category": "test-only"
 		},
 		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalAutoThemeDetectionOptions",
+			"file": "packages/coding-agent/src/modes/interactive/slash-command.ts",
+			"export": "SlashCommandMatch",
 			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalAutoThemeDetector",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalBackgroundThemeDetectionOptions",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalBackgroundThemeDetector",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalThemeDetection",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "TerminalThemeDetectionOptions",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
-			"export": "ThemeInfo",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/coding-agent/src/modes/rpc/rpc-types.ts",
-			"export": "RpcCommandType",
-			"category": "zero-reference"
 		},
 		{
 			"file": "packages/coding-agent/src/package-manager-cli.ts",
@@ -1355,6 +1305,56 @@
 			"file": "packages/coding-agent/src/package-manager-cli.ts",
 			"export": "PackageCommand",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/keybinding-hints.ts",
+			"export": "KeyTextFormatOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "getDefaultTheme",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "getThemeForRgbColor",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalAutoThemeDetectionOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalAutoThemeDetector",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalBackgroundThemeDetectionOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalBackgroundThemeDetector",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalThemeDetection",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "TerminalThemeDetectionOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/presentation/theme.ts",
+			"export": "ThemeInfo",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/coding-agent/src/utils/clipboard-image.ts",
@@ -1369,6 +1369,11 @@
 		{
 			"file": "packages/coding-agent/src/utils/clipboard-process.ts",
 			"export": "ClipboardCommandResult",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/external-editor.ts",
+			"export": "launchExternalEditor",
 			"category": "test-only"
 		},
 		{
@@ -1487,6 +1492,21 @@
 			"category": "test-only"
 		},
 		{
+			"file": "packages/desktop/src/main/browser-manager.ts",
+			"export": "BrowserToolActor",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/browser-native-select.ts",
+			"export": "NativeOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/browser-profile-store.ts",
+			"export": "browserRootFingerprint",
+			"category": "test-only"
+		},
+		{
 			"file": "packages/desktop/src/main/browser-profile-store.ts",
 			"export": "ImportedProfileIdentity",
 			"category": "same-file-only"
@@ -1498,8 +1518,38 @@
 		},
 		{
 			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "assertSourceReady",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
 			"export": "ImportedBrowserData",
-			"category": "same-file-only"
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "isTrustedBrowserRoot",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "TrustedBrowserRoot",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "TrustedRootFailure",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "TrustedRootResult",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "validateSelectedBrowserRoot",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/desktop/src/main/client-broker.ts",
@@ -1557,18 +1607,18 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/desktop/src/main/window-preferences.ts",
+			"export": "WindowPreferences",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/desktop/src/main/windows-sandbox-setup.ts",
 			"export": "WindowsSandboxSetupResult",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
-			"export": "AgentTreeNode",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
-			"export": "buildAgentTree",
+			"file": "packages/desktop/src/renderer/components/AgentConversation.tsx",
+			"export": "AgentConversationProps",
 			"category": "same-file-only"
 		},
 		{
@@ -1577,9 +1627,19 @@
 			"category": "test-only"
 		},
 		{
+			"file": "packages/desktop/src/renderer/components/browser-download-presentation.ts",
+			"export": "BrowserDownloadPresentation",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/desktop/src/renderer/components/ContextUsageRing.tsx",
 			"export": "ContextUsageRingProps",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ConversationInteractionCards.tsx",
+			"export": "InlineInteraction",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/ConversationQuoteContext.tsx",
@@ -1587,23 +1647,43 @@
 			"category": "test-only"
 		},
 		{
+			"file": "packages/desktop/src/renderer/components/ConversationScope.tsx",
+			"export": "ConversationScope",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/desktop/src/renderer/components/HomeProjectPicker.tsx",
 			"export": "HomeProjectPickerProps",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/knowledge-graph-labels.ts",
-			"export": "GraphLabel",
+			"file": "packages/desktop/src/renderer/components/knowledge-graph-camera.ts",
+			"export": "GraphPoint",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/KnowledgePanel.tsx",
-			"export": "knowledgeNoteMarkdown",
-			"category": "test-only"
+			"file": "packages/desktop/src/renderer/components/knowledge-graph-labels.ts",
+			"export": "GraphLabelOptions",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/markdown-lexer.ts",
 			"export": "MarkdownLexResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/markdown-resources.ts",
+			"export": "MarkdownSource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/MarkdownDocumentContext.tsx",
+			"export": "MarkdownEmbedBudget",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/MarkdownEmbed.tsx",
+			"export": "pdfEmbedPage",
 			"category": "same-file-only"
 		},
 		{
@@ -1630,6 +1710,51 @@
 			"file": "packages/desktop/src/renderer/components/NewTaskHome.tsx",
 			"export": "NewTaskRecentProject",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "RestorableDefault",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "RestorableDefaultState",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "ruleName",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "ruleResource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "RuleResource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "ruleResourceOf",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "RuleTranslate",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/permission-rule-presentation.ts",
+			"export": "ScopeRangeEntry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PermissionDecisionLabel.tsx",
+			"export": "PermissionDecisionLabel",
+			"category": "zero-reference"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/PlanCard.tsx",
@@ -1672,14 +1797,14 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/preview/ImageViewer.tsx",
-			"export": "ImageViewerProps",
+			"file": "packages/desktop/src/renderer/components/preview/HtmlViewer.tsx",
+			"export": "HtmlViewerProps",
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/preview/PdfViewer.tsx",
-			"export": "PdfViewerProps",
-			"category": "test-only"
+			"file": "packages/desktop/src/renderer/components/preview/ImageViewer.tsx",
+			"export": "ImageViewerProps",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/preview/pptx-selection.ts",
@@ -1689,7 +1814,7 @@
 		{
 			"file": "packages/desktop/src/renderer/components/preview/PptxViewer.tsx",
 			"export": "PptxViewerProps",
-			"category": "test-only"
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/preview/preview-bytes-cache.ts",
@@ -1732,6 +1857,11 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/desktop/src/renderer/components/preview/use-pdf-document.ts",
+			"export": "PdfDocumentState",
+			"category": "test-only"
+		},
+		{
 			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
 			"export": "ActivityWeek",
 			"category": "same-file-only"
@@ -1752,9 +1882,14 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/ReleaseNotesPopover.tsx",
+			"file": "packages/desktop/src/renderer/components/ReleaseNotesDialog.tsx",
 			"export": "RELEASE_NOTES_READ_VERSION_STORAGE_KEY",
 			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/RememberedPermissionsDialog.tsx",
+			"export": "RememberedGroups",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/review-model.ts",
@@ -1767,8 +1902,18 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/desktop/src/renderer/components/ReviewPanel.tsx",
+			"export": "FILE_LIST_BOTTOM_PADDING",
+			"category": "test-only"
+		},
+		{
 			"file": "packages/desktop/src/renderer/components/ScheduledTaskDialog.tsx",
 			"export": "ScheduledTaskDialogProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionActions.tsx",
+			"export": "ConversationActionsProps",
 			"category": "same-file-only"
 		},
 		{
@@ -1792,6 +1937,11 @@
 			"category": "same-file-only"
 		},
 		{
+			"file": "packages/desktop/src/renderer/components/SidebarListMotion.tsx",
+			"export": "SidebarListMotionProps",
+			"category": "same-file-only"
+		},
+		{
 			"file": "packages/desktop/src/renderer/components/SkillCreationDialog.tsx",
 			"export": "SkillProjectOption",
 			"category": "same-file-only"
@@ -1799,11 +1949,6 @@
 		{
 			"file": "packages/desktop/src/renderer/components/SystemNotice.tsx",
 			"export": "SystemNoticeCopy",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/desktop/src/renderer/components/SystemNotice.tsx",
-			"export": "SystemNoticeProps",
 			"category": "same-file-only"
 		},
 		{
@@ -1824,6 +1969,11 @@
 		{
 			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
 			"export": "CodeTurnPresentation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "ImageGenerationSegment",
 			"category": "same-file-only"
 		},
 		{
@@ -1873,11 +2023,6 @@
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/TurnRuntimeStatus.tsx",
-			"export": "advanceDisplayedTokens",
-			"category": "test-only"
-		},
-		{
-			"file": "packages/desktop/src/renderer/components/TurnRuntimeStatus.tsx",
 			"export": "estimateOutputTokens",
 			"category": "test-only"
 		},
@@ -1887,8 +2032,38 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/components/use-knowledge-links.ts",
-			"export": "KNOWLEDGE_CHANGED_EVENT",
+			"file": "packages/desktop/src/renderer/components/WorkspaceTabMenu.tsx",
+			"export": "WorkspaceTabMenuAnchor",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/WorkspaceTabMotion.tsx",
+			"export": "WorkspaceTabMotionProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/conversation-navigation.ts",
+			"export": "MARK_FAN_FALLOFF",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/conversation-navigation.ts",
+			"export": "MARK_FAN_WIDTH",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/conversation-navigation.ts",
+			"export": "MARK_OVERSCAN",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/conversation-navigation.ts",
+			"export": "MIN_TRACK_HEIGHT",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/conversation-navigation.ts",
+			"export": "NavigationMark",
 			"category": "same-file-only"
 		},
 		{
@@ -1905,6 +2080,16 @@
 			"file": "packages/desktop/src/renderer/general-preferences.ts",
 			"export": "MotionPreference",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/hooks/use-agent-history.ts",
+			"export": "mergeAgentItems",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/hooks/use-agent-history.ts",
+			"export": "refreshAgentItems",
+			"category": "test-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/hooks/use-conversation-plan-flow.ts",
@@ -1925,6 +2110,16 @@
 			"file": "packages/desktop/src/renderer/i18n.ts",
 			"export": "loadLocale",
 			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/icons.tsx",
+			"export": "Cpu",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/icons.tsx",
+			"export": "IconProps",
+			"category": "same-file-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
@@ -1967,11 +2162,6 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/session-view-utils.ts",
-			"export": "SessionIndicator",
-			"category": "same-file-only"
-		},
-		{
 			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
 			"export": "SessionProjectTarget",
 			"category": "same-file-only"
@@ -1992,18 +2182,28 @@
 			"category": "test-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/store/app-store.ts",
-			"export": "AgentTranscriptState",
+			"file": "packages/desktop/src/renderer/store/agent-catalog-store.ts",
+			"export": "AgentCatalogHandle",
 			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/agent-catalog-store.ts",
+			"export": "AgentCatalogSnapshot",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/agent-catalog-store.ts",
+			"export": "AgentCatalogStore",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/agent-catalog-store.ts",
+			"export": "mergeAgentCatalog",
+			"category": "barrel-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/store/reducer.ts",
 			"export": "eventSessionId",
-			"category": "same-file-only"
-		},
-		{
-			"file": "packages/desktop/src/renderer/store/reducer.ts",
-			"export": "MutableAgentTranscriptState",
 			"category": "same-file-only"
 		},
 		{
@@ -2037,8 +2237,53 @@
 			"category": "same-file-only"
 		},
 		{
-			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
-			"export": "AgentTab",
+			"file": "packages/desktop/src/renderer/use-workspace-layout.ts",
+			"export": "reconcileWorkspaceChat",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/use-workspace-layout.ts",
+			"export": "seedWorkspaceLayout",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-layout-storage.ts",
+			"export": "serializeWorkspaceLayout",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-layout-storage.ts",
+			"export": "WORKSPACE_LAYOUT_STORAGE_KEY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "calculateWorkspaceTabWidth",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "visibleWorkspaceTabElements",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "WORKSPACE_TAB_MAX_WIDTH",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "WORKSPACE_TAB_MIN_WIDTH",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "WORKSPACE_TAB_WIDTH_PROPERTY",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tab-sizing.ts",
+			"export": "WorkspaceTabWidthInput",
 			"category": "same-file-only"
 		},
 		{
@@ -2049,7 +2294,7 @@
 		{
 			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
 			"export": "ChatTab",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
@@ -2104,7 +2349,7 @@
 		{
 			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
 			"export": "ToolStrip",
-			"category": "same-file-only"
+			"category": "test-only"
 		},
 		{
 			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
@@ -2119,6 +2364,11 @@
 		{
 			"file": "packages/desktop/src/shared/desktop-api.ts",
 			"export": "DESKTOP_CHANGELOG_MAX_RELEASES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopBrowserImportDiagnostic",
 			"category": "same-file-only"
 		},
 		{
@@ -2210,11 +2460,6 @@
 			"file": "packages/tui/src/utils.ts",
 			"export": "extractAnsiCode",
 			"category": "same-file-only"
-		},
-		{
-			"file": "packages/tui/src/utils.ts",
-			"export": "isPunctuationChar",
-			"category": "zero-reference"
 		},
 		{
 			"file": "packages/tui/src/word-navigation.ts",
