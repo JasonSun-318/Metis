@@ -9,7 +9,7 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { getAgentDir, getMetisEnv, getPackageDir, getSessionDirOverride, VERSION } from "./config.ts";
+import { getAgentDir, getMetisEnv, getSessionDirOverride, VERSION } from "./config.ts";
 import { DEFAULT_AGENT_MODE } from "./core/agent-mode.ts";
 import {
 	type AgentSessionRuntime,
@@ -60,7 +60,6 @@ import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
-import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = 'Hint: Start without extensions using "metis -ne".';
 
@@ -611,10 +610,6 @@ export async function main(args: string[], options?: MainOptions) {
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(getMetisEnv("OFFLINE"));
 	if (offlineMode) {
 		process.env.METIS_OFFLINE = "1";
-	}
-
-	if (process.platform === "win32") {
-		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
 
 	const cwd = process.cwd();
