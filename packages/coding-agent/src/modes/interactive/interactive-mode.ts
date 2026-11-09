@@ -187,8 +187,6 @@ import {
 	buildScopeGroups,
 	formatDiagnostics,
 	formatScopeGroups,
-	getDisplaySourceInfo,
-	getScopeGroup,
 	type PathFormatHelpers,
 	type ResourceItem,
 	type ScopeGroup,
@@ -1233,22 +1231,6 @@ export class InteractiveMode {
 		},
 	): string {
 		return formatScopeGroups(groups, options);
-	}
-
-	// Compatibility seam kept for phase2-resource-labels-compat.test.ts; production
-	// callers use the module functions directly.
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: exercised by the resource label compatibility test
-	private getDisplaySourceInfo(sourceInfo?: SourceInfo): {
-		label: string;
-		scopeLabel?: string;
-		color: "accent" | "muted";
-	} {
-		return getDisplaySourceInfo(sourceInfo);
-	}
-
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: exercised by the resource label compatibility test
-	private getScopeGroup(sourceInfo?: SourceInfo): "user" | "project" | "path" {
-		return getScopeGroup(sourceInfo);
 	}
 
 	private formatDiagnostics(diagnostics: readonly ResourceDiagnostic[], sourceInfos: Map<string, SourceInfo>): string {

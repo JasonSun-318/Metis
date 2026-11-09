@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SourceInfo } from "../src/core/source-info.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
+import { getDisplaySourceInfo, getScopeGroup } from "../src/modes/interactive/interactive-resource-display.ts";
 
 vi.mock("node:os", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:os")>();
@@ -28,12 +29,6 @@ type ResourceLabelMethods = {
 	getShortPath(resourcePath: string, sourceInfo?: SourceInfo): string;
 	getCompactPathLabel(resourcePath: string, sourceInfo?: SourceInfo): string;
 	getCompactExtensionLabels(extensions: Array<{ path: string; sourceInfo?: SourceInfo }>): string[];
-	getDisplaySourceInfo(sourceInfo?: SourceInfo): {
-		label: string;
-		scopeLabel?: string;
-		color: "accent" | "muted";
-	};
-	getScopeGroup(sourceInfo?: SourceInfo): "user" | "project" | "path";
 };
 
 type TestMode = ResourceLabelMethods & { setCwd(cwd: string): void };
@@ -446,57 +441,51 @@ describe("InteractiveMode compact extension-list compatibility", () => {
 
 describe("InteractiveMode resource scope label compatibility", () => {
 	it("keeps local, CLI, package, unknown and missing scope labels", () => {
-		const mode = createMode("/tmp/project");
-
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "local", scope: "user" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "local", scope: "user" }))).toEqual({
 			label: "user",
 			color: "muted",
 		});
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "local", scope: "project" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "local", scope: "project" }))).toEqual({
 			label: "project",
 			color: "muted",
 		});
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "local", scope: "temporary" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "local", scope: "temporary" }))).toEqual({
 			label: "path",
 			scopeLabel: "temp",
 			color: "muted",
 		});
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "cli", scope: "temporary" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "cli", scope: "temporary" }))).toEqual({
 			label: "path",
 			scopeLabel: "temp",
 			color: "muted",
 		});
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "npm:pkg", scope: "user", origin: "package" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "npm:pkg", scope: "user", origin: "package" }))).toEqual({
 			label: "npm:pkg",
 			scopeLabel: "user",
 			color: "accent",
 		});
 		expect(
-			mode.getDisplaySourceInfo(sourceInfo({ source: "git:github.com/a/b", scope: "temporary", origin: "package" })),
+			getDisplaySourceInfo(sourceInfo({ source: "git:github.com/a/b", scope: "temporary", origin: "package" })),
 		).toEqual({
 			label: "git:github.com/a/b",
 			scopeLabel: "temp",
 			color: "accent",
 		});
-		expect(mode.getDisplaySourceInfo(sourceInfo({ source: "custom:thing", scope: "temporary" }))).toEqual({
+		expect(getDisplaySourceInfo(sourceInfo({ source: "custom:thing", scope: "temporary" }))).toEqual({
 			label: "custom:thing",
 			scopeLabel: "temp",
 			color: "accent",
 		});
-		expect(mode.getDisplaySourceInfo()).toEqual({ label: "project", color: "muted" });
+		expect(getDisplaySourceInfo()).toEqual({ label: "project", color: "muted" });
 	});
 
 	it("keeps scope grouping for user, project, temporary, CLI and unknown scopes", () => {
-		const mode = createMode("/tmp/project");
-
-		expect(mode.getScopeGroup()).toBe("project");
-		expect(mode.getScopeGroup(sourceInfo({ source: "local", scope: "user" }))).toBe("user");
-		expect(mode.getScopeGroup(sourceInfo({ source: "local", scope: "project" }))).toBe("project");
-		expect(mode.getScopeGroup(sourceInfo({ source: "local", scope: "temporary" }))).toBe("path");
-		expect(mode.getScopeGroup(sourceInfo({ source: "cli", scope: "project" }))).toBe("path");
-		expect(mode.getScopeGroup(sourceInfo({ source: "npm:pkg", scope: "temporary" }))).toBe("path");
-		expect(mode.getScopeGroup(sourceInfo({ source: "custom:thing", scope: "other" as SourceInfo["scope"] }))).toBe(
-			"path",
-		);
+		expect(getScopeGroup()).toBe("project");
+		expect(getScopeGroup(sourceInfo({ source: "local", scope: "user" }))).toBe("user");
+		expect(getScopeGroup(sourceInfo({ source: "local", scope: "project" }))).toBe("project");
+		expect(getScopeGroup(sourceInfo({ source: "local", scope: "temporary" }))).toBe("path");
+		expect(getScopeGroup(sourceInfo({ source: "cli", scope: "project" }))).toBe("path");
+		expect(getScopeGroup(sourceInfo({ source: "npm:pkg", scope: "temporary" }))).toBe("path");
+		expect(getScopeGroup(sourceInfo({ source: "custom:thing", scope: "other" as SourceInfo["scope"] }))).toBe("path");
 	});
 });

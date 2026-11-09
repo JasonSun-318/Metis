@@ -180,6 +180,28 @@ selected public queue, session and tool-render signatures. Root `tsgo --noEmit`
 checks those assertions, including negative assignments. They supplement the
 export-surface gate; they are not exhaustive signature compatibility checks.
 
+### Retention policy for type-debt counts
+
+Not every count is actionable, and a lower total is not an acceptance criterion.
+Treat these categories as deliberately retained unless the feature they belong to
+changes:
+
+- Non-null assertions that follow an explicit existence check, and `any` at
+  protocol or extension boundaries, document an invariant or an intentional
+  escape hatch. Replacing them with optional chaining or fallback defaults changes
+  runtime behaviour instead of cleaning types.
+- `useExhaustiveDependencies` suppressions record a deliberate dependency trim;
+  restoring the dependency re-runs the effect (duplicate requests, restarted
+  timers, extra renders).
+- `noArrayIndexKey` suppressions on append-only transcript lists keep positional
+  identity on purpose; item keys would remount drawers and lose local state.
+- `noConfusingVoidType` on `ExtensionHandler` keeps handlers that return a value
+  assignable. Switching the union to `undefined` rejects existing extension code.
+
+Prefer targeted fixes while already editing a file over repository-wide debt
+clearing. Each reduction must keep behaviour identical and be verified with the
+package tests in addition to the full gate.
+
 ## Advisory presentation boundary report
 
 `npm run check:presentation-boundaries` checks direct dependencies from

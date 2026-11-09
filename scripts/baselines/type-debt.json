@@ -882,11 +882,6 @@
 			"count": 6
 		},
 		{
-			"file": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
-			"category": "suppression:lint/correctness/noUnusedPrivateClassMembers",
-			"count": 2
-		},
-		{
 			"file": "packages/coding-agent/src/modes/rpc/rpc-client.ts",
 			"category": "non-null-assertion",
 			"count": 1
@@ -1240,11 +1235,6 @@
 			"file": "packages/desktop/src/renderer/components/ModelSettingsPanel.tsx",
 			"category": "suppression:lint/correctness/useExhaustiveDependencies",
 			"count": 1
-		},
-		{
-			"file": "packages/desktop/src/renderer/components/PermissionDecisionLabel.tsx",
-			"category": "non-null-assertion",
-			"count": 2
 		},
 		{
 			"file": "packages/desktop/src/renderer/components/PermissionRuleDialog.tsx",
