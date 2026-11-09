@@ -92,10 +92,3 @@
 .permission-approval-split-selector .menu-select-value { display: none; }
 .permission-approval-panel footer kbd { margin-left: 3px; font-size: 10px; opacity: .7; }
 .permission-approval-panel .error-copy { margin: 6px 0 0; font-size: 12px; }
-
-.tool-permission-source {
-	color: var(--text-muted);
-	font-size: 11px;
-	font-weight: 400;
-	white-space: nowrap;
-}
