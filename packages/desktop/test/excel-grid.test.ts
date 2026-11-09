@@ -5,10 +5,12 @@ import {
 	excelSelectionContext,
 	expandExcelSelection,
 	mergesInRowRange,
+	offsetIndex,
 	paintedCellsForRow,
 	parseExcelBytes,
 	parseSheetView,
 	parseWorkbook,
+	prefixOffsets,
 	SpreadsheetTooLargeError,
 } from "../src/renderer/components/preview/excel-grid.ts";
 
@@ -134,6 +136,30 @@ describe("spreadsheet preview limits", () => {
 		expect(view.merges).toEqual([]);
 	});
 
+	it("uses the workbook column widths and row heights", () => {
+		const sheet = sheetOf({
+			A1: cell("a"),
+			B1: cell("b"),
+			"!cols": [{ wpx: 96 }, { wpx: 160 }],
+			"!rows": [{ hpt: 78 }],
+		});
+		const view = parseSheetView("Data", sheet);
+		expect(view.columnWidths).toEqual([96, 160]);
+		expect(view.rowHeights).toEqual([104]);
+	});
+
+	it("grows default-height rows enough to wrap long text", () => {
+		const short = parseSheetView("Data", sheetOf({ A1: cell("hi") }));
+		expect(short.rowHeights).toEqual([28]);
+		const long = parseSheetView("Data", sheetOf({ A1: cell("很长的说明文字".repeat(30)) }));
+		expect(long.rowHeights[0]).toBeGreaterThan(28);
+	});
+
+	it("keeps stored row heights even when text is long", () => {
+		const sheet = sheetOf({ A1: cell("很长的说明文字".repeat(30)), "!rows": [{ hpt: 20 }] });
+		expect(parseSheetView("Data", sheet).rowHeights).toEqual([27]);
+	});
+
 	it("rejects a workbook whose sheets together exceed the cell budget", () => {
 		const workbook = {
 			SheetNames: ["A", "B"],
@@ -142,5 +168,18 @@ describe("spreadsheet preview limits", () => {
 		expect(() => parseWorkbook(workbook, { ...DEFAULT_SPREADSHEET_LIMITS, maxCells: 2 })).toThrow(
 			expect.objectContaining({ reason: "cells" }),
 		);
+	});
+});
+
+describe("layout offsets", () => {
+	it("accumulates sizes and resolves positions to indices", () => {
+		const offsets = prefixOffsets([96, 156, 156]);
+		expect(offsets).toEqual([0, 96, 252, 408]);
+		expect(offsetIndex(offsets, 0)).toBe(0);
+		expect(offsetIndex(offsets, 95)).toBe(0);
+		expect(offsetIndex(offsets, 96)).toBe(1);
+		expect(offsetIndex(offsets, 251)).toBe(1);
+		expect(offsetIndex(offsets, 252)).toBe(2);
+		expect(offsetIndex(offsets, 10000)).toBe(3);
 	});
 });

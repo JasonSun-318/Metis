@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MagnifyingGlass, SpinnerGap, Table } from "../../icons.tsx";
 import {
@@ -9,8 +9,10 @@ import {
 	excelSelectionContext,
 	expandExcelSelection,
 	mergesInRowRange,
+	offsetIndex,
 	paintedCellsForRow,
 	parseExcelBytes,
+	prefixOffsets,
 	SpreadsheetTooLargeError,
 } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
@@ -27,8 +29,8 @@ export interface ExcelViewerProps {
 	readonly onReveal?: () => void;
 }
 
-const ROW_HEIGHT = 28;
-const COL_WIDTH = 88;
+const DEFAULT_ROW_HEIGHT = 28;
+const DEFAULT_COL_WIDTH = 88;
 const INDEX_WIDTH = 44;
 
 function getColumnLetter(colIndex: number): string {
@@ -85,9 +87,18 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 
 	const sheet = workbook?.sheets[activeSheetName];
 	const scale = zoom / 100;
-	const rowHeight = Math.max(18, Math.round(ROW_HEIGHT * scale));
-	const colWidth = Math.max(56, Math.round(COL_WIDTH * scale));
 	const indexWidth = Math.max(36, Math.round(INDEX_WIDTH * scale));
+	const defaultRowHeight = Math.max(18, Math.round(DEFAULT_ROW_HEIGHT * scale));
+	const columnWidths = useMemo(
+		() => (sheet?.columnWidths ?? []).map((width) => Math.max(24, Math.round(width * scale))),
+		[sheet, scale],
+	);
+	const rowHeights = useMemo(
+		() => (sheet?.rowHeights ?? []).map((height) => Math.max(12, Math.round(height * scale))),
+		[sheet, scale],
+	);
+	const columnOffsets = useMemo(() => prefixOffsets(columnWidths), [columnWidths]);
+	const rowOffsets = useMemo(() => prefixOffsets(rowHeights), [rowHeights]);
 	const query = searchQuery.trim().toLowerCase();
 	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): New workbook bytes invalidate the previous cell selection.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(activeSheetName): Switching sheets clears the previous cell selection and scroll position.
@@ -102,7 +113,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 	const virtualizer = useVirtualizer({
 		count: sheet?.rowCount ?? 0,
 		getScrollElement: () => viewportRef.current,
-		estimateSize: () => rowHeight,
+		estimateSize: (index) => rowHeights[index] ?? defaultRowHeight,
 		overscan: 16,
 	});
 
@@ -143,11 +154,11 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 			if (!body) return null;
 			const rect = body.getBoundingClientRect();
 			return {
-				row: Math.max(0, Math.min(sheet.rowCount - 1, Math.floor((y - rect.top) / rowHeight))),
-				col: Math.max(0, Math.min(sheet.colCount - 1, Math.floor((x - rect.left - indexWidth) / colWidth))),
+				row: Math.max(0, Math.min(sheet.rowCount - 1, offsetIndex(rowOffsets, y - rect.top))),
+				col: Math.max(0, Math.min(sheet.colCount - 1, offsetIndex(columnOffsets, x - rect.left - indexWidth))),
 			};
 		},
-		[colWidth, indexWidth, rowHeight, sheet],
+		[columnOffsets, indexWidth, rowOffsets, sheet],
 	);
 	const moveSelection = useCallback(
 		(x: number, y: number) => {
@@ -176,7 +187,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 				const rect = viewport.getBoundingClientRect(),
 					{ x, y } = pointer.current;
 				const dx = x < rect.left + 24 ? -12 : x > rect.right - 24 ? 12 : 0;
-				const dy = y < rect.top + rowHeight + 24 ? -12 : y > rect.bottom - 24 ? 12 : 0;
+				const dy = y < rect.top + defaultRowHeight + 24 ? -12 : y > rect.bottom - 24 ? 12 : 0;
 				if (dx || dy) {
 					viewport.scrollLeft += dx;
 					viewport.scrollTop += dy;
@@ -187,14 +198,14 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		};
 		if (dragging) frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
-	}, [dragging, moveSelection, rowHeight]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies(rowHeight): Zoom changes require measuring virtual rows again.
+	}, [defaultRowHeight, dragging, moveSelection]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(rowHeights): Zoom and sheet changes invalidate the measured row sizes.
 	useEffect(() => {
 		virtualizer.measure();
-	}, [rowHeight, virtualizer]);
+	}, [rowHeights, virtualizer]);
 	const visibleRows = virtualizer.getVirtualItems();
 	const sheetNames = workbook?.sheetNames ?? [];
-	const gridWidth = sheet ? indexWidth + sheet.colCount * colWidth : 0;
+	const gridWidth = sheet ? indexWidth + (columnOffsets[sheet.colCount] ?? 0) : 0;
 	const firstVisibleRow = visibleRows[0]?.index ?? 0;
 	const lastVisibleRow = visibleRows[visibleRows.length - 1]?.index ?? 0;
 	const visibleMerges = sheet ? mergesInRowRange(sheet.merges, firstVisibleRow, lastVisibleRow) : [];
@@ -332,14 +343,23 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 						<span>{t("Empty sheet")}</span>
 					</div>
 				) : (
-					<div className="excel-grid" style={{ width: gridWidth, height: rowHeight + virtualizer.getTotalSize() }}>
-						<div className="excel-grid-header" style={{ height: rowHeight, width: gridWidth }}>
+					<div
+						className="excel-grid"
+						style={{ width: gridWidth, height: defaultRowHeight + virtualizer.getTotalSize() }}
+					>
+						<div className="excel-grid-header" style={{ height: defaultRowHeight, width: gridWidth }}>
 							<div className="excel-corner-cell" style={{ width: indexWidth, minWidth: indexWidth }}>
 								#
 							</div>
 							{Array.from({ length: sheet.colCount }, (_, col) => (
-								/* biome-ignore lint/suspicious/noArrayIndexKey: Columns have fixed worksheet positions and do not reorder within a sheet. */
-								<div className="excel-col-header" key={col} style={{ width: colWidth, minWidth: colWidth }}>
+								<div
+									className="excel-col-header"
+									key={getColumnLetter(col + sheet.startCol)}
+									style={{
+										width: columnWidths[col] ?? DEFAULT_COL_WIDTH,
+										minWidth: columnWidths[col] ?? DEFAULT_COL_WIDTH,
+									}}
+								>
 									{getColumnLetter(col + sheet.startCol)}
 								</div>
 							))}
@@ -350,10 +370,10 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 									ref={rangeAnchor}
 									className="excel-range-selection"
 									style={{
-										top: range.startRow * rowHeight,
-										left: indexWidth + range.startCol * colWidth,
-										height: (range.endRow - range.startRow + 1) * rowHeight,
-										width: (range.endCol - range.startCol + 1) * colWidth,
+										top: rowOffsets[range.startRow] ?? 0,
+										left: indexWidth + (columnOffsets[range.startCol] ?? 0),
+										height: (rowOffsets[range.endRow + 1] ?? 0) - (rowOffsets[range.startRow] ?? 0),
+										width: (columnOffsets[range.endCol + 1] ?? 0) - (columnOffsets[range.startCol] ?? 0),
 									}}
 								/>
 							)}
@@ -373,7 +393,10 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 											<div
 												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}`}
 												key={cell.col}
-												style={{ width: colWidth, minWidth: colWidth }}
+												style={{
+													width: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
+													minWidth: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
+												}}
 												title={merged ? undefined : cell.formatted}
 											>
 												{merged ? "" : cell.formatted}
@@ -389,10 +412,11 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 										className={`excel-merge${match ? " is-search-match" : ""}`}
 										key={`${merge.row}:${merge.col}`}
 										style={{
-											height: merge.rowSpan * rowHeight,
-											left: indexWidth + merge.col * colWidth,
-											top: merge.row * rowHeight,
-											width: merge.colSpan * colWidth,
+											height: (rowOffsets[merge.row + merge.rowSpan] ?? 0) - (rowOffsets[merge.row] ?? 0),
+											left: indexWidth + (columnOffsets[merge.col] ?? 0),
+											top: rowOffsets[merge.row] ?? 0,
+											width:
+												(columnOffsets[merge.col + merge.colSpan] ?? 0) - (columnOffsets[merge.col] ?? 0),
 										}}
 										title={merge.formatted}
 									>

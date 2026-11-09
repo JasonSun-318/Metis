@@ -3728,6 +3728,14 @@ classes so their inline layout wins the cascade. */
 	flex: 0 0 auto;
 }
 
+.excel-cell,
+.excel-merge {
+	/* Excel wraps text and lets the stored row height decide how many lines stay
+	   visible; clipping without wrapping hid the rest of long paragraphs. */
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
 .excel-cell.is-covered {
 	visibility: hidden;
 }

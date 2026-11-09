@@ -63,6 +63,10 @@ export interface ExcelSheetView {
 	readonly cells: ReadonlyMap<string, ExcelCellView>;
 	readonly hidden: ReadonlySet<string>;
 	readonly merges: readonly ExcelMergeView[];
+	/** Column widths in CSS pixels, taken from the workbook when it stores them. */
+	readonly columnWidths: readonly number[];
+	/** Row heights in CSS pixels, stored by the workbook or estimated from wrapped text. */
+	readonly rowHeights: readonly number[];
 }
 
 export interface ExcelWorkbookView {
@@ -105,6 +109,53 @@ export function mergesInRowRange(
 }
 
 const CELL_ADDRESS = /^[A-Za-z]{1,3}[0-9]{1,7}$/;
+const DEFAULT_COLUMN_WIDTH = 112;
+const MIN_COLUMN_WIDTH = 40;
+const MAX_COLUMN_WIDTH = 480;
+const DEFAULT_ROW_HEIGHT = 28;
+const MIN_ROW_HEIGHT = 16;
+const MAX_ROW_HEIGHT = 400;
+const CELL_LINE_HEIGHT = 16;
+const CELL_VERTICAL_PADDING = 8;
+const CELL_HORIZONTAL_PADDING = 16;
+const NARROW_CHARACTER_WIDTH = 7;
+const WIDE_CHARACTER_WIDTH = 11;
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, value));
+}
+
+/** Cumulative pixel offsets for a list of sizes, with a trailing total. */
+export function prefixOffsets(sizes: readonly number[]): readonly number[] {
+	const offsets = new Array<number>(sizes.length + 1);
+	offsets[0] = 0;
+	for (let index = 0; index < sizes.length; index += 1) {
+		offsets[index + 1] = (offsets[index] ?? 0) + (sizes[index] ?? 0);
+	}
+	return offsets;
+}
+
+/** Greatest index whose offset is at or before the given position. */
+export function offsetIndex(offsets: readonly number[], position: number): number {
+	let low = 0;
+	let high = Math.max(0, offsets.length - 1);
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+		if ((offsets[middle] ?? 0) <= position) low = middle;
+		else high = middle - 1;
+	}
+	return low;
+}
+
+/** Approximates the rendered width of one line of the 11px monospace cell font. */
+function measureTextWidth(text: string): number {
+	let width = 0;
+	for (const character of text) {
+		// CJK ideographs and full-width punctuation occupy a full monospace cell.
+		width += /[\u2e80-\u9fff\uff00-\uffef]/.test(character) ? WIDE_CHARACTER_WIDTH : NARROW_CHARACTER_WIDTH;
+	}
+	return width;
+}
 
 function decodeCellAddress(key: string): { row: number; column: number } | undefined {
 	if (!CELL_ADDRESS.test(key)) return undefined;
@@ -132,6 +183,8 @@ function emptySheetView(name: string): ExcelSheetView {
 		cells: new Map(),
 		hidden: new Set(),
 		merges: [],
+		columnWidths: [],
+		rowHeights: [],
 	};
 }
 
@@ -217,7 +270,49 @@ export function parseSheetView(
 			}
 		}
 	}
-	return { name, startRow, startCol, rowCount, colCount, cells, hidden, merges };
+	const sheetLayout = sheet as unknown as {
+		readonly "!cols"?: readonly ({ readonly wpx?: number; readonly wch?: number } | undefined)[];
+		readonly "!rows"?: readonly ({ readonly hpt?: number } | undefined)[];
+	};
+	const columnWidths = Array.from({ length: colCount }, (_, index) => {
+		const stored = sheetLayout["!cols"]?.[startCol + index];
+		const pixels =
+			typeof stored?.wpx === "number"
+				? stored.wpx
+				: typeof stored?.wch === "number"
+					? stored.wch * 7 + 5
+					: DEFAULT_COLUMN_WIDTH;
+		return clamp(Math.round(pixels), MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
+	});
+	const storedRows = sheetLayout["!rows"];
+	const rowHeights = Array.from({ length: rowCount }, (_, index) => {
+		const points = storedRows?.[startRow + index]?.hpt;
+		return points !== undefined && points > 0
+			? clamp(Math.round((points * 4) / 3), MIN_ROW_HEIGHT, MAX_ROW_HEIGHT)
+			: DEFAULT_ROW_HEIGHT;
+	});
+	// Rows the workbook leaves on the default height grow when wrapped text needs
+	// more lines; stored heights are authoritative because Excel already wrapped.
+	for (let index = 0; index < rowCount; index += 1) {
+		if (storedRows?.[startRow + index]?.hpt) continue;
+		let required = DEFAULT_ROW_HEIGHT;
+		for (let column = 0; column < colCount; column += 1) {
+			const cell = cells.get(cellKey(index, column));
+			if (!cell) continue;
+			let available = 0;
+			for (let offset = 0; offset < (cell.colSpan ?? 1); offset += 1) {
+				available += columnWidths[column + offset] ?? DEFAULT_COLUMN_WIDTH;
+			}
+			const lineWidth = Math.max(available - CELL_HORIZONTAL_PADDING, MIN_COLUMN_WIDTH);
+			const lines = Math.max(1, Math.ceil(measureTextWidth(cell.formatted) / lineWidth));
+			required = Math.max(
+				required,
+				clamp(lines * CELL_LINE_HEIGHT + CELL_VERTICAL_PADDING, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT),
+			);
+		}
+		rowHeights[index] = required;
+	}
+	return { name, startRow, startCol, rowCount, colCount, cells, hidden, merges, columnWidths, rowHeights };
 }
 
 export function parseWorkbook(
@@ -245,8 +340,8 @@ export function parseExcelBytes(
 ): ExcelWorkbookView {
 	const isCsv = fileName.toLowerCase().endsWith(".csv");
 	const workbook = isCsv
-		? XLSX.read(new TextDecoder().decode(bytes), { type: "string", cellDates: true })
-		: XLSX.read(bytes, { type: "array", cellDates: true });
+		? XLSX.read(new TextDecoder().decode(bytes), { type: "string", cellDates: true, cellStyles: true })
+		: XLSX.read(bytes, { type: "array", cellDates: true, cellStyles: true });
 	return parseWorkbook(workbook, limits);
 }
 
