@@ -44,6 +44,8 @@ export interface ExcelCellView {
 	readonly type?: string;
 	readonly rowSpan?: number;
 	readonly colSpan?: number;
+	/** Solid fill as `#RRGGBB`; styles other than solid fills are not exposed. */
+	readonly fill?: string;
 }
 
 export interface ExcelMergeView {
@@ -52,6 +54,7 @@ export interface ExcelMergeView {
 	readonly rowSpan: number;
 	readonly colSpan: number;
 	readonly formatted: string;
+	readonly fill?: string;
 }
 
 export interface ExcelSheetView {
@@ -86,6 +89,7 @@ export interface ExcelPaintedCell {
 	readonly rowSpan: number;
 	readonly colSpan: number;
 	readonly type?: string;
+	readonly fill?: string;
 }
 
 export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly ExcelPaintedCell[] {
@@ -98,6 +102,7 @@ export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly
 			rowSpan: cell?.rowSpan ?? 1,
 			colSpan: cell?.colSpan ?? 1,
 			...(cell?.type ? { type: cell.type } : {}),
+			...(cell?.fill ? { fill: cell.fill } : {}),
 		};
 	});
 }
@@ -147,6 +152,28 @@ export function offsetIndex(offsets: readonly number[], position: number): numbe
 		else high = middle - 1;
 	}
 	return low;
+}
+
+function cellFill(cell: XLSX.CellObject): string | undefined {
+	const style = (
+		cell as unknown as {
+			readonly s?: { readonly patternType?: string; readonly fgColor?: { readonly rgb?: string } };
+		}
+	).s;
+	if (!style || style.patternType !== "solid") return undefined;
+	const rgb = style.fgColor?.rgb;
+	if (typeof rgb !== "string") return undefined;
+	const hex = rgb.length === 8 ? rgb.slice(2) : rgb;
+	return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex.toUpperCase()}` : undefined;
+}
+
+/** Black or white text, whichever contrasts with the fill. */
+export function readableTextColor(fill: string): string {
+	const red = Number.parseInt(fill.slice(1, 3), 16);
+	const green = Number.parseInt(fill.slice(3, 5), 16);
+	const blue = Number.parseInt(fill.slice(5, 7), 16);
+	const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+	return luminance > 0.6 ? "#111111" : "#FFFFFF";
 }
 
 /** Approximates the rendered width of one line of the 11px monospace cell font. */
@@ -241,11 +268,13 @@ export function parseSheetView(
 		const formatted = cell.w ?? (cell.v !== undefined ? String(cell.v) : "");
 		if (formatted === "" && !cell.f) continue;
 		if (cells.size >= limits.maxCells) throw new SpreadsheetTooLargeError("cells");
+		const fill = cellFill(cell);
 		cells.set(cellKey(row - startRow, column - startCol), {
 			formatted,
 			value: cell.v instanceof Date ? cell.v.toISOString() : (cell.v ?? null),
 			type: cell.t,
 			...(cell.f ? { formula: cell.f } : {}),
+			...(fill ? { fill } : {}),
 		});
 	}
 	const merges: ExcelMergeView[] = [];
@@ -262,7 +291,14 @@ export function parseSheetView(
 			colSpan: colSpan > 1 ? colSpan : undefined,
 		});
 		if (rowSpan > 1 || colSpan > 1) {
-			merges.push({ row, col, rowSpan, colSpan, formatted: existing.formatted });
+			merges.push({
+				row,
+				col,
+				rowSpan,
+				colSpan,
+				formatted: existing.formatted,
+				...(existing.fill ? { fill: existing.fill } : {}),
+			});
 		}
 		for (let mergedRow = row; mergedRow < row + rowSpan; mergedRow += 1) {
 			for (let mergedCol = col; mergedCol < col + colSpan; mergedCol += 1) {

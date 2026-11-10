@@ -11,6 +11,7 @@ import {
 	parseSheetView,
 	parseWorkbook,
 	prefixOffsets,
+	readableTextColor,
 	SpreadsheetTooLargeError,
 } from "../src/renderer/components/preview/excel-grid.ts";
 
@@ -181,5 +182,37 @@ describe("layout offsets", () => {
 		expect(offsetIndex(offsets, 251)).toBe(1);
 		expect(offsetIndex(offsets, 252)).toBe(2);
 		expect(offsetIndex(offsets, 10000)).toBe(3);
+	});
+});
+
+describe("cell fills", () => {
+	const sheetOf = (values: Record<string, unknown>): XLSX.WorkSheet => values as unknown as XLSX.WorkSheet;
+	const styled = (rgb: string) => ({
+		t: "s" as const,
+		v: "x",
+		s: { patternType: "solid", fgColor: { rgb } },
+	});
+
+	it("reads solid fills, including 8-digit ARGB values", () => {
+		const view = parseSheetView(
+			"Data",
+			sheetOf({ A1: styled("FFF2CC"), B1: styled("FF1F3864"), C1: { t: "s", v: "plain" } }),
+		);
+		expect(view.cells.get("0:0")?.fill).toBe("#FFF2CC");
+		expect(view.cells.get("0:1")?.fill).toBe("#1F3864");
+		expect(view.cells.get("0:2")?.fill).toBeUndefined();
+	});
+
+	it("carries the anchor fill onto merged overlays", () => {
+		const view = parseSheetView(
+			"Data",
+			sheetOf({ A1: styled("DEEBF7"), "!merges": [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }] }),
+		);
+		expect(view.merges[0]).toMatchObject({ fill: "#DEEBF7", colSpan: 2 });
+	});
+
+	it("picks readable text for light and dark fills", () => {
+		expect(readableTextColor("#FFF2CC")).toBe("#111111");
+		expect(readableTextColor("#1F3864")).toBe("#FFFFFF");
 	});
 });

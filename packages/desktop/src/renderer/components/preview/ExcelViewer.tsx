@@ -13,6 +13,7 @@ import {
 	paintedCellsForRow,
 	parseExcelBytes,
 	prefixOffsets,
+	readableTextColor,
 	SpreadsheetTooLargeError,
 } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
@@ -398,6 +399,9 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 												style={{
 													width: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
 													minWidth: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
+													...(!match && cell.fill
+														? { backgroundColor: cell.fill, color: readableTextColor(cell.fill) }
+														: {}),
 												}}
 												title={merged ? undefined : cell.formatted}
 											>
