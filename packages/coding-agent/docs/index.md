@@ -4,33 +4,14 @@ Metis is a minimal general-purpose terminal agent. It is designed to stay small 
 
 ## Quick start
 
-Install Metis with npm:
+`@metis/coding-agent` is not published on npm. Clone https://gitee.com/sun124578963_0/metis.git, then from the repository root, with Node.js 22.19 or newer:
 
 ```bash
-npm install -g --ignore-scripts @metis/coding-agent
+npm ci --ignore-scripts
+./metis-test.sh
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Metis does not require install scripts for normal npm installs.
-
-On Linux or macOS, you can also use the installer:
-
-```bash
-curl -fsSL https://gitee.com/sun124578963_0/metis/install.sh | sh
-```
-
-To uninstall metis itself, use npm for curl and npm installs:
-
-```bash
-npm uninstall -g @metis/coding-agent
-```
-
-For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @metis/coding-agent`, `yarn global remove @metis/coding-agent`, or `bun uninstall -g @metis/coding-agent`.
-
-Then run it in a project directory:
-
-```bash
-metis
-```
+`npm ci --ignore-scripts` installs the locked dependencies and skips package lifecycle scripts. `./metis-test.sh` starts the CLI from source. Examples that spell the command as `metis` take the same arguments.
 
 Store an API key with `/login`, or set one such as `ANTHROPIC_API_KEY` before starting metis.
 
