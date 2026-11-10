@@ -3692,12 +3692,23 @@ classes so their inline layout wins the cascade. */
 	box-sizing: border-box;
 	border: 1px solid var(--border-weak);
 	padding: 4px 8px;
-	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: ellipsis;
 	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 	font-size: 11px;
 	line-height: 1.4;
+}
+
+.excel-corner-cell,
+.excel-col-header,
+.excel-row-header {
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.excel-cell {
+	/* Data cells wrap: the workbook's stored row height decides how much is visible. */
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .excel-corner-cell,
@@ -3728,12 +3739,8 @@ classes so their inline layout wins the cascade. */
 	flex: 0 0 auto;
 }
 
-.excel-cell,
-.excel-merge {
-	/* Excel wraps text and lets the stored row height decide how many lines stay
-	   visible; clipping without wrapping hid the rest of long paragraphs. */
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
+.excel-cell.is-number {
+	text-align: right;
 }
 
 .excel-cell.is-covered {
@@ -3745,12 +3752,13 @@ classes so their inline layout wins the cascade. */
 	z-index: 1;
 	box-sizing: border-box;
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	border: 1px solid var(--border-weak);
 	padding: 4px 8px;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 	font-size: 11px;
 	line-height: 1.4;

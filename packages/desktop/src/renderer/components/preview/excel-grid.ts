@@ -85,6 +85,7 @@ export interface ExcelPaintedCell {
 	readonly covered: boolean;
 	readonly rowSpan: number;
 	readonly colSpan: number;
+	readonly type?: string;
 }
 
 export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly ExcelPaintedCell[] {
@@ -96,6 +97,7 @@ export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly
 			covered: sheet.hidden.has(cellKey(row, col)),
 			rowSpan: cell?.rowSpan ?? 1,
 			colSpan: cell?.colSpan ?? 1,
+			...(cell?.type ? { type: cell.type } : {}),
 		};
 	});
 }

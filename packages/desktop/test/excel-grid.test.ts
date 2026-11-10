@@ -61,7 +61,7 @@ describe("parseExcelBytes", () => {
 		expect(view.sheets.Data.cells.size).toBe(2);
 		expect(view.sheets.Data.merges).toEqual([{ row: 0, col: 0, rowSpan: 1, colSpan: 2, formatted: "A" }]);
 		expect(paintedCellsForRow(view.sheets.Data, 0)).toEqual([
-			{ col: 0, formatted: "A", covered: false, rowSpan: 1, colSpan: 2 },
+			{ col: 0, formatted: "A", covered: false, rowSpan: 1, colSpan: 2, type: "s" },
 			{ col: 1, formatted: "", covered: true, rowSpan: 1, colSpan: 1 },
 		]);
 		expect(paintedCellsForRow(view.sheets.Data, 1)).toHaveLength(2);

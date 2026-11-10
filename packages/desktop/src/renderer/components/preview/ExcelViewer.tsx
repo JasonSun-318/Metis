@@ -389,9 +389,11 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 									{paintedCellsForRow(sheet, virtualRow.index).map((cell) => {
 										const merged = cell.covered || cell.rowSpan > 1 || cell.colSpan > 1;
 										const match = Boolean(!merged && query && cell.formatted.toLowerCase().includes(query));
+										// Excel right-aligns numbers and dates by default.
+										const numeric = cell.type === "n" || cell.type === "d";
 										return (
 											<div
-												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}`}
+												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}${numeric ? " is-number" : ""}`}
 												key={cell.col}
 												style={{
 													width: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
