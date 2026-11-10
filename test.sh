@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 set -e
 
+# fd, rg, and trash are invoked by unit tests. Fail before npm so a missing
+# binary is an install hint instead of a later command-not-found failure.
+# Debian/Ubuntu ship fd as fdfind; tests look up the fd command by name.
+missing=""
+if ! command -v fd >/dev/null 2>&1; then
+    missing="fd"
+fi
+if ! command -v rg >/dev/null 2>&1; then
+    missing="${missing:+$missing, }rg"
+fi
+if ! command -v trash >/dev/null 2>&1; then
+    missing="${missing:+$missing, }trash"
+fi
+if [ -n "$missing" ]; then
+    echo "Missing test tools: ${missing}." >&2
+    echo "Unit tests need fd, rg (ripgrep), and trash on PATH." >&2
+    echo 'Debian/Ubuntu: sudo apt-get install -y fd-find ripgrep trash-cli && sudo ln -sfn "$(command -v fdfind)" /usr/local/bin/fd' >&2
+    exit 1
+fi
+
 testAgentDir="$(mktemp -d "${TMPDIR:-/tmp}/metis-tests.XXXXXXXX")"
 export METIS_CODING_AGENT_DIR="$testAgentDir"
 unset METIS_CODING_AGENT_SESSION_DIR

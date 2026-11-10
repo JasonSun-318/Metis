@@ -11,11 +11,13 @@ on:
       - ".github/workflows/desktop.yml"
       - "package-lock.json"
       - "package.json"
+      - "packages/agent/**"
       - "packages/ai/**"
       - "packages/app-protocol/**"
       - "packages/app-server/**"
       - "packages/coding-agent/**"
       - "packages/desktop/**"
+      - "packages/tui/**"
   push:
     branches: [main]
     tags: ["v*"]
