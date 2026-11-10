@@ -100,6 +100,11 @@ jobs:
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
+          # Ubuntu 26.04 keeps rejecting nested user namespaces through this
+          # profile after the sysctl above. Unload it so bwrap can setgroups.
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
+          fi
           command -v fd
           command -v rg
           command -v trash
@@ -111,12 +116,14 @@ jobs:
         env:
           METIS_SKIP_MODEL_REGENERATION: "1"
         run: npm run build
-      - name: Run package unit tests
-        run: |
-          npm test --workspace @metis/ai
-          npm test --workspace @metis/agent-core
-          npm test --workspace @metis/coding-agent
-          npm test --workspace @metis/tui
+      - name: Test @metis/ai
+        run: npm test --workspace @metis/ai
+      - name: Test @metis/agent-core
+        run: npm test --workspace @metis/agent-core
+      - name: Test @metis/coding-agent
+        run: npm test --workspace @metis/coding-agent
+      - name: Test @metis/tui
+        run: npm test --workspace @metis/tui
 
   windows-native:
     # Native Windows acceptance probes (W19). These cannot be proven by the

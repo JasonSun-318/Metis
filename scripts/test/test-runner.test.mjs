@@ -146,8 +146,14 @@ test(
 		for (const name of ["fd", "rg", "trash"]) rmSync(join(workspace.bin, name));
 		const result = await runIsolated(workspace);
 		assert.notEqual(result.code, 0);
-		assert.match(result.stderr, /Missing test tools: fd, rg, trash\./);
+		if (process.platform === "linux") {
+			assert.match(result.stderr, /Missing test tools: fd, rg, trash\./);
+		} else {
+			assert.match(result.stderr, /Missing test tools: fd, rg\./);
+			assert.doesNotMatch(result.stderr, /Missing test tools:.*\btrash\b/);
+		}
 		assert.match(result.stderr, /fd-find ripgrep trash-cli/);
+		assert.match(result.stderr, /brew install fd ripgrep/);
 		assert.equal(result.stdout.includes("METIS_TEST_ENV="), false);
 		assert.equal(result.stdout.includes("Running tests without API keys"), false);
 	},
@@ -156,9 +162,16 @@ test(
 test("offline launcher reports only the absent tools", { skip: process.platform === "win32" }, async (t) => {
 	const workspace = fixture(t);
 	rmSync(join(workspace.bin, "trash"));
-	const result = await runIsolated(workspace);
-	assert.notEqual(result.code, 0);
-	assert.match(result.stderr, /Missing test tools: trash\./);
-	assert.doesNotMatch(result.stderr, /Missing test tools:.*\bfd\b/);
-	assert.equal(result.stdout.includes("Running tests without API keys"), false);
+	if (process.platform === "linux") {
+		const result = await runIsolated(workspace);
+		assert.notEqual(result.code, 0);
+		assert.match(result.stderr, /Missing test tools: trash\./);
+		assert.doesNotMatch(result.stderr, /Missing test tools:.*\bfd\b/);
+		assert.equal(result.stdout.includes("Running tests without API keys"), false);
+		return;
+	}
+	const result = await run(workspace);
+	assert.equal(result.code, 0);
+	assert.match(result.stdout, /Running tests without API keys/);
+	assert.doesNotMatch(result.stderr, /Missing test tools/);
 });
