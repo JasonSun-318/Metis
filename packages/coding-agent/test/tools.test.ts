@@ -176,6 +176,65 @@ describe("Coding Agent Tools", () => {
 			);
 		});
 
+		it("does not count a trailing newline as an extra line", async () => {
+			const testFile = join(testDir, "trailing-newline.txt");
+			const lines = Array.from({ length: 2500 }, (_, i) => `Line ${i + 1}`);
+			const content = `${lines.join("\n")}\n`;
+			writeFileSync(testFile, content);
+
+			const result = await readTool.execute("test-call-trailing-newline", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]");
+			expect(output).not.toContain("of 2501");
+			expect(result.details?.truncation?.totalLines).toBe(2500);
+			expect(result.details?.truncation?.outputLines).toBe(2000);
+
+			const rest = await readTool.execute("test-call-trailing-newline-rest", { path: testFile, offset: 2001 });
+			const restOutput = getTextOutput(rest);
+			expect(restOutput.startsWith("Line 2001\n")).toBe(true);
+			expect(restOutput.endsWith("Line 2500\n")).toBe(true);
+			expect(restOutput).not.toContain("Use offset=");
+
+			await expect(
+				readTool.execute("test-call-trailing-newline-past", { path: testFile, offset: 2501 }),
+			).rejects.toThrow(/Offset 2501 is beyond end of file \(2500 lines total\)/);
+		});
+
+		it("keeps continuation offsets aligned for a trailing newline", async () => {
+			const testFile = join(testDir, "limit-trailing.txt");
+			const content = "Line 1\nLine 2\nLine 3\n";
+			writeFileSync(testFile, content);
+
+			const full = await readTool.execute("test-call-trailing-full", { path: testFile });
+			expect(getTextOutput(full)).toBe(content);
+
+			const page = await readTool.execute("test-call-trailing-limit", { path: testFile, limit: 2 });
+			expect(getTextOutput(page)).toBe("Line 1\nLine 2\n\n[1 more lines in file. Use offset=3 to continue.]");
+
+			const last = await readTool.execute("test-call-trailing-last", { path: testFile, offset: 3 });
+			expect(getTextOutput(last)).toBe("Line 3\n");
+
+			await expect(readTool.execute("test-call-trailing-beyond", { path: testFile, offset: 4 })).rejects.toThrow(
+				/Offset 4 is beyond end of file \(3 lines total\)/,
+			);
+		});
+
+		it("still counts a blank line before the trailing newline and reads empty files", async () => {
+			const blankFile = join(testDir, "blank-line.txt");
+			writeFileSync(blankFile, "Line 1\n\n");
+			const blank = await readTool.execute("test-call-blank-line", { path: blankFile, offset: 2 });
+			expect(getTextOutput(blank)).toBe("\n");
+			await expect(readTool.execute("test-call-blank-beyond", { path: blankFile, offset: 3 })).rejects.toThrow(
+				/Offset 3 is beyond end of file \(2 lines total\)/,
+			);
+
+			const emptyFile = join(testDir, "empty.txt");
+			writeFileSync(emptyFile, "");
+			const empty = await readTool.execute("test-call-empty", { path: emptyFile });
+			expect(getTextOutput(empty)).toBe("");
+		});
+
 		it("should include truncation details when truncated", async () => {
 			const testFile = join(testDir, "large-file.txt");
 			const lines = Array.from({ length: 2500 }, (_, i) => `Line ${i + 1}`);

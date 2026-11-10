@@ -270,7 +270,11 @@ export function createReadToolDefinition(
 								// Read text content.
 								const buffer = await ops.readFile(absolutePath);
 								const textContent = buffer.toString("utf-8");
+								// A final newline is a separator, not another line (same rule as truncate.ts).
+								// Empty input does not end in a newline, so it stays a single empty read.
+								const trailingNewline = textContent.endsWith("\n");
 								const allLines = textContent.split("\n");
+								if (trailingNewline) allLines.pop();
 								const totalFileLines = allLines.length;
 								// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
 								const startLine = offset ? Math.max(0, offset - 1) : 0;
@@ -285,9 +289,11 @@ export function createReadToolDefinition(
 								if (limit !== undefined) {
 									const endLine = Math.min(startLine + limit, allLines.length);
 									selectedContent = allLines.slice(startLine, endLine).join("\n");
+									if (trailingNewline && endLine === allLines.length) selectedContent += "\n";
 									userLimitedLines = endLine - startLine;
 								} else {
 									selectedContent = allLines.slice(startLine).join("\n");
+									if (trailingNewline) selectedContent += "\n";
 								}
 								// Apply truncation, respecting both line and byte limits.
 								const truncation = truncateHead(selectedContent);
