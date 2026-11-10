@@ -58,9 +58,21 @@ function trashOne(source: string, mounts: readonly string[]): void {
 			if (errorCode(error) !== "EXDEV") throw error;
 		}
 	}
-	const volume = volumeTrashDirectory(mountPointFor(source, mounts));
-	if (!volume) throw new Error("XDG trash is not available on this filesystem");
-	moveIntoXdgTrash(source, volume);
+	const directories = volumeTrashDirectories(mountPointFor(source, mounts));
+	if (directories.length === 0) throw new Error("XDG trash is not available on this filesystem");
+	let failure: unknown;
+	for (const directory of directories) {
+		try {
+			moveIntoXdgTrash(source, directory);
+			return;
+		} catch (error) {
+			// `.Trash/$uid` can be missing-but-uncreatable (mode 01555) or the
+			// rename into it can fail. The spec then requires `.Trash-$uid`.
+			// Each attempt is a rename; a failure leaves the original in place.
+			failure = error;
+		}
+	}
+	throw failure;
 }
 
 function homeTrashDirectory(): string {
@@ -71,19 +83,24 @@ function homeTrashDirectory(): string {
 }
 
 /**
- * `$topdir/.Trash/$uid` when the administrator directory exists, is not a symlink,
- * and has the sticky bit. Otherwise `$topdir/.Trash-$uid`. Either directory must
- * be missing or be a real directory owned by the current user.
+ * Candidate trash directories on `topdir`, in the order the spec requires.
+ * `$topdir/.Trash/$uid` comes first when `.Trash` is a sticky real directory and
+ * the per-user directory is absent or is a real directory owned by this user.
+ * A symlink or foreign `$uid` directory is skipped. `$topdir/.Trash-$uid` is the
+ * next candidate, including when the first directory cannot be created or a
+ * rename into it fails.
  */
-function volumeTrashDirectory(topdir: string): string | undefined {
+function volumeTrashDirectories(topdir: string): string[] {
 	const uid = process.getuid?.();
-	if (uid === undefined) return undefined;
+	if (uid === undefined) return [];
+	const directories: string[] = [];
 	if (isStickyRealDirectory(join(topdir, ".Trash"))) {
 		const userDir = join(topdir, ".Trash", String(uid));
-		return usableVolumeTrash(userDir) ? userDir : undefined;
+		if (usableVolumeTrash(userDir)) directories.push(userDir);
 	}
 	const fallback = join(topdir, `.Trash-${uid}`);
-	return usableVolumeTrash(fallback) ? fallback : undefined;
+	if (usableVolumeTrash(fallback)) directories.push(fallback);
+	return directories;
 }
 
 function isStickyRealDirectory(directory: string): boolean {

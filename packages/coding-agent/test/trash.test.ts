@@ -382,6 +382,60 @@ describe("Linux XDG trash", () => {
 		});
 	});
 
+	it.skipIf(!bindMountsAvailable)(
+		"falls back to .Trash-$uid when the sticky administrator trash is not writable",
+		() => {
+			withBindMount((mountPoint) => {
+				const admin = join(mountPoint, ".Trash");
+				mkdirSync(admin);
+				chmodSync(admin, 0o1555);
+				const source = join(mountPoint, "locked.txt");
+				writeFileSync(source, "locked");
+				const before = statSync(source);
+				try {
+					expect(trashPathsSync([source])).toBeUndefined();
+					const uid = String(process.getuid?.());
+					const dest = join(mountPoint, `.Trash-${uid}`, "files", "locked.txt");
+					expect(existsSync(source)).toBe(false);
+					expect(existsSync(join(admin, uid))).toBe(false);
+					expect(statSync(dest).ino).toBe(before.ino);
+					expect(statSync(dest).dev).toBe(before.dev);
+					expect(readFileSync(dest, "utf8")).toBe("locked");
+				} finally {
+					chmodSync(admin, 0o755);
+				}
+			});
+		},
+	);
+
+	it.skipIf(!bindMountsAvailable)(
+		"falls back to .Trash-$uid when the per-user administrator trash is a symlink",
+		() => {
+			withBindMount((mountPoint) => {
+				const admin = join(mountPoint, ".Trash");
+				mkdirSync(admin);
+				chmodSync(admin, 0o1777);
+				const outside = join(root, "uid-symlink-target");
+				mkdirSync(outside);
+				const uid = String(process.getuid?.());
+				symlinkSync(outside, join(admin, uid));
+				const source = join(mountPoint, "sym.txt");
+				writeFileSync(source, "sym");
+				const before = statSync(source);
+
+				expect(trashPathsSync([source])).toBeUndefined();
+
+				const dest = join(mountPoint, `.Trash-${uid}`, "files", "sym.txt");
+				expect(existsSync(source)).toBe(false);
+				expect(lstatSync(join(admin, uid)).isSymbolicLink()).toBe(true);
+				expect(existsSync(join(outside, "files"))).toBe(false);
+				expect(statSync(dest).ino).toBe(before.ino);
+				expect(statSync(dest).dev).toBe(before.dev);
+				expect(readFileSync(dest, "utf8")).toBe("sym");
+			});
+		},
+	);
+
 	it.skipIf(!bindMountsAvailable)("ignores an administrator trash without the sticky bit", () => {
 		withBindMount((mountPoint) => {
 			mkdirSync(join(mountPoint, ".Trash"));
