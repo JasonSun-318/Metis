@@ -157,7 +157,7 @@ describe("Project sidebar motion", () => {
 		const accountMenu = rule(".account-menu-popover");
 		expect(accountMenu.background).toBe("var(--menu-bg)");
 		expect(accountMenu.border).toContain("var(--border-strong)");
-		expect(accountMenu.borderRadius).toBe("8px");
+		expect(accountMenu.borderRadius).toBe("var(--radius-control)");
 		expect(accountMenu.boxShadow).toBe("var(--overlay-shadow)");
 		const hover = rule(".account-menu-item:hover, .account-menu-item:focus-visible");
 		expect(hover.background).toBe("var(--menu-hover)");

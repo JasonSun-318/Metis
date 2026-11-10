@@ -29,7 +29,7 @@ describe("Browser chrome geometry and interaction styles", () => {
 	it("uses compact rounded rectangles without wrapping navigation in a pill", () => {
 		const field = rule(".browser-address-field");
 		expect(field.height).toBe("32px");
-		expect(field.borderRadius).toBe("8px");
+		expect(field.borderRadius).toBe("var(--radius-control)");
 		expect(field.minWidth).toBe("0px");
 		for (const selector of [
 			".browser-toolbar-button",
