@@ -18,6 +18,7 @@ import {
 } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import type { UniversalPreviewTarget } from "./preview-kinds.ts";
+import type { SpreadsheetBorders, SpreadsheetCellStyle } from "./spreadsheet-styles.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface ExcelViewerProps {
@@ -42,6 +43,65 @@ function getColumnLetter(colIndex: number): string {
 		temp = Math.floor(temp / 26) - 1;
 	}
 	return letter;
+}
+
+function sideStyle(side: SpreadsheetBorders["top"], scale: number): string {
+	if (!side) return "1px solid var(--border-weak)";
+	const width = Math.max(1, Math.round(side.width * scale));
+	return `${width}px ${side.style}${side.color ? ` ${side.color}` : " currentColor"}`;
+}
+
+function borderCss(borders: SpreadsheetBorders | undefined, scale: number): React.CSSProperties {
+	return {
+		borderTop: sideStyle(borders?.top, scale),
+		borderRight: sideStyle(borders?.right, scale),
+		borderBottom: sideStyle(borders?.bottom, scale),
+		borderLeft: sideStyle(borders?.left, scale),
+	};
+}
+
+function relativeLuminance(color: string): number {
+	const hex = color.replace("#", "");
+	if (!/^[0-9a-fA-F]{6}$/.test(hex)) return 0;
+	const [red, green, blue] = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
+	const channel = (value: number) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+	return 0.2126 * channel(red ?? 0) + 0.7152 * channel(green ?? 0) + 0.0722 * channel(blue ?? 0);
+}
+
+function contrastRatio(left: string, right: string): number {
+	const brighter = Math.max(relativeLuminance(left), relativeLuminance(right));
+	const darker = Math.min(relativeLuminance(left), relativeLuminance(right));
+	return (brighter + 0.05) / (darker + 0.05);
+}
+
+/** The preview sits on the app panel; a workbook color that only reads on white
+ *  paper (dark navy titles) would disappear in the dark theme. */
+function panelColor(): string {
+	try {
+		const value = getComputedStyle(document.documentElement).getPropertyValue("--panel").trim();
+		return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#181818";
+	} catch {
+		return "#181818";
+	}
+}
+
+function textCss(style: SpreadsheetCellStyle | undefined, scale: number, background: string): React.CSSProperties {
+	const font = style?.font;
+	let color = font?.color;
+	if (color && contrastRatio(color, background) < 3) color = undefined;
+	if (!color && style?.fill) color = readableTextColor(style.fill);
+	return {
+		...(font?.bold ? { fontWeight: 600 } : {}),
+		...(font?.italic ? { fontStyle: "italic" } : {}),
+		...(font?.size ? { fontSize: Math.min(48, Math.max(8, Math.round(font.size * scale))) } : {}),
+		...(color ? { color } : {}),
+	};
+}
+
+function verticalCss(valign: SpreadsheetCellStyle["valign"]): React.CSSProperties {
+	return {
+		justifyContent: valign === "middle" ? "center" : valign === "bottom" ? "flex-end" : "flex-start",
+	};
 }
 
 export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpenDefault, onReveal }: ExcelViewerProps) {
@@ -101,6 +161,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 	const columnOffsets = useMemo(() => prefixOffsets(columnWidths), [columnWidths]);
 	const rowOffsets = useMemo(() => prefixOffsets(rowHeights), [rowHeights]);
 	const query = searchQuery.trim().toLowerCase();
+	const panelBackground = useMemo(panelColor, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): New workbook bytes invalidate the previous cell selection.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(activeSheetName): Switching sheets clears the previous cell selection and scroll position.
 	useEffect(() => {
@@ -390,22 +451,41 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 									{paintedCellsForRow(sheet, virtualRow.index).map((cell) => {
 										const merged = cell.covered || cell.rowSpan > 1 || cell.colSpan > 1;
 										const match = Boolean(!merged && query && cell.formatted.toLowerCase().includes(query));
-										// Excel right-aligns numbers and dates by default.
+										// Excel right-aligns numbers and dates unless the cell overrides it.
 										const numeric = cell.type === "n" || cell.type === "d";
+										const align = cell.align ?? (numeric ? "right" : undefined);
+										const wrapClass = cell.wrap === false ? " is-clip" : cell.wrap ? " is-wrap" : "";
 										return (
 											<div
-												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}${numeric ? " is-number" : ""}`}
+												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}${numeric ? " is-number" : ""}${wrapClass}`}
 												key={cell.col}
 												style={{
 													width: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
 													minWidth: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
-													...(!match && cell.fill
-														? { backgroundColor: cell.fill, color: readableTextColor(cell.fill) }
-														: {}),
+													...(!match && cell.fill ? { backgroundColor: cell.fill } : {}),
+													...borderCss(cell.borders, scale),
+													...verticalCss(cell.valign),
 												}}
 												title={merged ? undefined : cell.formatted}
 											>
-												{merged ? "" : cell.formatted}
+												{merged ? (
+													""
+												) : (
+													<span
+														style={{
+															display: "block",
+															width: "100%",
+															textAlign: align,
+															...textCss(
+																cell,
+																scale,
+																match ? panelBackground : (cell.fill ?? panelBackground),
+															),
+														}}
+													>
+														{cell.formatted}
+													</span>
+												)}
 											</div>
 										);
 									})}
@@ -413,9 +493,10 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 							))}
 							{visibleMerges.map((merge) => {
 								const match = Boolean(query && merge.formatted.toLowerCase().includes(query));
+								const wrapClass = merge.wrap === false ? " is-clip" : merge.wrap ? " is-wrap" : "";
 								return (
 									<div
-										className={`excel-merge${match ? " is-search-match" : ""}`}
+										className={`excel-merge${match ? " is-search-match" : ""}${wrapClass}`}
 										key={`${merge.row}:${merge.col}`}
 										style={{
 											height: (rowOffsets[merge.row + merge.rowSpan] ?? 0) - (rowOffsets[merge.row] ?? 0),
@@ -423,10 +504,22 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 											top: rowOffsets[merge.row] ?? 0,
 											width:
 												(columnOffsets[merge.col + merge.colSpan] ?? 0) - (columnOffsets[merge.col] ?? 0),
+											...(!match && merge.fill ? { backgroundColor: merge.fill } : {}),
+											...borderCss(merge.borders, scale),
+											...verticalCss(merge.valign),
 										}}
 										title={merge.formatted}
 									>
-										{merge.formatted}
+										<span
+											style={{
+												display: "block",
+												width: "100%",
+												textAlign: merge.align,
+												...textCss(merge, scale, match ? panelBackground : (merge.fill ?? panelBackground)),
+											}}
+										>
+											{merge.formatted}
+										</span>
 									</div>
 								);
 							})}

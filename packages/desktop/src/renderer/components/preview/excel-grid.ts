@@ -1,4 +1,14 @@
 import * as XLSX from "xlsx";
+import {
+	parseCellStyleIndexes,
+	parseStylesXml,
+	type SpreadsheetBorders,
+	type SpreadsheetCellStyle,
+	type SpreadsheetFont,
+	type SpreadsheetHorizontalAlign,
+	type SpreadsheetVerticalAlign,
+	styleAt,
+} from "./spreadsheet-styles.ts";
 
 /**
  * Rendering guards. The viewer draws every column of the used range on each
@@ -44,8 +54,13 @@ export interface ExcelCellView {
 	readonly type?: string;
 	readonly rowSpan?: number;
 	readonly colSpan?: number;
-	/** Solid fill as `#RRGGBB`; styles other than solid fills are not exposed. */
+	/** Solid fill as `#RRGGBB`. */
 	readonly fill?: string;
+	readonly font?: SpreadsheetFont;
+	readonly align?: SpreadsheetHorizontalAlign;
+	readonly valign?: SpreadsheetVerticalAlign;
+	readonly wrap?: boolean;
+	readonly borders?: SpreadsheetBorders;
 }
 
 export interface ExcelMergeView {
@@ -55,6 +70,11 @@ export interface ExcelMergeView {
 	readonly colSpan: number;
 	readonly formatted: string;
 	readonly fill?: string;
+	readonly font?: SpreadsheetFont;
+	readonly align?: SpreadsheetHorizontalAlign;
+	readonly valign?: SpreadsheetVerticalAlign;
+	readonly wrap?: boolean;
+	readonly borders?: SpreadsheetBorders;
 }
 
 export interface ExcelSheetView {
@@ -90,6 +110,11 @@ export interface ExcelPaintedCell {
 	readonly colSpan: number;
 	readonly type?: string;
 	readonly fill?: string;
+	readonly font?: SpreadsheetFont;
+	readonly align?: SpreadsheetHorizontalAlign;
+	readonly valign?: SpreadsheetVerticalAlign;
+	readonly wrap?: boolean;
+	readonly borders?: SpreadsheetBorders;
 }
 
 export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly ExcelPaintedCell[] {
@@ -103,6 +128,11 @@ export function paintedCellsForRow(sheet: ExcelSheetView, row: number): readonly
 			colSpan: cell?.colSpan ?? 1,
 			...(cell?.type ? { type: cell.type } : {}),
 			...(cell?.fill ? { fill: cell.fill } : {}),
+			...(cell?.font ? { font: cell.font } : {}),
+			...(cell?.align ? { align: cell.align } : {}),
+			...(cell?.valign ? { valign: cell.valign } : {}),
+			...(cell?.wrap !== undefined ? { wrap: cell.wrap } : {}),
+			...(cell?.borders ? { borders: cell.borders } : {}),
 		};
 	});
 }
@@ -226,6 +256,7 @@ export function parseSheetView(
 	name: string,
 	sheet: XLSX.WorkSheet,
 	limits: SpreadsheetPreviewLimits = DEFAULT_SPREADSHEET_LIMITS,
+	styles?: ReadonlyMap<string, SpreadsheetCellStyle>,
 ): ExcelSheetView {
 	const entries = Object.entries(sheet as unknown as Record<string, unknown>);
 	const rawCells: { row: number; column: number; cell: XLSX.CellObject }[] = [];
@@ -268,13 +299,19 @@ export function parseSheetView(
 		const formatted = cell.w ?? (cell.v !== undefined ? String(cell.v) : "");
 		if (formatted === "" && !cell.f) continue;
 		if (cells.size >= limits.maxCells) throw new SpreadsheetTooLargeError("cells");
-		const fill = cellFill(cell);
+		const style = styles?.get(`${row}:${column}`);
+		const fill = style?.fill ?? cellFill(cell);
 		cells.set(cellKey(row - startRow, column - startCol), {
 			formatted,
 			value: cell.v instanceof Date ? cell.v.toISOString() : (cell.v ?? null),
 			type: cell.t,
 			...(cell.f ? { formula: cell.f } : {}),
 			...(fill ? { fill } : {}),
+			...(style?.font ? { font: style.font } : {}),
+			...(style?.align ? { align: style.align } : {}),
+			...(style?.valign ? { valign: style.valign } : {}),
+			...(style?.wrap !== undefined ? { wrap: style.wrap } : {}),
+			...(style?.borders ? { borders: style.borders } : {}),
 		});
 	}
 	const merges: ExcelMergeView[] = [];
@@ -298,6 +335,11 @@ export function parseSheetView(
 				colSpan,
 				formatted: existing.formatted,
 				...(existing.fill ? { fill: existing.fill } : {}),
+				...(existing.font ? { font: existing.font } : {}),
+				...(existing.align ? { align: existing.align } : {}),
+				...(existing.valign ? { valign: existing.valign } : {}),
+				...(existing.wrap !== undefined ? { wrap: existing.wrap } : {}),
+				...(existing.borders ? { borders: existing.borders } : {}),
 			});
 		}
 		for (let mergedRow = row; mergedRow < row + rowSpan; mergedRow += 1) {
@@ -353,22 +395,105 @@ export function parseSheetView(
 	return { name, startRow, startCol, rowCount, colCount, cells, hidden, merges, columnWidths, rowHeights };
 }
 
+const BOOK_FILES_LIMIT = 20 * 1024 * 1024;
+
+interface ZipEntry {
+	readonly content?: unknown;
+}
+
+function entryText(files: Record<string, unknown> | undefined, path: string): string | undefined {
+	const entry = files?.[path];
+	if (entry === undefined) return undefined;
+	const content = (entry as ZipEntry).content ?? entry;
+	if (typeof content === "string") return content;
+	if (content instanceof Uint8Array) return new TextDecoder().decode(content);
+	if (content instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(content));
+	if (content && typeof content === "object" && "data" in content) {
+		const data = (content as { data?: unknown }).data;
+		if (Array.isArray(data)) return new TextDecoder().decode(Uint8Array.from(data as number[]));
+		if (data instanceof Uint8Array) return new TextDecoder().decode(data);
+	}
+	return undefined;
+}
+
+function sheetXmlPaths(files: Record<string, unknown> | undefined): readonly (string | undefined)[] {
+	const workbookXml = entryText(files, "xl/workbook.xml");
+	const relsXml = entryText(files, "xl/_rels/workbook.xml.rels");
+	const targets = new Map<string, string>();
+	if (relsXml) {
+		for (const match of relsXml.matchAll(/<[A-Za-z0-9._-]*:?Relationship\b[^>]*>/g)) {
+			const id = /\bId="([^"]*)"/.exec(match[0])?.[1];
+			const target = /\bTarget="([^"]*)"/.exec(match[0])?.[1];
+			if (id && target) targets.set(id, target.replace(/^\/+/, ""));
+		}
+	}
+	const paths: (string | undefined)[] = [];
+	if (workbookXml) {
+		for (const match of workbookXml.matchAll(/<[A-Za-z0-9._-]*:?sheet\b[^>]*>/g)) {
+			const id = /\br:id="([^"]*)"/.exec(match[0])?.[1];
+			paths.push(id ? targets.get(id) : undefined);
+		}
+	}
+	return paths;
+}
+
+/**
+ * Reads `xl/styles.xml` and the per-cell style indexes from each worksheet, so
+ * the preview can draw fonts, borders and alignment that SheetJS drops. Raw zip
+ * entries are only requested for preview-sized files and released afterwards.
+ */
+function buildCellStyleOverlays(workbook: XLSX.WorkBook): Map<number, Map<string, SpreadsheetCellStyle>> {
+	const overlays = new Map<number, Map<string, SpreadsheetCellStyle>>();
+	const files = (workbook as { files?: Record<string, unknown> }).files;
+	if (!files) return overlays;
+	try {
+		const stylesXml = entryText(files, "xl/styles.xml");
+		const table = stylesXml ? parseStylesXml(stylesXml) : { styles: [] };
+		const paths = sheetXmlPaths(files);
+		for (let index = 0; index < workbook.SheetNames.length; index += 1) {
+			const sheetXml =
+				entryText(files, paths[index] ?? "") ?? entryText(files, `xl/worksheets/sheet${index + 1}.xml`);
+			if (!sheetXml) continue;
+			const overlay = new Map<string, SpreadsheetCellStyle>();
+			for (const [key, styleIndex] of parseCellStyleIndexes(sheetXml)) {
+				const style = styleAt(table, styleIndex);
+				if (style) overlay.set(key, style);
+			}
+			if (overlay.size > 0) overlays.set(index, overlay);
+		}
+	} finally {
+		// The raw entries duplicate the workbook bytes; drop them once parsed.
+		delete (workbook as { files?: Record<string, unknown> }).files;
+	}
+	return overlays;
+}
+
+function activeSheetName(workbook: XLSX.WorkBook): string {
+	const views = (workbook as { Workbook?: { Views?: readonly { activeTab?: number }[] } }).Workbook?.Views;
+	const activeTab = views?.[0]?.activeTab;
+	if (activeTab !== undefined && activeTab >= 0 && activeTab < workbook.SheetNames.length) {
+		return workbook.SheetNames[activeTab] ?? workbook.SheetNames[0] ?? "";
+	}
+	return workbook.SheetNames[0] ?? "";
+}
+
 export function parseWorkbook(
 	workbook: XLSX.WorkBook,
 	limits: SpreadsheetPreviewLimits = DEFAULT_SPREADSHEET_LIMITS,
+	styleOverlays?: ReadonlyMap<number, ReadonlyMap<string, SpreadsheetCellStyle>>,
 ): ExcelWorkbookView {
 	const sheets: Record<string, ExcelSheetView> = {};
 	let totalCells = 0;
-	for (const name of workbook.SheetNames) {
+	workbook.SheetNames.forEach((name, index) => {
 		const sheet = workbook.Sheets[name];
-		if (!sheet) continue;
-		const view = parseSheetView(name, sheet, limits);
+		if (!sheet) return;
+		const view = parseSheetView(name, sheet, limits, styleOverlays?.get(index));
 		totalCells += view.cells.size;
 		if (totalCells > limits.maxCells) throw new SpreadsheetTooLargeError("cells");
 		sheets[name] = view;
-	}
+	});
 	const sheetNames = workbook.SheetNames;
-	return { sheetNames, activeSheet: sheetNames[0] ?? "", sheets };
+	return { sheetNames, activeSheet: activeSheetName(workbook), sheets };
 }
 
 export function parseExcelBytes(
@@ -377,10 +502,13 @@ export function parseExcelBytes(
 	limits: SpreadsheetPreviewLimits = DEFAULT_SPREADSHEET_LIMITS,
 ): ExcelWorkbookView {
 	const isCsv = fileName.toLowerCase().endsWith(".csv");
+	const withBookFiles = !isCsv && bytes.length <= BOOK_FILES_LIMIT;
+	const options = { cellDates: true, cellStyles: true, ...(withBookFiles ? { bookFiles: true } : {}) } as const;
 	const workbook = isCsv
-		? XLSX.read(new TextDecoder().decode(bytes), { type: "string", cellDates: true, cellStyles: true })
-		: XLSX.read(bytes, { type: "array", cellDates: true, cellStyles: true });
-	return parseWorkbook(workbook, limits);
+		? XLSX.read(new TextDecoder().decode(bytes), { type: "string", ...options })
+		: XLSX.read(bytes, { type: "array", ...options });
+	const overlays = buildCellStyleOverlays(workbook);
+	return parseWorkbook(workbook, limits, overlays);
 }
 
 export interface ExcelSelection {

@@ -3706,9 +3706,18 @@ classes so their inline layout wins the cascade. */
 }
 
 .excel-cell {
-	/* Data cells wrap: the workbook's stored row height decides how much is visible. */
+	/* Data cells wrap by default: the workbook's stored row height decides how much
+	   is visible. Cells whose style disables wrapping switch to clipping. */
+	display: flex;
+	flex-direction: column;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+
+.excel-cell.is-clip,
+.excel-merge.is-clip {
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 .excel-corner-cell,
@@ -3752,6 +3761,7 @@ classes so their inline layout wins the cascade. */
 	z-index: 1;
 	box-sizing: border-box;
 	display: flex;
+	flex-direction: column;
 	align-items: flex-start;
 	border: 1px solid var(--border-weak);
 	padding: 4px 8px;
