@@ -1,25 +1,24 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MagnifyingGlass, SpinnerGap, Table } from "../../icons.tsx";
 import {
-	buildSheetLayout,
-	drawSheet,
-	type SheetCanvasTheme,
-	type SheetScroll,
-	type SheetSelectionRect,
-	type SheetViewport,
-} from "./excel-canvas.ts";
-import {
+	cellKey,
 	type ExcelSelection,
 	type ExcelWorkbookView,
 	excelSelectionContext,
 	expandExcelSelection,
+	mergesInRowRange,
 	offsetIndex,
+	paintedCellsForRow,
 	parseExcelBytes,
+	prefixOffsets,
+	readableTextColor,
 	SpreadsheetTooLargeError,
 } from "./excel-grid.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import type { UniversalPreviewTarget } from "./preview-kinds.ts";
+import type { SpreadsheetBorders, SpreadsheetCellStyle } from "./spreadsheet-styles.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface ExcelViewerProps {
@@ -32,34 +31,76 @@ export interface ExcelViewerProps {
 	readonly onReveal?: () => void;
 }
 
-const THEME_FALLBACK: SheetCanvasTheme = {
-	background: "#181818",
-	text: "#e6e6e6",
-	border: "#2c2c2c",
-	headerBackground: "#202020",
-	headerText: "#9a9a9a",
-	searchFill: "#ffd700",
-	searchText: "#ffeaa7",
-};
+const DEFAULT_ROW_HEIGHT = 28;
+const DEFAULT_COL_WIDTH = 88;
+const INDEX_WIDTH = 44;
 
-function cssColor(name: string, fallback: string): string {
+function getColumnLetter(colIndex: number): string {
+	let letter = "";
+	let temp = colIndex;
+	while (temp >= 0) {
+		letter = String.fromCharCode((temp % 26) + 65) + letter;
+		temp = Math.floor(temp / 26) - 1;
+	}
+	return letter;
+}
+
+function sideStyle(side: SpreadsheetBorders["top"], scale: number): string {
+	if (!side) return "1px solid var(--border-weak)";
+	const width = Math.max(1, Math.round(side.width * scale));
+	return `${width}px ${side.style}${side.color ? ` ${side.color}` : " currentColor"}`;
+}
+
+function borderCss(borders: SpreadsheetBorders | undefined, scale: number): React.CSSProperties {
+	return {
+		borderTop: sideStyle(borders?.top, scale),
+		borderRight: sideStyle(borders?.right, scale),
+		borderBottom: sideStyle(borders?.bottom, scale),
+		borderLeft: sideStyle(borders?.left, scale),
+	};
+}
+
+function relativeLuminance(color: string): number {
+	const hex = color.replace("#", "");
+	if (!/^[0-9a-fA-F]{6}$/.test(hex)) return 0;
+	const [red, green, blue] = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
+	const channel = (value: number) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+	return 0.2126 * channel(red ?? 0) + 0.7152 * channel(green ?? 0) + 0.0722 * channel(blue ?? 0);
+}
+
+function contrastRatio(left: string, right: string): number {
+	const brighter = Math.max(relativeLuminance(left), relativeLuminance(right));
+	const darker = Math.min(relativeLuminance(left), relativeLuminance(right));
+	return (brighter + 0.05) / (darker + 0.05);
+}
+
+/** The preview sits on the app panel; a workbook color that only reads on white
+ *  paper (dark navy titles) would disappear in the dark theme. */
+function panelColor(): string {
 	try {
-		const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-		return value.length > 0 ? value : fallback;
+		const value = getComputedStyle(document.documentElement).getPropertyValue("--panel").trim();
+		return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#181818";
 	} catch {
-		return fallback;
+		return "#181818";
 	}
 }
 
-function readCanvasTheme(): SheetCanvasTheme {
+function textCss(style: SpreadsheetCellStyle | undefined, scale: number, background: string): React.CSSProperties {
+	const font = style?.font;
+	let color = font?.color;
+	if (color && contrastRatio(color, background) < 3) color = undefined;
+	if (!color && style?.fill) color = readableTextColor(style.fill);
 	return {
-		background: cssColor("--panel", THEME_FALLBACK.background),
-		text: cssColor("--text", THEME_FALLBACK.text),
-		border: cssColor("--border-weak", THEME_FALLBACK.border),
-		headerBackground: cssColor("--surface-04", THEME_FALLBACK.headerBackground),
-		headerText: cssColor("--text-09", THEME_FALLBACK.headerText),
-		searchFill: THEME_FALLBACK.searchFill,
-		searchText: THEME_FALLBACK.searchText,
+		...(font?.bold ? { fontWeight: 600 } : {}),
+		...(font?.italic ? { fontStyle: "italic" } : {}),
+		...(font?.size ? { fontSize: Math.min(48, Math.max(8, Math.round(font.size * scale))) } : {}),
+		...(color ? { color } : {}),
+	};
+}
+
+function verticalCss(valign: SpreadsheetCellStyle["valign"]): React.CSSProperties {
+	return {
+		justifyContent: valign === "middle" ? "center" : valign === "bottom" ? "flex-end" : "flex-start",
 	};
 }
 
@@ -74,11 +115,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 	const [dragging, setDragging] = useState(false);
 	const lastCell = useRef({ row: 0, col: 0 });
 	const pointer = useRef({ x: 0, y: 0 });
-	const frameRef = useRef<HTMLDivElement>(null);
-	const canvasRef = useRef<HTMLCanvasElement>(null);
-	const scrollRef = useRef<HTMLDivElement>(null);
-	const [viewport, setViewport] = useState<SheetViewport>({ width: 0, height: 0 });
-	const [scroll, setScroll] = useState<SheetScroll>({ left: 0, top: 0 });
+	const viewportRef = useRef<HTMLElement>(null);
 	const isDraggingRef = useRef(false);
 	const startPosRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
 	const [isPanning, setIsPanning] = useState(false);
@@ -111,10 +148,20 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 
 	const sheet = workbook?.sheets[activeSheetName];
 	const scale = zoom / 100;
-	const layout = useMemo(() => (sheet ? buildSheetLayout(sheet, scale) : undefined), [sheet, scale]);
-	const theme = useMemo(readCanvasTheme, []);
+	const indexWidth = Math.max(36, Math.round(INDEX_WIDTH * scale));
+	const defaultRowHeight = Math.max(18, Math.round(DEFAULT_ROW_HEIGHT * scale));
+	const columnWidths = useMemo(
+		() => (sheet?.columnWidths ?? []).map((width) => Math.max(24, Math.round(width * scale))),
+		[sheet, scale],
+	);
+	const rowHeights = useMemo(
+		() => (sheet?.rowHeights ?? []).map((height) => Math.max(12, Math.round(height * scale))),
+		[sheet, scale],
+	);
+	const columnOffsets = useMemo(() => prefixOffsets(columnWidths), [columnWidths]);
+	const rowOffsets = useMemo(() => prefixOffsets(rowHeights), [rowHeights]);
 	const query = searchQuery.trim().toLowerCase();
-
+	const panelBackground = useMemo(panelColor, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): New workbook bytes invalidate the previous cell selection.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(activeSheetName): Switching sheets clears the previous cell selection and scroll position.
 	useEffect(() => {
@@ -123,93 +170,58 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		selecting.current = false;
 		setDragging(false);
 		selection.clear();
-		const viewportElement = scrollRef.current;
-		if (viewportElement) {
-			viewportElement.scrollLeft = 0;
-			viewportElement.scrollTop = 0;
-		}
-		setScroll({ left: 0, top: 0 });
+		if (viewportRef.current) viewportRef.current.scrollTo?.(0, 0);
 	}, [activeSheetName, bytes, selection.clear]);
+	const virtualizer = useVirtualizer({
+		count: sheet?.rowCount ?? 0,
+		getScrollElement: () => viewportRef.current,
+		estimateSize: (index) => rowHeights[index] ?? defaultRowHeight,
+		overscan: 16,
+	});
 
-	// Track the canvas viewport size; the canvas is repainted from scratch on resize.
-	useEffect(() => {
-		const frame = frameRef.current;
-		if (!frame || typeof ResizeObserver === "undefined") return;
-		const observer = new ResizeObserver((entries) => {
-			const entry = entries[0];
-			if (!entry) return;
-			setViewport({ width: entry.contentRect.width, height: entry.contentRect.height });
-		});
-		observer.observe(frame);
-		return () => observer.disconnect();
-	}, []);
+	const handleMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+		if (event.button !== 1) return;
+		event.preventDefault();
+		if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
+		const viewport = viewportRef.current;
+		if (!viewport) return;
+		isDraggingRef.current = true;
+		setIsPanning(true);
+		startPosRef.current = {
+			x: event.clientX,
+			y: event.clientY,
+			scrollLeft: viewport.scrollLeft,
+			scrollTop: viewport.scrollTop,
+		};
+	};
 
-	useEffect(() => {
-		const canvas = canvasRef.current;
-		if (!canvas || !sheet || !layout || viewport.width <= 0 || viewport.height <= 0) return;
-		const ratio = window.devicePixelRatio || 1;
-		const pixelWidth = Math.max(1, Math.round(viewport.width * ratio));
-		const pixelHeight = Math.max(1, Math.round(viewport.height * ratio));
-		if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
-		if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-		canvas.style.width = `${viewport.width}px`;
-		canvas.style.height = `${viewport.height}px`;
-		const context = canvas.getContext("2d");
-		if (!context) return;
-		context.setTransform(ratio, 0, 0, ratio, 0, 0);
-		const selectionRect: SheetSelectionRect | null = range
-			? { startRow: range.startRow, startCol: range.startCol, endRow: range.endRow, endCol: range.endCol }
-			: null;
-		drawSheet({
-			context,
-			sheet,
-			layout,
-			scroll,
-			viewport,
-			theme,
-			query,
-			scale,
-			selection: selectionRect,
-		});
-	}, [sheet, layout, scroll, viewport, theme, query, scale, range]);
+	const handleMouseMove = (event: React.MouseEvent<HTMLElement>) => {
+		if (!isDraggingRef.current) return;
+		const viewport = viewportRef.current;
+		if (!viewport) return;
+		viewport.scrollLeft = startPosRef.current.scrollLeft - (event.clientX - startPosRef.current.x);
+		viewport.scrollTop = startPosRef.current.scrollTop - (event.clientY - startPosRef.current.y);
+	};
 
-	const scrollToCell = useCallback(
-		(row: number, col: number) => {
-			const element = scrollRef.current;
-			if (!element || !layout) return;
-			const left = layout.columnOffsets[col] ?? 0;
-			const right = left + (layout.columnWidths[col] ?? 0);
-			const top = layout.rowOffsets[row] ?? 0;
-			const bottom = top + (layout.rowHeights[row] ?? 0);
-			const visibleWidth = element.clientWidth - layout.indexWidth;
-			const visibleHeight = element.clientHeight - layout.headerHeight;
-			if (left < element.scrollLeft) element.scrollLeft = left;
-			else if (right > element.scrollLeft + visibleWidth) element.scrollLeft = right - visibleWidth;
-			if (top < element.scrollTop) element.scrollTop = top;
-			else if (bottom > element.scrollTop + visibleHeight) element.scrollTop = bottom - visibleHeight;
-		},
-		[layout],
-	);
+	const handleMouseUp = () => {
+		isDraggingRef.current = false;
+		setIsPanning(false);
+	};
 
 	const cellAt = useCallback(
 		(x: number, y: number) => {
-			const element = scrollRef.current;
-			if (!element || !sheet || !layout || sheet.rowCount <= 0 || sheet.colCount <= 0) return null;
-			const rect = element.getBoundingClientRect();
-			const localX = x - rect.left;
-			const localY = y - rect.top;
-			if (localX < layout.indexWidth || localY < layout.headerHeight) return null;
-			if (localX > rect.width || localY > rect.height) return null;
-			const contentX = localX - layout.indexWidth + element.scrollLeft;
-			const contentY = localY - layout.headerHeight + element.scrollTop;
+			const viewport = viewportRef.current;
+			if (!viewport || !sheet || !sheet.rowCount || !sheet.colCount) return null;
+			const body = viewport.querySelector(".excel-grid-body");
+			if (!body) return null;
+			const rect = body.getBoundingClientRect();
 			return {
-				row: Math.max(0, Math.min(sheet.rowCount - 1, offsetIndex(layout.rowOffsets, contentY))),
-				col: Math.max(0, Math.min(sheet.colCount - 1, offsetIndex(layout.columnOffsets, contentX))),
+				row: Math.max(0, Math.min(sheet.rowCount - 1, offsetIndex(rowOffsets, y - rect.top))),
+				col: Math.max(0, Math.min(sheet.colCount - 1, offsetIndex(columnOffsets, x - rect.left - indexWidth))),
 			};
 		},
-		[layout, sheet],
+		[columnOffsets, indexWidth, rowOffsets, sheet],
 	);
-
 	const moveSelection = useCallback(
 		(x: number, y: number) => {
 			const last = cellAt(x, y);
@@ -229,54 +241,18 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 			if (rangeAnchor.current) selection.select(value.target, value.text, rangeAnchor.current, value.excerpt);
 		});
 	};
-
-	const handleScroll = () => {
-		const element = scrollRef.current;
-		if (!element) return;
-		setScroll({ left: element.scrollLeft, top: element.scrollTop });
-	};
-
-	const handleMouseDown = (event: React.MouseEvent<HTMLElement>) => {
-		if (event.button !== 1) return;
-		event.preventDefault();
-		if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
-		const element = scrollRef.current;
-		if (!element) return;
-		isDraggingRef.current = true;
-		setIsPanning(true);
-		startPosRef.current = {
-			x: event.clientX,
-			y: event.clientY,
-			scrollLeft: element.scrollLeft,
-			scrollTop: element.scrollTop,
-		};
-	};
-
-	const handleMouseMove = (event: React.MouseEvent<HTMLElement>) => {
-		if (!isDraggingRef.current) return;
-		const element = scrollRef.current;
-		if (!element) return;
-		element.scrollLeft = startPosRef.current.scrollLeft - (event.clientX - startPosRef.current.x);
-		element.scrollTop = startPosRef.current.scrollTop - (event.clientY - startPosRef.current.y);
-	};
-
-	const handleMouseUp = () => {
-		isDraggingRef.current = false;
-		setIsPanning(false);
-	};
-
 	useEffect(() => {
 		let frame = 0;
 		const tick = () => {
-			const element = scrollRef.current;
-			if (selecting.current && element) {
-				const rect = element.getBoundingClientRect();
-				const { x, y } = pointer.current;
+			const viewport = viewportRef.current;
+			if (selecting.current && viewport) {
+				const rect = viewport.getBoundingClientRect(),
+					{ x, y } = pointer.current;
 				const dx = x < rect.left + 24 ? -12 : x > rect.right - 24 ? 12 : 0;
-				const dy = y < rect.top + (layout?.headerHeight ?? 0) + 24 ? -12 : y > rect.bottom - 24 ? 12 : 0;
+				const dy = y < rect.top + defaultRowHeight + 24 ? -12 : y > rect.bottom - 24 ? 12 : 0;
 				if (dx || dy) {
-					element.scrollLeft += dx;
-					element.scrollTop += dy;
+					viewport.scrollLeft += dx;
+					viewport.scrollTop += dy;
 					moveSelection(x, y);
 				}
 			}
@@ -284,7 +260,17 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		};
 		if (dragging) frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
-	}, [dragging, layout?.headerHeight, moveSelection]);
+	}, [defaultRowHeight, dragging, moveSelection]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(rowHeights): Zoom and sheet changes invalidate the measured row sizes.
+	useEffect(() => {
+		virtualizer.measure();
+	}, [rowHeights, virtualizer]);
+	const visibleRows = virtualizer.getVirtualItems();
+	const sheetNames = workbook?.sheetNames ?? [];
+	const gridWidth = sheet ? indexWidth + (columnOffsets[sheet.colCount] ?? 0) : 0;
+	const firstVisibleRow = visibleRows[0]?.index ?? 0;
+	const lastVisibleRow = visibleRows[visibleRows.length - 1]?.index ?? 0;
+	const visibleMerges = sheet ? mergesInRowRange(sheet.merges, firstVisibleRow, lastVisibleRow) : [];
 
 	return (
 		<div className="universal-previewer excel-previewer">
@@ -316,7 +302,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 				<span>
 					{range && sheet
 						? (() => {
-								const cell = sheet.cells.get(`${range.startRow}:${range.startCol}`);
+								const cell = sheet.cells.get(cellKey(range.startRow, range.startCol));
 								return cell?.formula ? `=${cell.formula}` : (cell?.formatted ?? "");
 							})()
 						: ""}
@@ -327,8 +313,82 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 				className={`preview-viewport excel-viewport${isPanning ? " is-panning" : ""}`}
 				onMouseDown={handleMouseDown}
 				onMouseLeave={handleMouseUp}
+				onPointerDown={(event) => {
+					if (event.button !== 0 || !selection.enabled) return;
+					const cell = cellAt(event.clientX, event.clientY);
+					if (!cell) return;
+					event.preventDefault();
+					selection.clear();
+					if (!event.shiftKey || !range) firstCell.current = cell;
+					selecting.current = true;
+					setDragging(true);
+					pointer.current = { x: event.clientX, y: event.clientY };
+					event.currentTarget.setPointerCapture(event.pointerId);
+					event.currentTarget.focus();
+					moveSelection(event.clientX, event.clientY);
+				}}
+				onPointerMove={(event) => {
+					if (selecting.current) {
+						pointer.current = { x: event.clientX, y: event.clientY };
+						moveSelection(event.clientX, event.clientY);
+					}
+				}}
+				onPointerUp={(event) => {
+					if (event.button === 0 && selecting.current) {
+						selecting.current = false;
+						setDragging(false);
+						event.currentTarget.releasePointerCapture(event.pointerId);
+						offerRequest();
+					}
+				}}
+				onPointerCancel={() => {
+					selecting.current = false;
+					setDragging(false);
+				}}
+				onKeyDown={(event) => {
+					if (event.key === "Escape") {
+						selection.clear();
+						setRange(null);
+						rangeRef.current = null;
+						return;
+					}
+					if (
+						!sheet ||
+						!selection.enabled ||
+						!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
+					)
+						return;
+					event.preventDefault();
+					selection.clear();
+					const current = rangeRef.current;
+					const row = Math.max(
+						0,
+						Math.min(
+							sheet.rowCount - 1,
+							(current ? lastCell.current.row : 0) +
+								(event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0),
+						),
+					);
+					const col = Math.max(
+						0,
+						Math.min(
+							sheet.colCount - 1,
+							(current ? lastCell.current.col : 0) +
+								(event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0),
+						),
+					);
+					if (!event.shiftKey || !current) firstCell.current = { row, col };
+					lastCell.current = { row, col };
+					rangeRef.current = expandExcelSelection(sheet, firstCell.current, { row, col });
+					setRange(rangeRef.current);
+					virtualizer.scrollToIndex(row);
+					offerRequest();
+				}}
 				onMouseMove={handleMouseMove}
 				onMouseUp={handleMouseUp}
+				ref={viewportRef}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: The scrollable sheet receives focus for arrow-key cell selection and Escape.
+				tabIndex={0}
 			>
 				{loading ? (
 					<div className="preview-loading-state">
@@ -339,122 +399,138 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 					<div className="preview-error-state">
 						<span>{error}</span>
 					</div>
-				) : !sheet || !layout || sheet.rowCount === 0 ? (
+				) : !sheet || sheet.rowCount === 0 ? (
 					<div className="preview-empty-state">
 						<Table aria-hidden="true" size={32} />
 						<span>{t("Empty sheet")}</span>
 					</div>
 				) : (
-					<div className="excel-canvas-frame" ref={frameRef}>
-						<canvas className="excel-canvas" ref={canvasRef} />
-						<div
-							aria-label={`${fileName}: ${activeSheetName}`}
-							className="excel-canvas-scroll"
-							onKeyDown={(event) => {
-								if (event.key === "Escape") {
-									selection.clear();
-									setRange(null);
-									rangeRef.current = null;
-									return;
-								}
-								if (
-									!sheet ||
-									!selection.enabled ||
-									!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
-								)
-									return;
-								event.preventDefault();
-								selection.clear();
-								const current = rangeRef.current;
-								const row = Math.max(
-									0,
-									Math.min(
-										sheet.rowCount - 1,
-										(current ? lastCell.current.row : 0) +
-											(event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0),
-									),
-								);
-								const col = Math.max(
-									0,
-									Math.min(
-										sheet.colCount - 1,
-										(current ? lastCell.current.col : 0) +
-											(event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0),
-									),
-								);
-								if (!event.shiftKey || !current) firstCell.current = { row, col };
-								lastCell.current = { row, col };
-								rangeRef.current = expandExcelSelection(sheet, firstCell.current, { row, col });
-								setRange(rangeRef.current);
-								scrollToCell(row, col);
-								offerRequest();
-							}}
-							onPointerCancel={() => {
-								selecting.current = false;
-								setDragging(false);
-							}}
-							onPointerDown={(event) => {
-								if (event.button !== 0 || !selection.enabled) return;
-								const cell = cellAt(event.clientX, event.clientY);
-								if (!cell) return;
-								event.preventDefault();
-								selection.clear();
-								if (!event.shiftKey || !range) firstCell.current = cell;
-								selecting.current = true;
-								setDragging(true);
-								pointer.current = { x: event.clientX, y: event.clientY };
-								event.currentTarget.setPointerCapture(event.pointerId);
-								moveSelection(event.clientX, event.clientY);
-							}}
-							onPointerMove={(event) => {
-								if (selecting.current) {
-									pointer.current = { x: event.clientX, y: event.clientY };
-									moveSelection(event.clientX, event.clientY);
-								}
-							}}
-							onPointerUp={(event) => {
-								if (event.button === 0 && selecting.current) {
-									selecting.current = false;
-									setDragging(false);
-									event.currentTarget.releasePointerCapture(event.pointerId);
-									offerRequest();
-								}
-							}}
-							onScroll={handleScroll}
-							ref={scrollRef}
-							role="application"
-							// biome-ignore lint/a11y/noNoninteractiveTabindex: The canvas grid receives focus for arrow-key cell selection and Escape.
-							tabIndex={0}
-						>
-							<div
-								className="excel-canvas-content"
-								style={{ width: layout.totalWidth, height: layout.totalHeight }}
-							>
-								{range && (
-									<div
-										className="excel-range-selection"
-										ref={rangeAnchor}
-										style={{
-											top: layout.headerHeight + (layout.rowOffsets[range.startRow] ?? 0),
-											left: layout.indexWidth + (layout.columnOffsets[range.startCol] ?? 0),
-											height:
-												(layout.rowOffsets[range.endRow + 1] ?? 0) -
-												(layout.rowOffsets[range.startRow] ?? 0),
-											width:
-												(layout.columnOffsets[range.endCol + 1] ?? 0) -
-												(layout.columnOffsets[range.startCol] ?? 0),
-										}}
-									/>
-								)}
+					<div
+						className="excel-grid"
+						style={{ width: gridWidth, height: defaultRowHeight + virtualizer.getTotalSize() }}
+					>
+						<div className="excel-grid-header" style={{ height: defaultRowHeight, width: gridWidth }}>
+							<div className="excel-corner-cell" style={{ width: indexWidth, minWidth: indexWidth }}>
+								#
 							</div>
+							{Array.from({ length: sheet.colCount }, (_, col) => (
+								<div
+									className="excel-col-header"
+									key={getColumnLetter(col + sheet.startCol)}
+									style={{
+										width: columnWidths[col] ?? DEFAULT_COL_WIDTH,
+										minWidth: columnWidths[col] ?? DEFAULT_COL_WIDTH,
+									}}
+								>
+									{getColumnLetter(col + sheet.startCol)}
+								</div>
+							))}
+						</div>
+						<div className="excel-grid-body" style={{ height: virtualizer.getTotalSize(), width: gridWidth }}>
+							{range && (
+								<div
+									ref={rangeAnchor}
+									className="excel-range-selection"
+									style={{
+										top: rowOffsets[range.startRow] ?? 0,
+										left: indexWidth + (columnOffsets[range.startCol] ?? 0),
+										height: (rowOffsets[range.endRow + 1] ?? 0) - (rowOffsets[range.startRow] ?? 0),
+										width: (columnOffsets[range.endCol + 1] ?? 0) - (columnOffsets[range.startCol] ?? 0),
+									}}
+								/>
+							)}
+							{visibleRows.map((virtualRow) => (
+								<div
+									className="excel-grid-row"
+									key={virtualRow.index}
+									style={{ height: virtualRow.size, top: virtualRow.start, width: gridWidth }}
+								>
+									<div className="excel-row-header" style={{ width: indexWidth, minWidth: indexWidth }}>
+										{virtualRow.index + sheet.startRow + 1}
+									</div>
+									{paintedCellsForRow(sheet, virtualRow.index).map((cell) => {
+										const merged = cell.covered || cell.rowSpan > 1 || cell.colSpan > 1;
+										const match = Boolean(!merged && query && cell.formatted.toLowerCase().includes(query));
+										// Excel right-aligns numbers and dates unless the cell overrides it.
+										const numeric = cell.type === "n" || cell.type === "d";
+										const align = cell.align ?? (numeric ? "right" : undefined);
+										const wrapClass = cell.wrap === false ? " is-clip" : cell.wrap ? " is-wrap" : "";
+										return (
+											<div
+												className={`excel-cell${merged ? " is-covered" : ""}${match ? " is-search-match" : ""}${numeric ? " is-number" : ""}${wrapClass}`}
+												key={cell.col}
+												style={{
+													width: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
+													minWidth: columnWidths[cell.col] ?? DEFAULT_COL_WIDTH,
+													...(!match && cell.fill ? { backgroundColor: cell.fill } : {}),
+													...borderCss(cell.borders, scale),
+													...verticalCss(cell.valign),
+												}}
+												title={merged ? undefined : cell.formatted}
+											>
+												{merged ? (
+													""
+												) : (
+													<span
+														style={{
+															display: "block",
+															width: "100%",
+															textAlign: align,
+															...textCss(
+																cell,
+																scale,
+																match ? panelBackground : (cell.fill ?? panelBackground),
+															),
+														}}
+													>
+														{cell.formatted}
+													</span>
+												)}
+											</div>
+										);
+									})}
+								</div>
+							))}
+							{visibleMerges.map((merge) => {
+								const match = Boolean(query && merge.formatted.toLowerCase().includes(query));
+								const wrapClass = merge.wrap === false ? " is-clip" : merge.wrap ? " is-wrap" : "";
+								return (
+									<div
+										className={`excel-merge${match ? " is-search-match" : ""}${wrapClass}`}
+										key={`${merge.row}:${merge.col}`}
+										style={{
+											height: (rowOffsets[merge.row + merge.rowSpan] ?? 0) - (rowOffsets[merge.row] ?? 0),
+											left: indexWidth + (columnOffsets[merge.col] ?? 0),
+											top: rowOffsets[merge.row] ?? 0,
+											width:
+												(columnOffsets[merge.col + merge.colSpan] ?? 0) - (columnOffsets[merge.col] ?? 0),
+											...(!match && merge.fill ? { backgroundColor: merge.fill } : {}),
+											...borderCss(merge.borders, scale),
+											...verticalCss(merge.valign),
+										}}
+										title={merge.formatted}
+									>
+										<span
+											style={{
+												display: "block",
+												width: "100%",
+												textAlign: merge.align,
+												...textCss(merge, scale, match ? panelBackground : (merge.fill ?? panelBackground)),
+											}}
+										>
+											{merge.formatted}
+										</span>
+									</div>
+								);
+							})}
 						</div>
 					</div>
 				)}
 			</section>
 			{selection.popover}
-			{workbook && workbook.sheetNames.length > 1 && (
+			{sheetNames.length > 1 && (
 				<nav aria-label={t("Sheets")} className="excel-sheet-tabs">
-					{workbook.sheetNames.map((name) => (
+					{sheetNames.map((name) => (
 						<button
 							className={`excel-sheet-tab${activeSheetName === name ? " is-active" : ""}`}
 							key={name}
