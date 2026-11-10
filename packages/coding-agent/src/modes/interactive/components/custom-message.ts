@@ -3,6 +3,7 @@ import type { Component } from "@metis/tui";
 import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
 import type { MessageRenderer } from "../../../core/extensions/types.ts";
 import type { CustomMessage } from "../../../core/messages.ts";
+import { sanitizeTerminalText } from "../../../utils/ansi.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 /**
@@ -91,7 +92,7 @@ export class CustomMessageComponent extends Container {
 		}
 
 		this.box.addChild(
-			new Markdown(text, 0, 0, this.markdownTheme, {
+			new Markdown(sanitizeTerminalText(text), 0, 0, this.markdownTheme, {
 				color: (text: string) => theme.fg("customMessageText", text),
 			}),
 		);
