@@ -12,6 +12,7 @@ import {
 	revalidateUnattendedAction,
 	UNATTENDED_TOOL_NAMES,
 } from "../src/core/unattended-execution.ts";
+import { UNATTENDED_BLOCKED_FETCH_REASON } from "../src/core/unattended-fetch-guard.ts";
 import { canonicalizeActionPath } from "../src/utils/paths.ts";
 import { createHarness } from "./suite/harness.ts";
 
@@ -80,6 +81,63 @@ describe("unattended workspace-write execution", () => {
 		expect(decision("write", { path: join(outside, "value.txt"), content: "x" })).toBe("deny");
 		expect(decision("mcp_read", {}, "mcp")).toBe("deny");
 		expect(decision("extension_tool", {}, "extension")).toBe("deny");
+	});
+
+	it("rejects loopback, unspecified, and link-local web_fetch targets but keeps private and public hosts", () => {
+		const profile = createUnattendedExecutionProfile({ workspaceRoots: [cwd], bashOperations });
+		const blocked = [
+			"http://127.0.0.1/",
+			"http://127.1/private",
+			"http://0/",
+			"http://0.0.0.0/",
+			"http://localhost/docs",
+			"http://LOCALHOST./docs",
+			"http://[::1]/",
+			"http://[::ffff:127.0.0.1]/",
+			"http://[::]/",
+			"http://169.254.169.254/latest/meta-data",
+			"http://[::ffff:169.254.169.254]/",
+			"http://[fe80::1]/",
+			"http://2130706433/",
+		];
+		for (const url of blocked) {
+			const result = authorizeUnattendedAction({
+				profile,
+				action: action("web_fetch", { url }),
+				args: { url },
+				cwd,
+			});
+			expect(result, url).toMatchObject({ decision: "deny", reason: UNATTENDED_BLOCKED_FETCH_REASON });
+		}
+		for (const url of [
+			"https://10.1.2.3/docs",
+			"http://192.168.1.5/",
+			"http://172.16.0.1/",
+			"http://172.31.255.255/",
+			"https://example.test/page",
+			"http://8.8.8.8/",
+			"http://[::ffff:10.1.2.3]/",
+			"http://[fd00:ec2::254]/",
+			"http://metadata.internal/latest",
+		]) {
+			expect(decision("web_fetch", { url }), url).toBe("allow");
+		}
+	});
+
+	it("rejects an unattended web_fetch whose target changes to a link-local address", () => {
+		const args = { url: "https://example.test/page" };
+		const profile = createUnattendedExecutionProfile({ workspaceRoots: [cwd], bashOperations });
+		const authorized = action("web_fetch", args);
+		expect(authorizeUnattendedAction({ profile, action: authorized, args, cwd }).decision).toBe("allow");
+		expect(() =>
+			revalidateUnattendedAction({
+				profile,
+				authorized,
+				toolName: "web_fetch",
+				args: { url: "http://169.254.169.254/latest/meta-data" },
+				cwd,
+			}),
+		).toThrow(/outside the unattended workspace/);
 	});
 
 	it("requires an absolute non-empty workspace and freezes the profile", () => {

@@ -3915,6 +3915,7 @@
 							"WaitAgentsResult",
 							"WebFetchToolDetails",
 							"WebFetchToolInput",
+							"WebFetchToolOptions",
 							"WebResult",
 							"WebSearchProvider",
 							"WebSearchResponse",

@@ -6308,6 +6308,7 @@ export class AgentSession {
 					},
 					write: memoryRoot ? { restrictedRoots: [memoryRoot] } : undefined,
 					edit: memoryRoot ? { restrictedRoots: [memoryRoot] } : undefined,
+					webFetch: this._unattendedExecution ? { unattended: true } : undefined,
 					webSearch: {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),

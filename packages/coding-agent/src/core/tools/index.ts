@@ -70,6 +70,7 @@ export {
 	createWebFetchToolDefinition,
 	type WebFetchToolDetails,
 	type WebFetchToolInput,
+	type WebFetchToolOptions,
 } from "./web-fetch.ts";
 export {
 	createWebSearchTool,
@@ -106,7 +107,7 @@ import { createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { createWebFetchToolDefinition } from "./web-fetch.ts";
+import { createWebFetchToolDefinition, type WebFetchToolOptions } from "./web-fetch.ts";
 import { createWebSearchToolDefinition, type WebSearchToolOptions } from "./web-search.ts";
 import { createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
@@ -140,6 +141,7 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
+	webFetch?: WebFetchToolOptions;
 	webSearch?: WebSearchToolOptions;
 	goal?: GoalToolOptions;
 	imageGeneration?: ImageGenerationToolOptions;
@@ -162,7 +164,7 @@ function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOp
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
 		case "web_fetch":
-			return createWebFetchToolDefinition();
+			return createWebFetchToolDefinition(options?.webFetch);
 		case "web_search":
 			return createWebSearchToolDefinition(options?.webSearch);
 		case "image_generate":
