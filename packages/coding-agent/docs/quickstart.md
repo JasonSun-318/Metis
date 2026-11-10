@@ -1,43 +1,26 @@
 # Quickstart
 
-This page gets you from install to a useful first metis session.
+This page gets you from a source checkout to a useful first metis session.
 
 ## Install
 
-Metis is distributed as an npm package:
+`@metis/coding-agent` is not published on npm. Node.js 22.19 or newer is required. Clone https://gitee.com/sun124578963_0/metis.git, then run these commands from the repository root:
 
 ```bash
-npm install -g --ignore-scripts @metis/coding-agent
+npm ci --ignore-scripts
+./metis-test.sh
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Metis does not require install scripts for normal npm installs.
+`npm ci --ignore-scripts` installs the locked dependencies and skips package lifecycle scripts. `./metis-test.sh` starts the CLI from source. There is no global `metis` binary. Commands on this page that show `metis` take the same arguments when passed to `./metis-test.sh`.
 
-### Uninstall
-
-Use the package manager that installed metis. The curl installer uses npm globally, so curl and npm installs are removed with npm:
-
-```bash
-# curl installer or npm install -g
-npm uninstall -g @metis/coding-agent
-
-# pnpm
-pnpm remove -g @metis/coding-agent
-
-# Yarn
-yarn global remove @metis/coding-agent
-
-# Bun
-bun uninstall -g @metis/coding-agent
-```
-
-Uninstalling metis leaves settings, credentials, sessions, and installed metis packages in `~/.metis/agent/`.
-
-Then start metis in the directory or workspace you want it to work on:
+Invoke the script by path when the project you want to work on is not the Metis checkout. Metis keeps that working directory:
 
 ```bash
 cd /path/to/project
-metis
+/path/to/metis/metis-test.sh
 ```
+
+Deleting the checkout does not remove settings, credentials, sessions, or installed metis packages in `~/.metis/agent/`.
 
 ## Authenticate
 
@@ -59,7 +42,7 @@ Set an API key before launching metis:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-metis
+./metis-test.sh
 ```
 
 You can also run `/login` and select an API-key provider to store the key in `~/.metis/agent/auth.json`.

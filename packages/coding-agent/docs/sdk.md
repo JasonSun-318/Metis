@@ -39,11 +39,13 @@ await session.prompt("What files are in the current directory?");
 
 ## Installation
 
+`@metis/coding-agent` is not published on npm. From the repository root (Node.js 22.19 or newer):
+
 ```bash
-npm install @metis/coding-agent
+npm ci --ignore-scripts
 ```
 
-The SDK is included in the main package. No separate installation needed.
+The SDK is the workspace package. Import `@metis/coding-agent` from that checkout. No separate installation is required.
 
 ## Core Concepts
 

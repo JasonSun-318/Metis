@@ -8,7 +8,7 @@ Outputs all session events as JSON lines to stdout. Useful for integrating metis
 
 ## Event Types
 
-Events are defined in [`AgentSessionEvent`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/agent-session.ts#L102):
+Events are defined in [`AgentSessionEvent`](../src/core/agent-session.ts):
 
 ```typescript
 type AgentSessionEvent =
@@ -22,7 +22,7 @@ type AgentSessionEvent =
 
 `queue_update` emits the full pending steering and follow-up queues whenever they change. `compaction_start` and `compaction_end` cover both manual and automatic compaction.
 
-Base events from [`AgentEvent`](https://github.com/metis/metis/blob/main/packages/agent/src/types.ts#L179):
+Base events from [`AgentEvent`](../../agent/src/types.ts):
 
 ```typescript
 type AgentEvent =
@@ -44,12 +44,12 @@ type AgentEvent =
 
 ## Message Types
 
-Base messages from [`packages/ai/src/types.ts`](https://github.com/metis/metis/blob/main/packages/ai/src/types.ts#L134):
-- `UserMessage` (line 134)
-- `AssistantMessage` (line 140)
-- `ToolResultMessage` (line 152)
+Base messages from [`packages/ai/src/types.ts`](../../ai/src/types.ts):
+- `UserMessage` (line 323)
+- `AssistantMessage` (line 329)
+- `ToolResultMessage` (line 344)
 
-Extended messages from [`packages/coding-agent/src/core/messages.ts`](https://github.com/metis/metis/blob/main/packages/coding-agent/src/core/messages.ts#L29):
+Extended messages from [`packages/coding-agent/src/core/messages.ts`](../src/core/messages.ts):
 - `BashExecutionMessage` (line 29)
 - `CustomMessage` (line 46)
 - `BranchSummaryMessage` (line 55)

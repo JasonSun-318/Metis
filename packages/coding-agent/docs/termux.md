@@ -16,14 +16,13 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install nodejs termux-api git
 
-# Install metis
-npm install -g --ignore-scripts @metis/coding-agent
-
-# Create config directory
+# Checkout this repository, then install and run from its root.
+# Node.js 22.19 or newer is required.
+git clone https://gitee.com/sun124578963_0/metis.git
+cd metis
+npm ci --ignore-scripts
 mkdir -p ~/.metis/agent
-
-# Run metis
-metis
+./metis-test.sh
 ```
 
 ## Clipboard Support

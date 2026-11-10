@@ -54,6 +54,6 @@ If you bind-mount a host workspace read/write, writes from inside the container 
 
 ## Reporting Security Issues
 
-To report a security issue, follow the repository [Security Policy](https://github.com/metis/metis/blob/main/SECURITY.md). Do not open a public issue for security-sensitive reports.
+This repository does not publish a separate security policy. To report a security issue, contact the maintainers of https://gitee.com/sun124578963_0/metis.git privately. Do not open a public issue for security-sensitive reports.
 
 Expected Full-mode behavior, prompt injection from untrusted content, and behavior of user-installed trusted code are generally outside the security boundary unless a report demonstrates an approval bypass or shows Metis granting access beyond the documented boundary.
