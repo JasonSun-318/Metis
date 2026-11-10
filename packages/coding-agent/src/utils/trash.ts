@@ -1,4 +1,5 @@
 import { spawnProcess, spawnProcessSync, waitForChildProcess } from "./child-process.ts";
+import { trashPathsViaXdg } from "./xdg-trash.ts";
 
 const TRASH_TIMEOUT_MS = 30_000;
 
@@ -183,7 +184,9 @@ function trashViaWindowsRecycleBin(paths: readonly string[]): string | undefined
  *
  * On Windows the `trash` CLI is not available, so items are moved to the Recycle
  * Bin through PowerShell's IFileOperation (see WINDOWS_RECYCLE_TYPE_DEFINITION).
- * Elsewhere the `trash` CLI is used, preserving prior behavior.
+ * macOS uses NSFileManager. Linux moves files into the XDG trash directory, so
+ * deletion does not depend on a `trash` executable. Other Unix platforms still
+ * use the `trash` CLI.
  */
 export function trashPathsSync(paths: readonly string[]): string | undefined {
 	if (paths.length === 0) return undefined;
@@ -192,6 +195,9 @@ export function trashPathsSync(paths: readonly string[]): string | undefined {
 	}
 	if (process.platform === "darwin") {
 		return trashViaMacOSFileManager(paths);
+	}
+	if (process.platform === "linux") {
+		return trashPathsViaXdg(paths);
 	}
 	const trashArgs = paths.some((path) => path.startsWith("-")) ? ["--", ...paths] : [...paths];
 	const result = spawnProcessSync("trash", trashArgs, { encoding: "utf8" });
@@ -212,6 +218,11 @@ export async function trashPath(path: string): Promise<void> {
 	}
 	if (process.platform === "darwin") {
 		const detail = trashViaMacOSFileManager([path]);
+		if (detail) throw new Error(`Trash failed: ${detail}`);
+		return;
+	}
+	if (process.platform === "linux") {
+		const detail = trashPathsViaXdg([path]);
 		if (detail) throw new Error(`Trash failed: ${detail}`);
 		return;
 	}

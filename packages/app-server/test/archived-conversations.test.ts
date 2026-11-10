@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ArchivedConversationView, PROTOCOL_VERSION } from "@metis/app-protocol";
@@ -245,6 +245,41 @@ describe("archived conversations", () => {
 			).toHaveProperty("error.data.name", "NOT_FOUND");
 			expect(server.runtimeHost.open).not.toHaveBeenCalled();
 		} finally {
+			await stop(server.app);
+		}
+	});
+
+	it("reports a fixed operation failure when an archived child cannot be moved to the trash", async () => {
+		const f = fixture();
+		const root = f.root("Root stays archived");
+		const child = f.child(root, "Cannot trash");
+		const blocker = join(f.directory, "xdg-data-home");
+		writeFileSync(blocker, "not a directory");
+		const previous = process.env.XDG_DATA_HOME;
+		process.env.XDG_DATA_HOME = blocker;
+		const server = await f.server();
+		try {
+			const sessionId = root.manager.getSessionId();
+			expect(await server.call("session/archive", { sessionId, requestId: randomUUID() })).toHaveProperty(
+				"result.session.archived",
+				true,
+			);
+			const response = await server.call("agent/delete", {
+				sessionId,
+				agentId: child.agentId,
+				requestId: randomUUID(),
+			});
+			expect(response).toMatchObject({
+				error: { message: "Operation failed", data: { name: "OPERATION_FAILED" } },
+			});
+			const wire = JSON.stringify(response);
+			expect(wire).not.toContain(blocker);
+			expect(wire).not.toContain("ENOTDIR");
+			expect(wire).not.toContain(child.path);
+			expect(existsSync(child.path)).toBe(true);
+		} finally {
+			if (previous === undefined) delete process.env.XDG_DATA_HOME;
+			else process.env.XDG_DATA_HOME = previous;
 			await stop(server.app);
 		}
 	});
