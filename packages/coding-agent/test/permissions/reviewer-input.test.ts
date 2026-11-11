@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	buildModelReviewInput,
@@ -93,8 +94,13 @@ describe("model permission review input", () => {
 		expect(() => buildModelReviewInput(reviewInput({ redactedArguments: new Date() }))).toThrow("plain");
 		const bounded = buildModelReviewInput(reviewInput({ redactedArguments: { path: `/${"x".repeat(17 * 1024)}` } }));
 		expect(Buffer.byteLength(JSON.stringify(bounded.redactedArguments), "utf8")).toBeLessThan(5 * 1024);
+		// A short tmpdir leaves 400 paths under 48 KiB. The fixed pad clears that
+		// limit without reaching the 16 KiB argument cap or the 256 KiB action cap.
+		const pathPad = "p".repeat(32);
 		const manyReads = normalizePermissionAction(
-			actionInput({ readPaths: Array.from({ length: 400 }, (_, index) => `${projectDir}/read-${index}.txt`) }),
+			actionInput({
+				readPaths: Array.from({ length: 400 }, (_, index) => join(projectDir, `${pathPad}-read-${index}.txt`)),
+			}),
 		);
 		expect(() =>
 			buildModelReviewInput(

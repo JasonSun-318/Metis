@@ -105,15 +105,64 @@ describe("read-only command semantics", () => {
 		["cut", "cut -d, -f1 package.json"],
 		["echo", "echo hello"],
 		["printf", "printf '%s\\n' hello"],
-		["git status", "git status --short"],
-		["git diff", "git diff --stat"],
-		["git log", "git log -n 5 --oneline"],
-		["git show", "git show HEAD"],
 	])("accepts read-only %s", (_label, command) => {
 		const result = analyze(command);
 		expect(result.disposition).toBe("safe");
 		expect(result.complete).toBe(true);
 		expect(result.writePaths).toEqual([]);
+	});
+
+	it.each([
+		["git status", "git status --short"],
+		["git diff", "git diff --stat"],
+		["git log", "git log -n 5 --oneline"],
+		["git show", "git show HEAD"],
+	])("accepts read-only %s without host git configuration", (_label, command) => {
+		const home = mkdtempSync(join(tmpdir(), "metis-shell-git-home-"));
+		const configHome = mkdtempSync(join(tmpdir(), "metis-shell-git-xdg-"));
+		const workspace = mkdtempSync(join(tmpdir(), "metis-shell-git-cwd-"));
+		const previous = new Map<string, string | undefined>();
+		const remember = (name: string) => {
+			if (!previous.has(name)) previous.set(name, process.env[name]);
+		};
+		remember("HOME");
+		remember("XDG_CONFIG_HOME");
+		remember("GIT_CONFIG_NOSYSTEM");
+		for (const name of [
+			"GIT_CONFIG_COUNT",
+			"GIT_DIR",
+			"GIT_WORK_TREE",
+			"GIT_CONFIG",
+			"GIT_CONFIG_PARAMETERS",
+			"GIT_EXTERNAL_DIFF",
+			"GIT_EXEC_PATH",
+		]) {
+			remember(name);
+		}
+		for (const name of Object.keys(process.env)) {
+			if (name.startsWith("GIT_CONFIG_KEY_") || name.startsWith("GIT_CONFIG_VALUE_")) remember(name);
+		}
+		try {
+			process.env.HOME = home;
+			process.env.XDG_CONFIG_HOME = configHome;
+			process.env.GIT_CONFIG_NOSYSTEM = "1";
+			for (const name of previous.keys()) {
+				if (name === "HOME" || name === "XDG_CONFIG_HOME" || name === "GIT_CONFIG_NOSYSTEM") continue;
+				delete process.env[name];
+			}
+			const result = analyze(command, { cwd: workspace, workspaceRoots: [workspace] });
+			expect(result.disposition).toBe("safe");
+			expect(result.complete).toBe(true);
+			expect(result.writePaths).toEqual([]);
+		} finally {
+			for (const [name, value] of previous) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			rmSync(home, { recursive: true, force: true });
+			rmSync(configHome, { recursive: true, force: true });
+			rmSync(workspace, { recursive: true, force: true });
+		}
 	});
 
 	it("records input targets for read filters", () => {
