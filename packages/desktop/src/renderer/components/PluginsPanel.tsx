@@ -130,7 +130,7 @@ interface PluginsPanelProps {
 	readonly onSkillsChanged?: () => void;
 	readonly preferences: ProjectPreferenceMap;
 	readonly serverReady: boolean;
-	readonly state: AppStoreSnapshot;
+	readonly state: Pick<AppStoreSnapshot, "activeSessionId" | "sessionsById">;
 }
 
 type LoadState<T> =
