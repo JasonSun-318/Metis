@@ -17,7 +17,6 @@ import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import type {
-	AgentMode,
 	ClientParams,
 	ClientResult,
 	DomainEvent,
@@ -202,7 +201,6 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
-			mode: "code",
 			contextTokens: 64_000,
 			contextWindow: 128_000,
 			contextBasis: "reported_total",
@@ -548,12 +546,11 @@ function writeSession(root: string, sessionId: string, cwd: string, tail = ""): 
 	return path;
 }
 
-function writeModeSession(
+function writeProjectSession(
 	agentDir: string,
 	sessionsRoot: string,
 	sessionId: string,
 	cwd: string,
-	mode: AgentMode,
 	options: {
 		archived?: boolean;
 		cwdOrigin?: "managed" | "user-selected";
@@ -572,7 +569,6 @@ function writeModeSession(
 			id: sessionId,
 			timestamp: "2026-01-01T00:00:00.000Z",
 			cwd,
-			mode,
 			cwdOrigin: options.cwdOrigin ?? "user-selected",
 			...(options.scheduled ? { scheduled: options.scheduled } : {}),
 		})}\n`,
@@ -980,7 +976,7 @@ describe("AppServer", () => {
 	it("publishes one canonical cwd for aliased project journals", async () => {
 		const alias = join(tempDir, "project-alias");
 		symlinkSync(projectDir, alias, "dir");
-		writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
+		writeProjectSession(agentDir, sessionsRoot, "aliased-project", alias);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -991,10 +987,33 @@ describe("AppServer", () => {
 		});
 	});
 
+	it("ignores the retired mode header in legacy session journals", async () => {
+		const path = writeProjectSession(agentDir, sessionsRoot, "legacy-mode", projectDir);
+		const [header] = readFileSync(path, "utf8").split("\n");
+		writeFileSync(path, `${JSON.stringify({ ...JSON.parse(header!), mode: "chat" })}\n`);
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const listed = await connection.handle({ jsonrpc: "2.0", id: "list-legacy", method: "session/list", params: {} });
+		expect(listed).toMatchObject({
+			result: {
+				sessions: [
+					expect.objectContaining({
+						sessionId: "legacy-mode",
+						cwd: realpathSync(projectDir),
+						cwdOrigin: "user-selected",
+					}),
+				],
+			},
+		});
+		expect(JSON.stringify(listed)).not.toContain('"mode"');
+	});
+
 	it("creates new sessions in an aliased project's existing storage directory", async () => {
 		const alias = join(tempDir, "project-alias");
 		symlinkSync(projectDir, alias, "dir");
-		const existingPath = writeModeSession(agentDir, sessionsRoot, "aliased-project", alias, "chat");
+		const existingPath = writeProjectSession(agentDir, sessionsRoot, "aliased-project", alias);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -1004,7 +1023,7 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "create-in-alias",
 				method: "session/create",
-				params: { requestId: REQUEST_A, mode: "chat", cwd: realpathSync(projectDir) },
+				params: { requestId: REQUEST_A, cwd: realpathSync(projectDir) },
 			}),
 		).toMatchObject({ result: { session: { sessionId: REQUEST_A, cwd: realpathSync(projectDir) } } });
 		expect(dirname(server.catalog.get(REQUEST_A).path)).toBe(dirname(existingPath));
@@ -1013,10 +1032,10 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-alias",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: realpathSync(projectDir) },
+			params: { cwd: realpathSync(projectDir) },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
-		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
+		vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => {
 			for (const session of input.sessions) unlinkSync(session.path);
 			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
 		});
@@ -1025,7 +1044,7 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "delete-alias",
 				method: "project/delete",
-				params: { requestId: REQUEST_B, mode: "chat", cwd: realpathSync(projectDir), expectedRevision: revision },
+				params: { requestId: REQUEST_B, cwd: realpathSync(projectDir), expectedRevision: revision },
 			}),
 		).toMatchObject({ result: { deletedSessionCount: 2 } });
 	});
@@ -1085,7 +1104,6 @@ describe("AppServer", () => {
 		).toMatchObject({
 			result: {
 				sessionId: "session-a",
-				mode: "code",
 				contextTokens: 64_000,
 				contextWindow: 128_000,
 				remainingPercent: 50,
@@ -1251,7 +1269,7 @@ describe("AppServer", () => {
 	it("renames ordinary sessions and rejects scheduled session actions", async () => {
 		writeSession(sessionsRoot, "session-a", projectDir);
 		writeSession(sessionsRoot, "session-archived", projectDir);
-		writeModeSession(agentDir, sessionsRoot, "scheduled-session", projectDir, "chat", {
+		writeProjectSession(agentDir, sessionsRoot, "scheduled-session", projectDir, {
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
@@ -2103,7 +2121,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0" as const,
 			id: "create-full",
 			method: "session/create" as const,
-			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, permissionPreset: "full" as const },
+			params: { requestId: REQUEST_A, cwd: projectDir, permissionPreset: "full" as const },
 		};
 
 		expect(await connection.handle(create)).toMatchObject({ result: { session: { sessionId: REQUEST_A } } });
@@ -2130,13 +2148,29 @@ describe("AppServer", () => {
 		);
 	});
 
+	it("rejects the removed session mode field on create", async () => {
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create-legacy-mode",
+				method: "session/create",
+				params: { requestId: REQUEST_A, cwd: projectDir, mode: "chat" },
+			}),
+			RPC_ERROR_CODES.INVALID_PARAMS,
+		);
+		expect(() => server.catalog.get(REQUEST_A)).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
+	});
+
 	it("rejects a scheduled session id before mutable create replay", async () => {
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const scheduled = SessionManager.create(projectDir, join(sessionsRoot, "scheduled"), {
 			id: REQUEST_C,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
@@ -2147,7 +2181,7 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "create-scheduled-collision",
 				method: "session/create",
-				params: { requestId: REQUEST_C, mode: "chat", cwd: projectDir },
+				params: { requestId: REQUEST_C, cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
@@ -2178,31 +2212,31 @@ describe("AppServer", () => {
 		expect(maximum).toBeLessThanOrEqual(32);
 	});
 
-	it("builds complete mode-project snapshots and refreshes only the targeted storage", async () => {
+	it("builds complete project snapshots and refreshes only the targeted storage", async () => {
 		const paths: string[] = [];
 		for (let index = 0; index < 205; index += 1) {
 			paths.push(
-				writeModeSession(agentDir, sessionsRoot, `bulk-${String(index).padStart(3, "0")}`, projectDir, "code", {
+				writeProjectSession(agentDir, sessionsRoot, `bulk-${String(index).padStart(3, "0")}`, projectDir, {
 					archived: index % 2 === 0,
 				}),
 			);
 		}
-		writeModeSession(agentDir, sessionsRoot, "same-cwd-chat", projectDir, "chat");
+		writeProjectSession(agentDir, sessionsRoot, "same-cwd-peer", projectDir);
 		const child = join(projectDir, "child");
 		mkdirSync(child);
-		writeModeSession(agentDir, sessionsRoot, "child-code", child, "code");
-		writeModeSession(agentDir, sessionsRoot, "managed-code", projectDir, "code", { cwdOrigin: "managed" });
-		writeModeSession(agentDir, sessionsRoot, "scheduled-code", projectDir, "code", {
+		writeProjectSession(agentDir, sessionsRoot, "child-session", child);
+		writeProjectSession(agentDir, sessionsRoot, "managed-session", projectDir, { cwdOrigin: "managed" });
+		writeProjectSession(agentDir, sessionsRoot, "scheduled-session", projectDir, {
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
 		const otherProject = join(tempDir, "other-project");
 		mkdirSync(otherProject);
-		const other = writeModeSession(agentDir, sessionsRoot, "other-code", otherProject, "code");
+		const other = writeProjectSession(agentDir, sessionsRoot, "other-session", otherProject);
 		writeFileSync(join(dirname(other), "broken.jsonl"), "not-json\n");
 
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
-		const snapshot = server.catalog.modeProjectSnapshot("code", projectDir);
-		expect(snapshot.refs).toHaveLength(205);
+		const snapshot = server.catalog.projectSnapshot(projectDir);
+		expect(snapshot.refs).toHaveLength(206);
 		expect(snapshot.refs.map((ref) => ref.summary.sessionId)).toEqual(
 			[...snapshot.refs.map((ref) => ref.summary.sessionId)].sort(),
 		);
@@ -2216,30 +2250,30 @@ describe("AppServer", () => {
 			scannedPaths.push(path);
 			return original(path, archived);
 		};
-		writeModeSession(agentDir, sessionsRoot, "created-after-startup", projectDir, "code");
-		await server.catalog.refreshModeProjectStorage(projectDir);
-		expect(server.catalog.modeProjectSnapshot("code", projectDir).refs).toHaveLength(206);
+		writeProjectSession(agentDir, sessionsRoot, "created-after-startup", projectDir);
+		await server.catalog.refreshProjectStorage(projectDir);
+		expect(server.catalog.projectSnapshot(projectDir).refs).toHaveLength(207);
 		const projectStorageKey = basename(getDefaultSessionDir(projectDir, agentDir));
 		expect(scannedPaths.length).toBeGreaterThan(0);
 		expect(scannedPaths.every((path) => path.includes(`${projectStorageKey}${sep}`))).toBe(true);
 
 		writeFileSync(join(dirname(paths[0]!), "broken.jsonl"), "not-json\n");
-		await server.catalog.refreshModeProjectStorage(projectDir);
-		expect(() => server.catalog.modeProjectSnapshot("code", projectDir)).toThrowError(
+		await server.catalog.refreshProjectStorage(projectDir);
+		expect(() => server.catalog.projectSnapshot(projectDir)).toThrowError(
 			expect.objectContaining({ code: "SESSION_CORRUPT" }),
 		);
-	}, 15_000);
+	}, 30_000);
 
-	it("deletes one mode-project snapshot, closes subscriptions, and replays the result", async () => {
-		const activePath = writeModeSession(agentDir, sessionsRoot, "chat-active", projectDir, "chat");
-		const archivedPath = writeModeSession(agentDir, sessionsRoot, "chat-archived", projectDir, "chat", {
+	it("deletes one project snapshot, closes subscriptions, and replays the result", async () => {
+		const activePath = writeProjectSession(agentDir, sessionsRoot, "project-active", projectDir);
+		const archivedPath = writeProjectSession(agentDir, sessionsRoot, "project-archived", projectDir, {
 			archived: true,
 		});
-		writeModeSession(agentDir, sessionsRoot, "code-preserved", projectDir, "code");
+		writeProjectSession(agentDir, sessionsRoot, "same-project-peer", projectDir);
 		const child = join(projectDir, "child");
 		mkdirSync(child);
-		writeModeSession(agentDir, sessionsRoot, "chat-child", child, "chat");
-		writeModeSession(agentDir, sessionsRoot, "scheduled-preserved", projectDir, "chat", {
+		writeProjectSession(agentDir, sessionsRoot, "child-session", child);
+		writeProjectSession(agentDir, sessionsRoot, "scheduled-preserved", projectDir, {
 			scheduled: { taskId: REQUEST_A, runId: REQUEST_B },
 		});
 		const host = new FakeHost();
@@ -2254,18 +2288,22 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "subscribe-before-delete",
 			method: "session/subscribe",
-			params: { sessionId: "chat-active" },
+			params: { sessionId: "project-active" },
 		});
 		const preview = await connection.handle({
 			jsonrpc: "2.0",
 			id: "preview-chat",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
-		expect(preview).toMatchObject({ result: { mode: "chat", sessionCount: 2, blockingScheduleCount: 0 } });
+		expect(preview).toMatchObject({ result: { sessionCount: 3, blockingScheduleCount: 0 } });
 		const previewResult = (preview as { result: ClientResult<"project/deletePreview"> }).result;
-		const trash = vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
-			expect(input.sessions.map(({ sessionId }) => sessionId).sort()).toEqual(["chat-active", "chat-archived"]);
+		const trash = vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => {
+			expect(input.sessions.map(({ sessionId }) => sessionId).sort()).toEqual([
+				"project-active",
+				"project-archived",
+				"same-project-peer",
+			]);
 			for (const target of input.sessions) unlinkSync(target.path);
 			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
 		});
@@ -2275,7 +2313,6 @@ describe("AppServer", () => {
 			method: "project/delete" as const,
 			params: {
 				requestId: REQUEST_C,
-				mode: "chat" as const,
 				cwd: projectDir,
 				expectedRevision: previewResult.revision,
 			},
@@ -2283,16 +2320,18 @@ describe("AppServer", () => {
 
 		const deleted = await connection.handle(request);
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		expect(deleted).toMatchObject({ result: { mode: "chat", deletedSessionCount: 2 } });
+		expect(deleted).toMatchObject({ result: { deletedSessionCount: 3 } });
 		expect(JSON.stringify(messages)).toContain('"type":"project/invalidated"');
 		expect(JSON.stringify(messages)).toContain('"reason":"deleted"');
-		expect(connection.state.subscriptions.has("chat-active")).toBe(false);
-		expect(host.runtimes.get("chat-active")?.closed).toBe(true);
+		expect(connection.state.subscriptions.has("project-active")).toBe(false);
+		expect(host.runtimes.get("project-active")?.closed).toBe(true);
 		expect(existsSync(activePath)).toBe(false);
 		expect(existsSync(archivedPath)).toBe(false);
-		expect(() => server.catalog.get("chat-active")).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
-		expect(server.catalog.get("code-preserved").summary.mode).toBe("code");
-		expect(server.catalog.get("chat-child").summary.cwd).toBe(realpathSync(child));
+		expect(() => server.catalog.get("project-active")).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
+		expect(() => server.catalog.get("same-project-peer")).toThrowError(
+			expect.objectContaining({ code: "NOT_FOUND" }),
+		);
+		expect(server.catalog.get("child-session").summary.cwd).toBe(realpathSync(child));
 		expect(server.catalog.get("scheduled-preserved").scheduled).toEqual({ taskId: REQUEST_A, runId: REQUEST_B });
 
 		expect(await connection.handle({ ...request, id: "delete-chat-replay" })).toEqual({
@@ -2310,8 +2349,8 @@ describe("AppServer", () => {
 		);
 	});
 
-	it("blocks same-mode project mutations while allowing unrelated projects", async () => {
-		writeModeSession(agentDir, sessionsRoot, "chat-selected", projectDir, "chat");
+	it("blocks project mutations while allowing unrelated projects", async () => {
+		writeProjectSession(agentDir, sessionsRoot, "project-selected", projectDir);
 		const otherProject = join(tempDir, "other-project");
 		mkdirSync(otherProject);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
@@ -2322,7 +2361,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
 		let trashEntered!: () => void;
@@ -2333,7 +2372,7 @@ describe("AppServer", () => {
 		const gate = new Promise<void>((resolve) => {
 			releaseTrash = resolve;
 		});
-		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
+		vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => {
 			trashEntered();
 			await gate;
 			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
@@ -2342,7 +2381,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "delete-held",
 			method: "project/delete",
-			params: { requestId: REQUEST_A, mode: "chat", cwd: projectDir, expectedRevision: revision },
+			params: { requestId: REQUEST_A, cwd: projectDir, expectedRevision: revision },
 		});
 		await entered;
 		await expect(
@@ -2373,7 +2412,7 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "create-same-project",
 				method: "session/create",
-				params: { requestId: REQUEST_B, mode: "chat", cwd: projectDir },
+				params: { requestId: REQUEST_B, cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.BUSY,
 		);
@@ -2382,22 +2421,10 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "archive-same-project",
 				method: "session/archive",
-				params: { requestId: REQUEST_C, sessionId: "chat-selected" },
+				params: { requestId: REQUEST_C, sessionId: "project-selected" },
 			}),
 			RPC_ERROR_CODES.BUSY,
 		);
-		await expect(
-			second.handle({
-				jsonrpc: "2.0",
-				id: "create-other-mode",
-				method: "session/create",
-				params: {
-					requestId: "00000000-0000-4000-8000-000000000004",
-					mode: "code",
-					cwd: projectDir,
-				},
-			}),
-		).resolves.toMatchObject({ result: { session: { mode: "code" } } });
 		await expect(
 			second.handle({
 				jsonrpc: "2.0",
@@ -2405,11 +2432,10 @@ describe("AppServer", () => {
 				method: "session/create",
 				params: {
 					requestId: "00000000-0000-4000-8000-000000000005",
-					mode: "chat",
 					cwd: otherProject,
 				},
 			}),
-		).resolves.toMatchObject({ result: { session: { mode: "chat" } } });
+		).resolves.toMatchObject({ result: { session: { cwd: realpathSync(otherProject) } } });
 		expectError(
 			await second.handle({
 				jsonrpc: "2.0",
@@ -2417,7 +2443,6 @@ describe("AppServer", () => {
 				method: "project/delete",
 				params: {
 					requestId: "00000000-0000-4000-8000-000000000006",
-					mode: "chat",
 					cwd: projectDir,
 					expectedRevision: revision,
 				},
@@ -2426,11 +2451,11 @@ describe("AppServer", () => {
 		);
 		releaseTrash();
 		await expect(deletion).resolves.toMatchObject({ result: { deletedSessionCount: 1 } });
-		expect(server.catalog.get("00000000-0000-4000-8000-000000000004").summary.mode).toBe("code");
+		expect(server.catalog.get("00000000-0000-4000-8000-000000000005").summary.cwd).toBe(realpathSync(otherProject));
 	});
 
 	it("admits only one same-tick project delete or session rename", async () => {
-		writeModeSession(agentDir, sessionsRoot, "chat-race", projectDir, "chat");
+		writeProjectSession(agentDir, sessionsRoot, "project-race", projectDir);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const first = server.connect();
 		const second = server.connect();
@@ -2439,7 +2464,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "race-preview",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
 		let trashEntered!: () => void;
@@ -2450,7 +2475,7 @@ describe("AppServer", () => {
 		const gate = new Promise<void>((resolve) => {
 			releaseTrash = resolve;
 		});
-		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
+		vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => {
 			trashEntered();
 			await gate;
 			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
@@ -2460,13 +2485,13 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "race-delete",
 			method: "project/delete",
-			params: { requestId: REQUEST_A, mode: "chat", cwd: projectDir, expectedRevision: revision },
+			params: { requestId: REQUEST_A, cwd: projectDir, expectedRevision: revision },
 		});
 		const rename = second.handle({
 			jsonrpc: "2.0",
 			id: "race-rename",
 			method: "session/rename",
-			params: { requestId: REQUEST_B, sessionId: "chat-race", name: "Must not race" },
+			params: { requestId: REQUEST_B, sessionId: "project-race", name: "Must not race" },
 		});
 		await entered;
 		expectError(await rename, RPC_ERROR_CODES.BUSY);
@@ -2475,7 +2500,7 @@ describe("AppServer", () => {
 	});
 
 	it("moves nothing for stale, active, pending-interaction, and Trash failures", async () => {
-		const sessionPath = writeModeSession(agentDir, sessionsRoot, "chat-failure", projectDir, "chat");
+		const sessionPath = writeProjectSession(agentDir, sessionsRoot, "failing-session", projectDir);
 		const host = new FakeHost();
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
 		const connection = server.connect();
@@ -2484,33 +2509,33 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "open-failure",
 			method: "session/open",
-			params: { sessionId: "chat-failure" },
+			params: { sessionId: "failing-session" },
 		});
 		await connection.handle({
 			jsonrpc: "2.0",
 			id: "subscribe-failure",
 			method: "session/subscribe",
-			params: { sessionId: "chat-failure" },
+			params: { sessionId: "failing-session" },
 		});
-		expect(connection.state.subscriptions.has("chat-failure")).toBe(true);
+		expect(connection.state.subscriptions.has("failing-session")).toBe(true);
 		const preview = await connection.handle({
 			jsonrpc: "2.0",
 			id: "preview-failure",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
-		const trash = vi.spyOn(SessionManager, "trashModeProjectData");
+		const trash = vi.spyOn(SessionManager, "trashProjectData");
 		const request = (requestId: string, expectedRevision = revision) => ({
 			jsonrpc: "2.0" as const,
 			id: requestId,
 			method: "project/delete" as const,
-			params: { requestId, mode: "chat" as const, cwd: projectDir, expectedRevision },
+			params: { requestId, cwd: projectDir, expectedRevision },
 		});
 
 		expectError(await connection.handle(request(REQUEST_A, "b".repeat(64))), RPC_ERROR_CODES.BUSY);
 		expect(trash).not.toHaveBeenCalled();
-		const runtime = host.runtimes.get("chat-failure")!;
+		const runtime = host.runtimes.get("failing-session")!;
 		runtime.active = true;
 		expectError(await connection.handle(request(REQUEST_B)), RPC_ERROR_CODES.SESSION_IN_USE);
 		runtime.active = false;
@@ -2526,7 +2551,7 @@ describe("AppServer", () => {
 			RPC_ERROR_CODES.OPERATION_FAILED,
 		);
 		expect(trash).not.toHaveBeenCalled();
-		expect(connection.state.subscriptions.has("chat-failure")).toBe(true);
+		expect(connection.state.subscriptions.has("failing-session")).toBe(true);
 		runtime.close = close;
 		trash.mockResolvedValue({
 			ok: false,
@@ -2538,13 +2563,13 @@ describe("AppServer", () => {
 			await connection.handle(request("00000000-0000-4000-8000-000000000005")),
 			RPC_ERROR_CODES.OPERATION_FAILED,
 		);
-		expect(connection.state.subscriptions.has("chat-failure")).toBe(false);
+		expect(connection.state.subscriptions.has("failing-session")).toBe(false);
 		expect(existsSync(sessionPath)).toBe(true);
 		const retryPreview = await connection.handle({
 			jsonrpc: "2.0",
 			id: "preview-after-failure",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		expect(retryPreview).toMatchObject({ result: { sessionCount: 1 } });
 		trash.mockRestore();
@@ -2561,16 +2586,16 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-after-journal-change",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		expect((changedPreview as { result: ClientResult<"project/deletePreview"> }).result.revision).not.toBe(
 			retryRevision,
 		);
 	});
 
-	it("applies fixed-schedule blockers only to Chat project deletion", async () => {
-		writeModeSession(agentDir, sessionsRoot, "chat-scheduled-project", projectDir, "chat");
-		writeModeSession(agentDir, sessionsRoot, "code-scheduled-project", projectDir, "code");
+	it("applies fixed-schedule blockers to cwd-wide project deletion", async () => {
+		writeProjectSession(agentDir, sessionsRoot, "blocked-project-a", projectDir);
+		writeProjectSession(agentDir, sessionsRoot, "blocked-project-b", projectDir);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -2592,110 +2617,71 @@ describe("AppServer", () => {
 			timezone: "Asia/Shanghai",
 			target: { kind: "general", workspace: "task" },
 		});
-		const chatPreview = await connection.handle({
+		const blockedPreview = await connection.handle({
 			jsonrpc: "2.0",
-			id: "preview-chat-blocked",
+			id: "preview-blocked",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
-		const codePreview = await connection.handle({
-			jsonrpc: "2.0",
-			id: "preview-code-unblocked",
-			method: "project/deletePreview",
-			params: { mode: "code", cwd: projectDir },
-		});
-		expect(chatPreview).toMatchObject({ result: { blockingScheduleCount: 1 } });
-		expect(codePreview).toMatchObject({ result: { blockingScheduleCount: 0 } });
-		const trash = vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => ({
+		expect(blockedPreview).toMatchObject({ result: { blockingScheduleCount: 1, sessionCount: 2 } });
+		const trash = vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => ({
 			ok: true,
 			method: "trash",
 			deletedSessionCount: input.sessions.length,
 		}));
-		const codeResult = (codePreview as { result: ClientResult<"project/deletePreview"> }).result;
-		expect(
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "delete-code-with-chat-schedule",
-				method: "project/delete",
-				params: {
-					requestId: REQUEST_A,
-					mode: "code",
-					cwd: projectDir,
-					expectedRevision: codeResult.revision,
-				},
-			}),
-		).toMatchObject({ result: { deletedSessionCount: 1 } });
-		const chatResult = (chatPreview as { result: ClientResult<"project/deletePreview"> }).result;
+		const blockedResult = (blockedPreview as { result: ClientResult<"project/deletePreview"> }).result;
 		expectError(
 			await connection.handle({
 				jsonrpc: "2.0",
-				id: "delete-chat-blocked",
+				id: "delete-blocked",
 				method: "project/delete",
-				params: {
-					requestId: REQUEST_B,
-					mode: "chat",
-					cwd: projectDir,
-					expectedRevision: chatResult.revision,
-				},
+				params: { requestId: REQUEST_A, cwd: projectDir, expectedRevision: blockedResult.revision },
 			}),
 			RPC_ERROR_CODES.BUSY,
 		);
-		expect(trash).toHaveBeenCalledTimes(1);
+		expect(trash).not.toHaveBeenCalled();
 		await server.scheduleManager.stop();
 		await server.scheduleManager.delete(fixed.id, { deleteSessions: false });
 		const retry = await connection.handle({
 			jsonrpc: "2.0",
-			id: "preview-chat-retry",
+			id: "preview-retry",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
-		expect(retry).toMatchObject({ result: { blockingScheduleCount: 0 } });
+		expect(retry).toMatchObject({ result: { blockingScheduleCount: 0, sessionCount: 2 } });
 		const retryResult = (retry as { result: ClientResult<"project/deletePreview"> }).result;
 		expect(
 			await connection.handle({
 				jsonrpc: "2.0",
-				id: "delete-chat-retry",
+				id: "delete-retry",
 				method: "project/delete",
-				params: {
-					requestId: REQUEST_C,
-					mode: "chat",
-					cwd: projectDir,
-					expectedRevision: retryResult.revision,
-				},
+				params: { requestId: REQUEST_C, cwd: projectDir, expectedRevision: retryResult.revision },
 			}),
-		).toMatchObject({ result: { deletedSessionCount: 1 } });
+		).toMatchObject({ result: { deletedSessionCount: 2 } });
+		expect(trash).toHaveBeenCalledOnce();
 	});
 
-	it("ignores a corrupt schedule store for Code preview but reports it for Chat", async () => {
-		writeModeSession(agentDir, sessionsRoot, "chat-corrupt-schedules", projectDir, "chat");
-		writeModeSession(agentDir, sessionsRoot, "code-corrupt-schedules", projectDir, "code");
+	it("reports a corrupt schedule store for cwd-wide project deletion previews", async () => {
+		writeProjectSession(agentDir, sessionsRoot, "corrupt-schedules", projectDir);
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(join(agentDir, "schedules.json"), "{broken");
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 
-		expect(
-			await connection.handle({
-				jsonrpc: "2.0",
-				id: "preview-code-corrupt-schedules",
-				method: "project/deletePreview",
-				params: { mode: "code", cwd: projectDir },
-			}),
-		).toMatchObject({ result: { sessionCount: 1, blockingScheduleCount: 0 } });
 		expectError(
 			await connection.handle({
 				jsonrpc: "2.0",
-				id: "preview-chat-corrupt-schedules",
+				id: "preview-corrupt-schedules",
 				method: "project/deletePreview",
-				params: { mode: "chat", cwd: projectDir },
+				params: { cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.SCHEDULE_STORE_CORRUPT,
 		);
 	});
 
 	it("previews and deletes residual sessions after the source folder is removed", async () => {
-		writeModeSession(agentDir, sessionsRoot, "code-missing-source", projectDir, "code");
+		writeProjectSession(agentDir, sessionsRoot, "missing-source", projectDir);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -2704,13 +2690,13 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-missing-source",
 			method: "project/deletePreview",
-			params: { mode: "code", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		expect(preview).toMatchObject({
 			result: { cwd: join(realpathSync(tempDir), basename(projectDir)), sessionCount: 1 },
 		});
 		const result = (preview as { result: ClientResult<"project/deletePreview"> }).result;
-		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => ({
+		vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => ({
 			ok: true,
 			method: "trash",
 			deletedSessionCount: input.sessions.length,
@@ -2723,7 +2709,6 @@ describe("AppServer", () => {
 				method: "project/delete",
 				params: {
 					requestId: REQUEST_A,
-					mode: "code",
 					cwd: projectDir,
 					expectedRevision: result.revision,
 				},
@@ -2732,7 +2717,7 @@ describe("AppServer", () => {
 	});
 
 	it("returns BUSY when another process creates a matching journal after preview", async () => {
-		writeModeSession(agentDir, sessionsRoot, "chat-before-preview", projectDir, "chat");
+		writeProjectSession(agentDir, sessionsRoot, "before-preview", projectDir);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -2740,12 +2725,11 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-before-external-create",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		const previewResult = (preview as { result: ClientResult<"project/deletePreview"> }).result;
 		const external = SessionManager.create(projectDir, getDefaultSessionDir(projectDir, agentDir), {
 			id: "chat-created-externally",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		external.close();
@@ -2757,7 +2741,6 @@ describe("AppServer", () => {
 				method: "project/delete",
 				params: {
 					requestId: REQUEST_A,
-					mode: "chat",
 					cwd: projectDir,
 					expectedRevision: previewResult.revision,
 				},
@@ -2768,13 +2751,13 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-after-external-create",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		expect(refreshed).toMatchObject({ result: { sessionCount: 2 } });
 	});
 
 	it("rejects a live journal lease before moving project data", async () => {
-		const path = writeModeSession(agentDir, sessionsRoot, "chat-live-lease", projectDir, "chat");
+		const path = writeProjectSession(agentDir, sessionsRoot, "live-lease", projectDir);
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
@@ -2782,7 +2765,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-live-lease",
 			method: "project/deletePreview",
-			params: { mode: "chat", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
 		const owner = SessionManager.open(path);
@@ -2792,7 +2775,7 @@ describe("AppServer", () => {
 					jsonrpc: "2.0",
 					id: "delete-live-lease",
 					method: "project/delete",
-					params: { requestId: REQUEST_A, mode: "chat", cwd: projectDir, expectedRevision: revision },
+					params: { requestId: REQUEST_A, cwd: projectDir, expectedRevision: revision },
 				}),
 				RPC_ERROR_CODES.SESSION_IN_USE,
 			);
@@ -2804,7 +2787,7 @@ describe("AppServer", () => {
 
 	it("deletes more than one protocol page from one project snapshot", async () => {
 		for (let index = 0; index < 201; index += 1) {
-			writeModeSession(agentDir, sessionsRoot, `delete-bulk-${String(index).padStart(3, "0")}`, projectDir, "code");
+			writeProjectSession(agentDir, sessionsRoot, `delete-bulk-${String(index).padStart(3, "0")}`, projectDir);
 		}
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
@@ -2813,11 +2796,11 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "preview-bulk",
 			method: "project/deletePreview",
-			params: { mode: "code", cwd: projectDir },
+			params: { cwd: projectDir },
 		});
 		expect(preview).toMatchObject({ result: { sessionCount: 201 } });
 		const previewResult = (preview as { result: ClientResult<"project/deletePreview"> }).result;
-		const trash = vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => ({
+		const trash = vi.spyOn(SessionManager, "trashProjectData").mockImplementation(async (input) => ({
 			ok: true,
 			method: "trash",
 			deletedSessionCount: input.sessions.length,
@@ -2829,15 +2812,14 @@ describe("AppServer", () => {
 				method: "project/delete",
 				params: {
 					requestId: REQUEST_A,
-					mode: "code",
 					cwd: projectDir,
 					expectedRevision: previewResult.revision,
 				},
 			}),
 		).toMatchObject({ result: { deletedSessionCount: 201 } });
 		expect(trash.mock.calls[0]![0].sessions).toHaveLength(201);
-		expect(server.catalog.modeProjectSnapshot("code", projectDir).refs).toHaveLength(0);
-	}, 15_000);
+		expect(server.catalog.projectSnapshot(projectDir).refs).toHaveLength(0);
+	}, 30_000);
 
 	it("replays a completed create after its working directory is removed", async () => {
 		const firstServer = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
@@ -2847,7 +2829,7 @@ describe("AppServer", () => {
 			jsonrpc: "2.0" as const,
 			id: "create",
 			method: "session/create" as const,
-			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, name: "durable replay" },
+			params: { requestId: REQUEST_A, cwd: projectDir, name: "durable replay" },
 		};
 		const created = await first.handle(create);
 		firstServer.beginShutdown();
@@ -2863,15 +2845,15 @@ describe("AppServer", () => {
 		});
 	});
 
-	it("creates managed and folder-backed chat sessions with durable mode metadata", async () => {
+	it("creates managed and folder-backed sessions with durable workspace metadata", async () => {
 		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 		const connection = server.connect();
 		await connection.handle(initialize());
 		const managedCreate = {
 			jsonrpc: "2.0" as const,
-			id: "create-managed-chat",
+			id: "create-managed-session",
 			method: "session/create" as const,
-			params: { requestId: REQUEST_A, mode: "chat" as const, name: "Managed chat" },
+			params: { requestId: REQUEST_A, name: "Managed session" },
 		};
 
 		const managed = await connection.handle(managedCreate);
@@ -2880,20 +2862,18 @@ describe("AppServer", () => {
 			result: {
 				session: {
 					sessionId: REQUEST_A,
-					mode: "chat",
 					cwdOrigin: "managed",
 					cwd: managedCwd,
 				},
 			},
 		});
 		expect(existsSync(managedCwd)).toBe(true);
-		expect(await connection.handle({ ...managedCreate, id: "create-managed-chat-replay" })).toMatchObject({
+		expect(await connection.handle({ ...managedCreate, id: "create-managed-session-replay" })).toMatchObject({
 			result: { session: { sessionId: REQUEST_A, cwd: managedCwd } },
 		});
 
 		const manager = SessionManager.open(server.catalog.get(REQUEST_A).path);
 		try {
-			expect(manager.getMode()).toBe("chat");
 			expect(manager.getCwdOrigin()).toBe("managed");
 		} finally {
 			manager.close();
@@ -2903,13 +2883,12 @@ describe("AppServer", () => {
 			jsonrpc: "2.0",
 			id: "create-folder-chat",
 			method: "session/create",
-			params: { requestId: REQUEST_B, mode: "chat", cwd: projectDir },
+			params: { requestId: REQUEST_B, cwd: projectDir },
 		});
 		expect(selected).toMatchObject({
 			result: {
 				session: {
 					sessionId: REQUEST_B,
-					mode: "chat",
 					cwdOrigin: "user-selected",
 					cwd: realpathSync(projectDir),
 				},
@@ -2919,8 +2898,8 @@ describe("AppServer", () => {
 		expectError(
 			await connection.handle({
 				...managedCreate,
-				id: "reuse-managed-chat-id",
-				params: { requestId: REQUEST_A, mode: "code" },
+				id: "reuse-managed-session-id",
+				params: { requestId: REQUEST_A, cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
@@ -3017,7 +2996,6 @@ describe("AppServer", () => {
 				id: futureId,
 				timestamp: "2026-01-05T00:00:00.000Z",
 				cwd: projectDir,
-				mode: "code",
 				cwdOrigin: "user-selected",
 			})}\nnot-json future record\n{unfinished`,
 		);
@@ -3030,7 +3008,7 @@ describe("AppServer", () => {
 		const scheduledFile = join(directory, `${scheduledId}.jsonl`);
 		writeFileSync(
 			scheduledFile,
-			`${JSON.stringify({ type: "session", version: 16, id: scheduledId, timestamp: "2026-01-05T00:00:00.000Z", cwd: projectDir, mode: "chat", cwdOrigin: "user-selected", scheduled: { taskId: REQUEST_B, runId: REQUEST_C } })}\nfuture body`,
+			`${JSON.stringify({ type: "session", version: 16, id: scheduledId, timestamp: "2026-01-05T00:00:00.000Z", cwd: projectDir, cwdOrigin: "user-selected", scheduled: { taskId: REQUEST_B, runId: REQUEST_C } })}\nfuture body`,
 		);
 		const before = readFileSync(path);
 		const host = new FakeHost();
@@ -3043,7 +3021,6 @@ describe("AppServer", () => {
 		const future = sessions.find((session) => session.sessionId === futureId);
 		expect(future).toMatchObject({
 			state: "unsupported",
-			mode: "code",
 			cwdOrigin: "user-selected",
 			cwd: realpathSync(projectDir),
 			createdAt: "2026-01-05T00:00:00.000Z",
@@ -3091,18 +3068,18 @@ describe("AppServer", () => {
 				jsonrpc: "2.0",
 				id: "create-replay-future",
 				method: "session/create",
-				params: { requestId: futureId, mode: "code", cwd: projectDir },
+				params: { requestId: futureId, cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
 		);
-		await server.catalog.refreshModeProjectStorage(projectDir);
+		await server.catalog.refreshProjectStorage(projectDir);
 		expect(server.catalog.get(futureId).summary.state).toBe("unsupported");
 		expectError(
 			await connection.handle({
 				jsonrpc: "2.0",
 				id: "preview-future-project",
 				method: "project/deletePreview",
-				params: { mode: "code", cwd: projectDir },
+				params: { cwd: projectDir },
 			}),
 			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
 		);
@@ -3161,7 +3138,6 @@ describe("AppServer", () => {
 		for (const duplicate of duplicates) {
 			expect(duplicate).toMatchObject({
 				state: "corrupt",
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd: realpathSync(projectDir),
 				createdAt: "2026-01-01T00:00:00.000Z",

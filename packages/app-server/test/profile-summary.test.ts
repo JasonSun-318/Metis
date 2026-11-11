@@ -59,14 +59,13 @@ function skillEntry(id: string, name: string, trigger: "command" | "read" = "rea
 	};
 }
 
-function sessionEntry(id: string, mode: "chat" | "code"): FileEntry {
+function sessionEntry(id: string): FileEntry {
 	return {
 		type: "session",
 		version: 9,
 		id,
 		timestamp: "2026-08-01T00:00:00.000Z",
 		cwd: "/tmp/profile-test",
-		mode,
 	};
 }
 
@@ -86,7 +85,6 @@ function ref(path: string, state: SessionRef["summary"]["state"] = "idle"): Sess
 		relativePath: path,
 		summary: {
 			sessionId: path.replace(/\W/gu, "") || "session",
-			mode: "chat",
 			cwdOrigin: "managed",
 			cwd: null,
 			createdAt: "2026-08-01T00:00:00.000Z",
@@ -101,16 +99,16 @@ function ref(path: string, state: SessionRef["summary"]["state"] = "idle"): Sess
 }
 
 describe("profile summary", () => {
-	it("aggregates real Token, streak, chat-duration, and Skill usage data", () => {
+	it("aggregates real token, streak, session-duration, and Skill usage data", () => {
 		const first = reduceProfileEntries([
-			sessionEntry("10000000-0000-4000-8000-000000000001", "chat"),
+			sessionEntry("10000000-0000-4000-8000-000000000001"),
 			userEntry("u1", localTime(2026, 7, 31, 9)),
 			assistantEntry("a1", localTime(2026, 7, 31, 10), 200),
 			skillEntry("s1", "pdf"),
 			skillEntry("s2", "pdf", "command"),
 		]);
 		const second = reduceProfileEntries([
-			sessionEntry("10000000-0000-4000-8000-000000000002", "chat"),
+			sessionEntry("10000000-0000-4000-8000-000000000002"),
 			userEntry("u2", localTime(2026, 8, 1, 11)),
 			assistantEntry("a2", localTime(2026, 8, 1, 12), 400),
 			skillEntry("s3", "documents"),
@@ -124,8 +122,6 @@ describe("profile summary", () => {
 			currentStreakDays: 2,
 			longestStreakDays: 2,
 			sessionCount: 2,
-			mostUsedMode: "chat",
-			mostUsedModePercent: 100,
 			mostUsedThinkingLevel: null,
 			mostUsedThinkingLevelPercent: 0,
 			usedSkillCount: 2,
@@ -141,24 +137,24 @@ describe("profile summary", () => {
 		});
 	});
 
-	it("reports dominant mode and only classifies reasoning recorded in the journal", () => {
+	it("classifies only reasoning recorded in the journal", () => {
 		const contributions = [
 			reduceProfileEntries([
-				sessionEntry("10000000-0000-4000-8000-000000000011", "chat"),
+				sessionEntry("10000000-0000-4000-8000-000000000011"),
 				userEntry("u1", localTime(2026, 8, 1, 8)),
 				thinkingEntry("t1", "high"),
 				assistantEntry("a1", localTime(2026, 8, 1, 9), 10),
 				assistantEntry("a2", localTime(2026, 8, 1, 10), 10),
 			]),
 			reduceProfileEntries([
-				sessionEntry("10000000-0000-4000-8000-000000000012", "code"),
+				sessionEntry("10000000-0000-4000-8000-000000000012"),
 				userEntry("u2", localTime(2026, 8, 1, 11)),
 				assistantEntry("unknown", localTime(2026, 8, 1, 12), 10),
 				thinkingEntry("t2", "high"),
 				assistantEntry("a3", localTime(2026, 8, 1, 13), 10),
 			]),
 			reduceProfileEntries([
-				sessionEntry("10000000-0000-4000-8000-000000000013", "code"),
+				sessionEntry("10000000-0000-4000-8000-000000000013"),
 				userEntry("u3", localTime(2026, 8, 1, 14)),
 				thinkingEntry("t3", "medium"),
 				assistantEntry("a4", localTime(2026, 8, 1, 15), 10),
@@ -166,44 +162,36 @@ describe("profile summary", () => {
 		];
 
 		expect(buildProfileSummary(contributions, localTime(2026, 8, 1, 18))).toMatchObject({
-			mostUsedMode: "code",
-			mostUsedModePercent: 67,
 			mostUsedThinkingLevel: "high",
 			mostUsedThinkingLevelPercent: 75,
 		});
 	});
 
 	it("builds range-scoped daily and model usage from the shared journal reduction", () => {
-		const chat = reduceProfileEntries([
-			sessionEntry("10000000-0000-4000-8000-000000000021", "chat"),
+		const firstDay = reduceProfileEntries([
+			sessionEntry("10000000-0000-4000-8000-000000000021"),
 			userEntry("u1", localTime(2026, 8, 7)),
 			assistantEntry("a1", localTime(2026, 8, 7), 20),
 		]);
-		const code = reduceProfileEntries([
-			sessionEntry("10000000-0000-4000-8000-000000000022", "code"),
+		const secondDay = reduceProfileEntries([
+			sessionEntry("10000000-0000-4000-8000-000000000022"),
 			userEntry("u2", localTime(2026, 8, 8)),
 			assistantEntry("a2", localTime(2026, 8, 8), 30),
 		]);
 
-		const summary = buildUsageSummary([chat, code], 7, localTime(2026, 8, 8, 18));
+		const summary = buildUsageSummary([firstDay, secondDay], 7, localTime(2026, 8, 8, 18));
 		expect(summary).toMatchObject({
 			rangeDays: 7,
 			totalTokens: 50,
 			inputTokens: 50,
 			outputTokens: 0,
-			chatTokens: 20,
-			codeTokens: 30,
 			sessionCount: 2,
-			chatSessionCount: 1,
-			codeSessionCount: 1,
 			topModels: [{ provider: "openai", modelId: "gpt-test", totalTokens: 50 }],
 		});
 		expect(summary.daily).toHaveLength(7);
 		expect(summary.daily.slice(-2)).toEqual([
 			{
 				date: "2026-08-07",
-				chatTokens: 20,
-				codeTokens: 0,
 				inputTokens: 20,
 				outputTokens: 0,
 				cacheReadTokens: 0,
@@ -211,8 +199,6 @@ describe("profile summary", () => {
 			},
 			{
 				date: "2026-08-08",
-				chatTokens: 0,
-				codeTokens: 30,
 				inputTokens: 30,
 				outputTokens: 0,
 				cacheReadTokens: 0,

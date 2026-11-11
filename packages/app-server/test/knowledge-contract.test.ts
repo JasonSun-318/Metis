@@ -19,7 +19,6 @@ it("persists multiple linked directories across restart and keeps conversations 
 	for (const id of [first, second]) {
 		const manager = SessionManager.create(cwd, sessionsRoot, {
 			id,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});

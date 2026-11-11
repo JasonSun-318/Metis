@@ -12,7 +12,6 @@ import type {
 function summary(sessionId: string): SessionSummary {
 	return {
 		sessionId,
-		mode: "code",
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: "2026-01-01T00:00:00.000Z",
@@ -141,7 +140,6 @@ class FakeRuntime implements OpenedSessionRuntime {
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
-			mode: "code",
 			contextTokens: 64_000,
 			contextWindow: 128_000,
 			contextBasis: "reported_total",

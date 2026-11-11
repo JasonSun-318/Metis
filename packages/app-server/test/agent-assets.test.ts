@@ -22,7 +22,6 @@ function setup() {
 	mkdirSync(agentDir);
 	const root = SessionManager.create(cwd, join(directory, "sessions"), {
 		id: "11111111-1111-4111-8111-111111111111",
-		mode: "chat",
 	});
 	const store = new AgentStore(root, agentDir);
 	const config: Parameters<AgentStore["create"]>[0] = {
@@ -30,7 +29,6 @@ function setup() {
 		name: "File reviewer",
 		agentType: "default",
 		initialTask: "Review files",
-		mode: "chat",
 		tools: ["read", "deliver_file"],
 		writePolicy: "inherit",
 		permissionPreset: "ask",
@@ -59,7 +57,6 @@ function setup() {
 			sessionId: root.getSessionId(),
 			cwd,
 			cwdOrigin: "user-selected",
-			mode: "chat",
 			createdAt: timestamp,
 			updatedAt: timestamp,
 			state: "idle",

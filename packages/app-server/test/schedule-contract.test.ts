@@ -110,9 +110,9 @@ describe("AppServer schedule contract", () => {
 			result: { models: expect.arrayContaining([expect.objectContaining(MODEL)]) },
 		});
 
-		await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "code", cwd: projectDir }));
-		await connection.handle(request("session/create", { requestId: CHAT_ID, mode: "chat", cwd: chatDir }));
-		await connection.handle(request("session/create", { requestId: MANAGED_CHAT_ID, mode: "chat" }));
+		await connection.handle(request("session/create", { requestId: SOURCE_ID, cwd: projectDir }));
+		await connection.handle(request("session/create", { requestId: CHAT_ID, cwd: chatDir }));
+		await connection.handle(request("session/create", { requestId: MANAGED_CHAT_ID }));
 		const create = async (taskId: string, sourceSessionId?: string, additionalCwd?: string) =>
 			connection.handle(
 				request("schedule/create", {
@@ -126,12 +126,14 @@ describe("AppServer schedule contract", () => {
 					schedule: { kind: "daily", time: "09:00" },
 				}),
 			);
-		const code = await create(TASK_ID, SOURCE_ID);
+		const projectFixed = await create(TASK_ID, SOURCE_ID);
 		const fixed = await create(FIXED_TASK_ID, CHAT_ID);
 		const managed = await create(MANAGED_TASK_ID, MANAGED_CHAT_ID);
 		const global = await create(GLOBAL_TASK_ID, undefined, additionalWorkspaceCwd);
 
-		expect(code).toMatchObject({ error: { code: RPC_ERROR_CODES.INVALID_REQUEST } });
+		expect(projectFixed).toMatchObject({
+			result: { task: { target: { kind: "general", workspace: "fixed", cwd: realpathSync(projectDir) } } },
+		});
 		expect(fixed).toMatchObject({
 			result: { task: { target: { kind: "general", workspace: "fixed", cwd: realpathSync(chatDir) } } },
 		});
@@ -181,7 +183,7 @@ describe("AppServer schedule contract", () => {
 	});
 
 	it(
-		"runs into a fresh visible read-only Chat session and deletes the whole task history",
+		"runs into a fresh visible read-only session and deletes the whole task history",
 		{ timeout: 20_000 },
 		async () => {
 			tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-run-"));
@@ -196,7 +198,6 @@ describe("AppServer schedule contract", () => {
 					getDefaultSessionDir(claim.snapshot.target.cwd, agentDir),
 					{
 						id: sessionId,
-						mode: "chat" as const,
 						cwdOrigin: "user-selected" as const,
 						scheduled: { taskId: claim.taskId, runId: claim.runId },
 					},
@@ -233,7 +234,7 @@ describe("AppServer schedule contract", () => {
 			};
 			connection.onMessage(recordEvent);
 			await connection.handle(initialize());
-			await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "chat", cwd: projectDir }));
+			await connection.handle(request("session/create", { requestId: SOURCE_ID, cwd: projectDir }));
 			await connection.handle(
 				request("schedule/create", {
 					requestId: TASK_ID,
@@ -265,7 +266,6 @@ describe("AppServer schedule contract", () => {
 					sessions: expect.arrayContaining([
 						expect.objectContaining({
 							sessionId: run.sessionId!,
-							mode: "chat",
 							scheduled: { taskId: TASK_ID, runId: RUN_ID },
 						}),
 					]),
@@ -396,9 +396,9 @@ describe("AppServer schedule contract", () => {
 				retainedRun.sessionId!,
 			);
 			const originalJournal = readFileSync(visibleFile, "utf8");
-			const wrongModeJournal = originalJournal.replace('"mode":"chat"', '"mode":"code"');
-			expect(wrongModeJournal).not.toBe(originalJournal);
-			writeFileSync(visibleFile, wrongModeJournal);
+			const wrongIdentityJournal = originalJournal.replace('"cwdOrigin":"user-selected"', '"cwdOrigin":"managed"');
+			expect(wrongIdentityJournal).not.toBe(originalJournal);
+			writeFileSync(visibleFile, wrongIdentityJournal);
 			expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject(
 				{
 					error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
@@ -494,7 +494,7 @@ describe("AppServer schedule contract", () => {
 			error: { data: { name: "SCHEDULE_STORE_CORRUPT", retryable: false } },
 		});
 		expect(
-			await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "code", cwd: projectDir })),
+			await connection.handle(request("session/create", { requestId: SOURCE_ID, cwd: projectDir })),
 		).toMatchObject({ result: { session: { sessionId: SOURCE_ID } } });
 	});
 });

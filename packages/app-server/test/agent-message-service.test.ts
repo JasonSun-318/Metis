@@ -63,7 +63,6 @@ function createFixture(): Fixture {
 	const sessionsRoot = join(agentDir, "sessions");
 	const manager = SessionManager.create(projectDir, sessionsRoot, {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	const store = new AgentStore(manager, agentDir);
@@ -84,7 +83,6 @@ function createFixture(): Fixture {
 		parentSessionId: ROOT_ID,
 		rootSessionId: ROOT_ID,
 		agentPath: [CHILD_ID],
-		mode: "code",
 	};
 	const child = store.create(config, [], TASK_ID);
 

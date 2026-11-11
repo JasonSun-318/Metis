@@ -9,7 +9,6 @@ import { SessionProjection } from "../src/projection/session-projection.ts";
 const time = "2026-11-05T00:00:00.000Z";
 const session: SessionSummary = {
 	sessionId: "history-session",
-	mode: "code",
 	cwdOrigin: "user-selected",
 	cwd: "/tmp",
 	createdAt: time,

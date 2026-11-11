@@ -19,7 +19,7 @@ afterEach(async () => {
 function createSession(name: string): SessionManager {
 	const directory = mkdtempSync(join(tmpdir(), "metis-fork-"));
 	directories.push(directory);
-	return SessionManager.create(directory, directory, { id: name, mode: "chat", cwdOrigin: "user-selected" });
+	return SessionManager.create(directory, directory, { id: name, cwdOrigin: "user-selected" });
 }
 
 function userMsg(text: string) {
@@ -134,7 +134,6 @@ describe("session/fork RPC end-to-end", () => {
 		// Create a real session file with a user message and an assistant reply.
 		const manager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
 			id: "source-session",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		manager.appendSessionInfo("Original title");
@@ -194,7 +193,7 @@ describe("session/fork RPC end-to-end", () => {
 			expect(forked).toMatchObject({
 				jsonrpc: "2.0",
 				result: {
-					session: { name: "fork Original title", mode: "chat" },
+					session: { name: "fork Original title" },
 					entryId: assistantId,
 				},
 			});
@@ -253,14 +252,12 @@ describe("session/fork RPC end-to-end", () => {
 		mkdirSync(projectDir, { recursive: true });
 		const manager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
 			id: "restart-source",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		const entryId = manager.appendMessage(userMsg("fork once"));
 		manager.close();
 		const otherManager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
 			id: "restart-other-source",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		const otherEntryId = otherManager.appendMessage(userMsg("fork separately"));
@@ -342,7 +339,6 @@ describe("session/fork RPC end-to-end", () => {
 		mkdirSync(projectDir, { recursive: true });
 		const source = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
 			id: "nested-source",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		const sourceEntryId = source.appendMessage(userMsg("first generation"));
@@ -445,7 +441,6 @@ describe("session/fork RPC end-to-end", () => {
 
 		const manager = SessionManager.create(projectDir, join(sessionsRoot, "dir"), {
 			id: "live-session",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		manager.appendSessionInfo("Live title");

@@ -203,7 +203,6 @@ function sessionRef(sessionId: string, cwd: string, scheduled = false): SessionR
 		relativePath: `${sessionId}.jsonl`,
 		summary: {
 			sessionId,
-			mode: "code",
 			cwdOrigin: "user-selected",
 			cwd,
 			createdAt: "2026-08-11T00:00:00.000Z",

@@ -64,7 +64,6 @@ describe("permission protocol", () => {
 		const projection = new SessionProjection({
 			session: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd: "/tmp/project",
 				createdAt: "2026-09-01T00:00:00.000Z",
@@ -113,7 +112,6 @@ describe("permission protocol", () => {
 		const projection = new SessionProjection({
 			session: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd: "/tmp/project",
 				createdAt: "2026-09-01T00:00:00.000Z",

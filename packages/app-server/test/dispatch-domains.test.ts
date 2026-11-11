@@ -377,7 +377,7 @@ function scheduleContext() {
 	const catalog = {
 		get: vi.fn(() => ({
 			scheduled: undefined,
-			summary: { archived: false, state: "idle", cwd: "/work", mode: "code", cwdOrigin: "project" },
+			summary: { archived: false, state: "idle", cwd: "/work", cwdOrigin: "project" },
 		})),
 		scheduledSessionIds: vi.fn(() => []),
 		registerScheduledRun: vi.fn(async () => ({ changed: false })),
@@ -471,9 +471,9 @@ function sessionsContext() {
 
 function projectContext() {
 	const catalog = {
-		refreshModeProjectStorage: vi.fn(async (cwd: string) => cwd),
-		modeProjectSnapshot: vi.fn((mode: string, cwd: string) => ({ mode, cwd, refs: [], revision: 1 })),
-		withModeProjectBlocked: vi.fn(async () => {
+		refreshProjectStorage: vi.fn(async (cwd: string) => cwd),
+		projectSnapshot: vi.fn((cwd: string) => ({ cwd, refs: [], revision: 1 })),
+		withProjectBlocked: vi.fn(async () => {
 			throw new Error("project delete runs in integration tests");
 		}),
 	} as unknown as SessionCatalog;
@@ -790,12 +790,11 @@ describe("dispatcher domain matrix", () => {
 		await dispatchSessionsRequest(request("session/goal/get", { sessionId: "s1" }), sessions.context);
 		expect(sessions.registry.run).toHaveBeenCalledTimes(2);
 	});
-	it("reports mode-project deletion previews with the blocking task count", async () => {
+	it("reports cwd-wide deletion previews with the blocking task count", async () => {
 		const project = projectContext();
 		await expect(
-			dispatchProjectRequest(request("project/deletePreview", { mode: "chat", cwd: "/work" }), project.context),
+			dispatchProjectRequest(request("project/deletePreview", { cwd: "/work" }), project.context),
 		).resolves.toEqual({
-			mode: "chat",
 			cwd: "/work",
 			sessionCount: 0,
 			blockingScheduleCount: 0,

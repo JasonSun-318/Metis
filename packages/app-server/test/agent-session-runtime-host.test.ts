@@ -51,7 +51,7 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		const cwd = join(root, "project");
 		mkdirSync(agentDir);
 		mkdirSync(cwd);
-		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), { id: SESSION_ID, mode: "chat" });
+		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), { id: SESSION_ID });
 		for (const id of ["first", "second"]) {
 			manager.appendMessage({
 				role: "assistant",
@@ -87,7 +87,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			relativePath: basename(path),
 			summary: {
 				sessionId: SESSION_ID,
-				mode: "chat",
 				cwd,
 				cwdOrigin: "user-selected",
 				createdAt: timestamp,
@@ -127,7 +126,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			mkdirSync(cwd);
 			const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 				id: SESSION_ID,
-				mode: "code",
 				permissionPreset: "full",
 			});
 			const ids = Array.from({ length: 450 }, (_, index) =>
@@ -149,7 +147,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 				relativePath: basename(path),
 				summary: {
 					sessionId: SESSION_ID,
-					mode: "code",
 					cwdOrigin: "user-selected",
 					cwd,
 					createdAt: header.timestamp,
@@ -208,7 +205,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			writeFileSync(source, "retain original");
 			const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 				id: SESSION_ID,
-				mode: "code",
 				permissionPreset: "full",
 			});
 			const path = manager.getSessionFile()!;
@@ -218,7 +214,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 				relativePath: basename(path),
 				summary: {
 					sessionId: SESSION_ID,
-					mode: "code",
 					cwdOrigin: "user-selected",
 					cwd,
 					createdAt: "2026-08-30T00:00:00.000Z",
@@ -275,7 +270,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		mkdirSync(agentDir);
 		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 			id: SESSION_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const path = manager.getSessionFile()!;
@@ -285,7 +279,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			relativePath: basename(path),
 			summary: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: "2026-11-01T00:00:00.000Z",
@@ -345,7 +338,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		mkdirSync(agentDir);
 		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 			id: SESSION_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const path = manager.getSessionFile()!;
@@ -355,7 +347,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			relativePath: basename(path),
 			summary: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: "2026-11-01T00:00:00.000Z",
@@ -419,7 +410,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		mkdirSync(agentDir);
 		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 			id: SESSION_ID,
-			mode: "code",
 			permissionPreset: "ask",
 		});
 		const path = manager.getSessionFile()!;
@@ -429,7 +419,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			relativePath: basename(path),
 			summary: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: "2026-10-22T00:00:00.000Z",
@@ -510,7 +499,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 
 		const manager = SessionManager.create(cwd, sessionsRoot, {
 			id: SESSION_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const sessionFile = manager.getSessionFile()!;
@@ -520,7 +508,6 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			relativePath: basename(sessionFile),
 			summary: {
 				sessionId: SESSION_ID,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: "2026-08-30T00:00:00.000Z",

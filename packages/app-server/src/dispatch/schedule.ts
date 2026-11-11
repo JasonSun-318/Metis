@@ -66,11 +66,9 @@ function scheduleTarget(
 		throw new AppServerError("NOT_FOUND", { sessionId: sourceSessionId });
 	}
 	const target = resolveScheduleCreateTarget({
-		mode: ref.summary.mode,
 		cwdOrigin: ref.summary.cwdOrigin,
 		cwd: ref.summary.cwd,
 	});
-	if (!target) throw new AppServerError("INVALID_REQUEST", { sessionId: sourceSessionId });
 	return { target };
 }
 

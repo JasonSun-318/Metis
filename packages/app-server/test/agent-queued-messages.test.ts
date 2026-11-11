@@ -75,7 +75,7 @@ function createFixture() {
 	const sessionsRoot = join(agentDir, "sessions");
 	mkdirSync(cwd);
 	mkdirSync(agentDir);
-	const manager = SessionManager.create(cwd, sessionsRoot, { id: ROOT, mode: "code", permissionPreset: "full" });
+	const manager = SessionManager.create(cwd, sessionsRoot, { id: ROOT, permissionPreset: "full" });
 	const path = manager.getSessionFile()!;
 	const store = new AgentStore(manager, agentDir);
 	manager.close();
@@ -84,7 +84,6 @@ function createFixture() {
 		relativePath: basename(path),
 		summary: {
 			sessionId: ROOT,
-			mode: "code",
 			cwdOrigin: "user-selected",
 			cwd,
 			createdAt: "2026-10-26T00:00:00.000Z",
@@ -375,7 +374,7 @@ describe("child queued-message app-server routes", () => {
 				mkdirSync(directory, { recursive: true });
 				writeFileSync(
 					join(directory, `${sessionId}.jsonl`),
-					`${JSON.stringify({ type: "session", version: 10, id: sessionId, timestamp: "2026-10-26T00:00:00.000Z", cwd, mode: "code", cwdOrigin: "user-selected", ...(!archived ? { scheduled: { taskId: "schedule-fixture", runId: "run-fixture" } } : {}) })}\n`,
+					`${JSON.stringify({ type: "session", version: 10, id: sessionId, timestamp: "2026-10-26T00:00:00.000Z", cwd, cwdOrigin: "user-selected", ...(!archived ? { scheduled: { taskId: "schedule-fixture", runId: "run-fixture" } } : {}) })}\n`,
 				);
 			}
 			await server.catalog.refresh();
@@ -447,7 +446,7 @@ describe("child queued-message durable runtime adapter", () => {
 	it("cannot read or delete a queued input through another root session", async () => {
 		const fixture = createFixture();
 		const childPath = seedPausedChild(fixture);
-		const other = SessionManager.create(fixture.cwd, fixture.sessionsRoot, { id: OTHER_ROOT, mode: "code" });
+		const other = SessionManager.create(fixture.cwd, fixture.sessionsRoot, { id: OTHER_ROOT });
 		const otherPath = other.getSessionFile()!;
 		other.close();
 		const opened = await new AgentSessionRuntimeHost({ agentDir: fixture.agentDir }).open({

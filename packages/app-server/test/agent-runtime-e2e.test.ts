@@ -433,14 +433,12 @@ describe("agent runtime e2e", () => {
 			);
 			const rootManager = SessionManager.create(projectDir, sessionsRoot, {
 				id: SESSION_ID,
-				mode: "code",
 				permissionPreset: "full",
 			});
 			for (let index = 0; index < 105; index++) {
 				const agentId = `00000000-0000-4000-8000-${String(index + 300).padStart(12, "0")}`;
 				const child = SessionManager.create(projectDir, getSessionAgentDir(agentDir, SESSION_ID), {
 					id: agentId,
-					mode: "code",
 					permissionPreset: "full",
 					agent: {
 						agentId,

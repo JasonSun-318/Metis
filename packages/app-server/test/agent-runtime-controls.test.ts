@@ -23,7 +23,6 @@ async function fixture() {
 	mkdirSync(agentDir);
 	const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 		id: ROOT,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	const path = manager.getSessionFile()!;
@@ -33,7 +32,6 @@ async function fixture() {
 		relativePath: basename(path),
 		summary: {
 			sessionId: ROOT,
-			mode: "code",
 			cwdOrigin: "user-selected",
 			cwd,
 			createdAt: "2026-10-23T00:00:00.000Z",

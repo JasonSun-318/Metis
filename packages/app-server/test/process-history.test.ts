@@ -160,7 +160,7 @@ describe("process history", () => {
 	it("restores existing command/result evidence after closing and reopening a real session", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "metis-process-history-"));
 		try {
-			const manager = SessionManager.create(dir, join(dir, "sessions"), { id: sessionId, mode: "chat" });
+			const manager = SessionManager.create(dir, join(dir, "sessions"), { id: sessionId });
 			const message = (call("saved") as Extract<FileEntry, { type: "message" }>).message;
 			manager.appendMessage({
 				...message,

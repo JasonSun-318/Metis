@@ -25,7 +25,6 @@ async function setup() {
 			summary: {
 				sessionId: `session-${index}`,
 				name: index === 0 ? "Research task" : "Project B",
-				mode: "chat",
 				cwdOrigin: index === 0 ? "managed" : "user-selected",
 				cwd,
 				createdAt: "2026-10-29T00:00:00.000Z",

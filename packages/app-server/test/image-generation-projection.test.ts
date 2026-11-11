@@ -149,7 +149,6 @@ describe("image generation projection", () => {
 		mkdirSync(cwd);
 		mkdirSync(agentDir);
 		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const sessionId = manager.getSessionId();
@@ -160,7 +159,6 @@ describe("image generation projection", () => {
 			relativePath: basename(path),
 			summary: {
 				sessionId,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: date,

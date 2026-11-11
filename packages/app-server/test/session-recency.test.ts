@@ -27,7 +27,6 @@ describe("session recency", () => {
 		vi.setSystemTime(new Date("2026-10-01T08:00:00.000Z"));
 		const manager = SessionManager.create(projectDir, getDefaultSessionDir(projectDir, agentDir), {
 			id: SESSION_ID,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		vi.setSystemTime(new Date("2026-10-01T09:00:00.000Z"));

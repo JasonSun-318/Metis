@@ -10,9 +10,9 @@ afterEach(() => {
 	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-it.each(["code", "chat"] as const)(
-	"preserves future %s identity through full and project refresh without touching body or metadata",
-	async (mode) => {
+it.each([false, true] as const)(
+	"preserves future identity through full and project refresh without touching body or metadata (scheduled=%s)",
+	async (scheduledRun) => {
 		const directory = mkdtempSync(join(tmpdir(), "metis-catalog-availability-"));
 		directories.push(directory);
 		const cwd = join(directory, "project");
@@ -21,14 +21,13 @@ it.each(["code", "chat"] as const)(
 		const storage = getDefaultSessionDir(cwd, agentDir);
 		mkdirSync(storage, { recursive: true });
 		const id = "11111111-1111-4111-8111-111111111111";
-		const scheduled =
-			mode === "chat"
-				? { taskId: "22222222-2222-4222-8222-222222222222", runId: "33333333-3333-4333-8333-333333333333" }
-				: undefined;
+		const scheduled = scheduledRun
+			? { taskId: "22222222-2222-4222-8222-222222222222", runId: "33333333-3333-4333-8333-333333333333" }
+			: undefined;
 		const file = join(storage, "future.jsonl");
 		const body = Buffer.concat([
 			Buffer.from(
-				`${JSON.stringify({ type: "session", version: CURRENT_SESSION_VERSION + 1, id, timestamp: "2026-10-28T12:00:00.000Z", cwd, mode, cwdOrigin: "user-selected", ...(scheduled ? { scheduled } : {}) })}\n`,
+				`${JSON.stringify({ type: "session", version: CURRENT_SESSION_VERSION + 1, id, timestamp: "2026-10-28T12:00:00.000Z", cwd, cwdOrigin: "user-selected", ...(scheduled ? { scheduled } : {}) })}\n`,
 			),
 			Buffer.from([0xff, 0x00, 0x7b]),
 		]);
@@ -41,13 +40,12 @@ it.each(["code", "chat"] as const)(
 		const catalog = new SessionCatalog({ agentDir, sessionsRoot: join(agentDir, "sessions") });
 		await catalog.refresh();
 		for (const projectRefresh of [false, true]) {
-			if (projectRefresh) await catalog.refreshModeProjectStorage(cwd);
+			if (projectRefresh) await catalog.refreshProjectStorage(cwd);
 			const ref = catalog.get(id);
 			expect(ref.summary).toMatchObject({
 				sessionId: id,
 				state: "unsupported",
 				cwd: realpathSync(cwd),
-				mode,
 				name: "Saved future name",
 				useMemory: false,
 			});

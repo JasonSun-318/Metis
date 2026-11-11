@@ -66,7 +66,6 @@ describe("Process projection", () => {
 	it("keeps the latest output in reconnect snapshots", () => {
 		const session = {
 			sessionId: "session",
-			mode: "code" as const,
 			cwdOrigin: "user-selected" as const,
 			cwd: "/tmp",
 			createdAt: "2026-09-12T00:00:00.000Z",

@@ -584,7 +584,6 @@ describe("production runtime streaming", () => {
 			expect(status).toMatchObject({
 				result: {
 					sessionId: SESSION_REQUEST,
-					mode: "code",
 					contextWindow: 32_000,
 					cacheHitPercent: null,
 				},

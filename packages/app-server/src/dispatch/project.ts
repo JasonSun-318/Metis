@@ -19,11 +19,11 @@ export function isProjectRequest(request: ClientRpcRequest): boolean {
 	return request.method.startsWith("project/");
 }
 
-async function deleteModeProject(
+async function deleteProject(
 	request: Extract<ClientRpcRequest, { method: "project/delete" }>,
 	context: ProjectDispatchContext,
 ): Promise<unknown> {
-	let invalidation: { mode: "chat" | "code"; cwd: string; reason: "deleted" | "reload_required" } | undefined;
+	let invalidation: { cwd: string; reason: "deleted" | "reload_required" } | undefined;
 	const publishInvalidation = () => {
 		const event = invalidation;
 		invalidation = undefined;
@@ -31,7 +31,7 @@ async function deleteModeProject(
 	};
 	try {
 		const result = await context.replayMutation(request, () =>
-			context.catalog.withModeProjectBlocked(request.params, async (snapshot) => {
+			context.catalog.withProjectBlocked(request.params, async (snapshot) => {
 				const deleteSessions = async () => {
 					let quiesced = false;
 					try {
@@ -39,10 +39,9 @@ async function deleteModeProject(
 							snapshot.refs.map((ref) => ref.summary.sessionId),
 							async () => {
 								quiesced = true;
-								const result = await SessionManager.trashModeProjectData({
+								const result = await SessionManager.trashProjectData({
 									agentDir: context.catalog.agentDir,
 									sessionsRoot: context.catalog.sessionsRoot,
-									mode: snapshot.mode,
 									cwd: snapshot.cwd,
 									sessions: snapshot.refs.map((ref) => ({
 										sessionId: ref.summary.sessionId,
@@ -64,9 +63,8 @@ async function deleteModeProject(
 								for (const ref of snapshot.refs) {
 									context.subscriptionHub.removeSession(ref.summary.sessionId);
 								}
-								invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "deleted" };
+								invalidation = { cwd: snapshot.cwd, reason: "deleted" };
 								return {
-									mode: snapshot.mode,
 									cwd: snapshot.cwd,
 									deletedSessionCount: result.deletedSessionCount,
 								};
@@ -82,14 +80,12 @@ async function deleteModeProject(
 							for (const ref of snapshot.refs) {
 								context.subscriptionHub.removeSession(ref.summary.sessionId);
 							}
-							invalidation = { mode: snapshot.mode, cwd: snapshot.cwd, reason: "reload_required" };
+							invalidation = { cwd: snapshot.cwd, reason: "reload_required" };
 						}
 						throw error;
 					}
 				};
-				return snapshot.mode === "chat"
-					? context.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions)
-					: deleteSessions();
+				return context.scheduleManager.withNoFixedWorkspaceTasks(snapshot.cwd, deleteSessions);
 			}),
 		);
 		publishInvalidation();
@@ -106,19 +102,17 @@ export async function dispatchProjectRequest(
 ): Promise<unknown> {
 	switch (request.method) {
 		case "project/deletePreview": {
-			const cwd = await context.catalog.refreshModeProjectStorage(request.params.cwd);
-			const snapshot = context.catalog.modeProjectSnapshot(request.params.mode, cwd);
+			const cwd = await context.catalog.refreshProjectStorage(request.params.cwd);
+			const snapshot = context.catalog.projectSnapshot(cwd);
 			return {
-				mode: snapshot.mode,
 				cwd: snapshot.cwd,
 				sessionCount: snapshot.refs.length,
-				blockingScheduleCount:
-					snapshot.mode === "chat" ? context.scheduleManager.countFixedWorkspaceTasks(snapshot.cwd) : 0,
+				blockingScheduleCount: context.scheduleManager.countFixedWorkspaceTasks(snapshot.cwd),
 				revision: snapshot.revision,
 			};
 		}
 		case "project/delete":
-			return await deleteModeProject(request, context);
+			return await deleteProject(request, context);
 		default:
 			throw new Error(`Unhandled project request: ${request.method}`);
 	}

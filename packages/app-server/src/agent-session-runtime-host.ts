@@ -1742,7 +1742,6 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 		return {
 			sessionId: input.sessionId,
-			mode: stats.mode,
 			contextTokens: context?.tokens ?? null,
 			contextWindow: context?.contextWindow ?? null,
 			contextBasis,
@@ -2545,7 +2544,6 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 				header?.id !== this.sessionId ||
 				header.scheduled?.taskId !== ref.scheduled?.taskId ||
 				header.scheduled?.runId !== ref.scheduled?.runId ||
-				header.mode !== ref.summary.mode ||
 				header.cwdOrigin !== ref.summary.cwdOrigin ||
 				(header.cwd || null) !== ref.summary.cwd ||
 				header.timestamp !== ref.summary.createdAt

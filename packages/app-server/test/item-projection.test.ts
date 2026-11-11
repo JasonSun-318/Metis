@@ -553,7 +553,6 @@ it("keeps a live permission decision in readItems reconnect output", () => {
 	const projection = new SessionProjection({
 		session: {
 			sessionId: "session-1",
-			mode: "code",
 			cwdOrigin: "user-selected",
 			cwd: "/tmp/project",
 			createdAt: CREATED_AT,
@@ -639,7 +638,6 @@ describe("managed permission decision details", () => {
 		const projection = new SessionProjection({
 			session: {
 				sessionId: "test-session",
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd: "/tmp/project",
 				createdAt: CREATED_AT,

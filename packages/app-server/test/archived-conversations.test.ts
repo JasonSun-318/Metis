@@ -23,7 +23,7 @@ function fixture() {
 		rmSync(directory, { recursive: true, force: true });
 	});
 	function root(name: string) {
-		const manager = SessionManager.create(cwd, sessionsRoot, { id: randomUUID(), mode: "chat" });
+		const manager = SessionManager.create(cwd, sessionsRoot, { id: randomUUID() });
 		manager.appendSessionInfo(name);
 		roots.push(manager);
 		return { manager, store: new AgentStore(manager, agentDir) };
@@ -37,7 +37,6 @@ function fixture() {
 				name,
 				agentType: "default",
 				initialTask: "Review",
-				mode: "chat",
 				tools: ["read"],
 				writePolicy: "inherit",
 				permissionPreset: "ask",
@@ -183,7 +182,6 @@ describe("archived conversations", () => {
 			expect(server.app.catalog.get(sessionId).path).toBe(originalPath);
 			expect(server.app.catalog.get(sessionId).summary).toMatchObject({
 				name: "Original root",
-				mode: "chat",
 				cwd: originalSummary.cwd,
 			});
 			const archive = await server.call("session/archived/list", {});

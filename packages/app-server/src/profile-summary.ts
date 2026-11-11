@@ -1,6 +1,6 @@
 import { lstatSync } from "node:fs";
 import type { ClientResult } from "@metis/app-protocol";
-import { DEFAULT_AGENT_MODE, type FileEntry, parseSkillUsageRecord, SessionManager } from "@metis/coding-agent/host";
+import { type FileEntry, parseSkillUsageRecord, SessionManager } from "@metis/coding-agent/host";
 import type { SessionRef } from "./session-runtime-host.ts";
 
 const DAY_MS = 86_400_000;
@@ -8,7 +8,6 @@ const VISIBLE_WEEKS = 53;
 const SKILL_USAGE_TYPE = "metis.skill_usage.v1";
 
 interface SessionProfileContribution {
-	readonly mode: "chat" | "code";
 	readonly totalTokens: number;
 	readonly tokensByDate: readonly (readonly [date: string, tokens: number])[];
 	readonly usageByDate: readonly (readonly [
@@ -89,8 +88,6 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 	const modelTokensByDate = new Map<string, { date: string; provider: string; modelId: string; tokens: number }>();
 	const skillCounts = new Map<string, number>();
 	const thinkingCounts = new Map<ProfileThinkingLevel, number>();
-	const header = entries.find((entry) => entry.type === "session");
-	const mode = header?.type === "session" ? (header.mode ?? DEFAULT_AGENT_MODE) : DEFAULT_AGENT_MODE;
 	let thinkingLevel: ProfileThinkingLevel | null = null;
 	let totalTokens = 0;
 	let firstMessageAt = Number.POSITIVE_INFINITY;
@@ -142,7 +139,6 @@ export function reduceProfileEntries(entries: readonly FileEntry[]): SessionProf
 	}
 
 	return {
-		mode,
 		totalTokens,
 		tokensByDate: [...tokensByDate].sort(([left], [right]) => compareNames(left, right)),
 		usageByDate: [...usageByDate].sort(([left], [right]) => compareNames(left, right)),
@@ -173,8 +169,6 @@ export function buildUsageSummary(
 	const firstDay = todayDay - rangeDays + 1;
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date((firstDay + index) * DAY_MS).toISOString().slice(0, 10),
-		chatTokens: 0,
-		codeTokens: 0,
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheReadTokens: 0,
@@ -187,10 +181,7 @@ export function buildUsageSummary(
 	let outputTokens = 0;
 	let cacheReadTokens = 0;
 	let cacheWriteTokens = 0;
-	let chatTokens = 0;
-	let codeTokens = 0;
-	let chatSessionCount = 0;
-	let codeSessionCount = 0;
+	let sessionCount = 0;
 
 	for (const contribution of contributions) {
 		let sessionTokens = 0;
@@ -207,18 +198,8 @@ export function buildUsageSummary(
 			day.outputTokens = safeAdd(day.outputTokens, usage.output);
 			day.cacheReadTokens = safeAdd(day.cacheReadTokens, usage.cacheRead);
 			day.cacheWriteTokens = safeAdd(day.cacheWriteTokens, usage.cacheWrite);
-			if (contribution.mode === "chat") {
-				chatTokens = safeAdd(chatTokens, usage.total);
-				day.chatTokens = safeAdd(day.chatTokens, usage.total);
-			} else {
-				codeTokens = safeAdd(codeTokens, usage.total);
-				day.codeTokens = safeAdd(day.codeTokens, usage.total);
-			}
 		}
-		if (contribution.hasUserMessage && sessionTokens > 0) {
-			if (contribution.mode === "chat") chatSessionCount += 1;
-			else codeSessionCount += 1;
-		}
+		if (contribution.hasUserMessage && sessionTokens > 0) sessionCount += 1;
 		for (const [date, provider, modelId, tokens] of contribution.modelTokensByDate) {
 			if (!byDate.has(date)) continue;
 			const key = `${provider}\0${modelId}`;
@@ -236,11 +217,7 @@ export function buildUsageSummary(
 		outputTokens,
 		cacheReadTokens,
 		cacheWriteTokens,
-		chatTokens,
-		codeTokens,
-		sessionCount: chatSessionCount + codeSessionCount,
-		chatSessionCount,
-		codeSessionCount,
+		sessionCount,
 		daily,
 		topModels: [...modelTotals.values()]
 			.sort(
@@ -259,7 +236,6 @@ export function buildProfileSummary(
 ): ClientResult<"profile/get"> {
 	const tokensByDate = new Map<string, number>();
 	const skillCounts = new Map<string, number>();
-	const modeCounts = new Map<"chat" | "code", number>();
 	const thinkingCounts = new Map<ProfileThinkingLevel, number>();
 	let totalTokens = 0;
 	let longestSessionMs = 0;
@@ -270,7 +246,6 @@ export function buildProfileSummary(
 		longestSessionMs = Math.max(longestSessionMs, contribution.durationMs);
 		if (contribution.hasUserMessage) {
 			sessionCount += 1;
-			modeCounts.set(contribution.mode, safeAdd(modeCounts.get(contribution.mode) ?? 0, 1));
 		}
 		for (const [date, tokens] of contribution.tokensByDate) {
 			tokensByDate.set(date, safeAdd(tokensByDate.get(date) ?? 0, tokens));
@@ -282,7 +257,6 @@ export function buildProfileSummary(
 			thinkingCounts.set(level, safeAdd(thinkingCounts.get(level) ?? 0, count));
 		}
 	}
-	const mostUsedMode = dominant(modeCounts);
 	const mostUsedThinkingLevel = dominant(thinkingCounts);
 
 	const todayKey = localDateKey(now);
@@ -330,8 +304,6 @@ export function buildProfileSummary(
 		currentStreakDays,
 		longestStreakDays,
 		sessionCount,
-		mostUsedMode: mostUsedMode.value,
-		mostUsedModePercent: mostUsedMode.percent,
 		mostUsedThinkingLevel: mostUsedThinkingLevel.value,
 		mostUsedThinkingLevelPercent: mostUsedThinkingLevel.percent,
 		usedSkillCount: skillCounts.size,

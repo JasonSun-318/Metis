@@ -31,7 +31,6 @@ it.each(["extension", "mcp"])(
 			);
 		}
 		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const header = manager.getHeader()!;
@@ -42,7 +41,6 @@ it.each(["extension", "mcp"])(
 			relativePath: basename(path),
 			summary: {
 				sessionId: header.id,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: header.timestamp,
@@ -77,7 +75,6 @@ it("reclaims an unsubscribed production runtime, restores its complete history a
 	const sessionId = "00000000-0000-4000-8000-000000000901";
 	const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
 		id: sessionId,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	const ids = Array.from({ length: 450 }, (_, index) =>
@@ -96,7 +93,6 @@ it("reclaims an unsubscribed production runtime, restores its complete history a
 		relativePath: basename(path),
 		summary: {
 			sessionId,
-			mode: "code" as const,
 			cwdOrigin: "user-selected" as const,
 			cwd,
 			createdAt: header.timestamp,

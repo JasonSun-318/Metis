@@ -32,7 +32,6 @@ const CREATED_AT = "2026-07-16T00:00:00.000Z";
 function summary(): SessionSummary {
 	return {
 		sessionId: SESSION_ID,
-		mode: "code",
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: CREATED_AT,
@@ -189,7 +188,6 @@ class PausableRuntime implements OpenedSessionRuntime {
 	async getStatus(input: ClientParams<"session/status">): Promise<ClientResult<"session/status">> {
 		return {
 			sessionId: input.sessionId,
-			mode: "code",
 			contextTokens: 64_000,
 			contextWindow: 128_000,
 			contextBasis: "reported_total",

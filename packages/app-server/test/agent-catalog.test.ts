@@ -59,7 +59,6 @@ interface CreateAgentInput {
 	readonly rootId?: string;
 	readonly parentId?: string;
 	readonly agentPath?: readonly string[];
-	readonly mode?: "chat" | "code";
 	readonly roleSnapshot?: RoleSnapshot;
 	readonly archived?: boolean;
 }
@@ -74,7 +73,6 @@ function createFixture(): Fixture {
 	const sessionsRoot = join(agentDir, "sessions");
 	const manager = SessionManager.create(projectDir, sessionsRoot, {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	return { root, projectDir, agentDir, sessionsRoot, manager, store: new AgentStore(manager, agentDir) };
@@ -99,7 +97,6 @@ function createAgent(store: AgentStore, projectDir: string, input: CreateAgentIn
 		parentSessionId: input.parentId ?? rootId,
 		rootSessionId: rootId,
 		agentPath: input.agentPath ?? [input.id],
-		...(input.mode ? { mode: input.mode } : {}),
 		...(input.roleSnapshot ? { roleSnapshot: input.roleSnapshot } : {}),
 	};
 	const record = store.create(config, [], input.taskId);
@@ -110,7 +107,6 @@ function createAgent(store: AgentStore, projectDir: string, input: CreateAgentIn
 function sessionRef(fixture: Fixture, path: string, sessionId: string, createdAt: string): SessionRef {
 	const summary: SessionSummary = {
 		sessionId,
-		mode: "code",
 		cwdOrigin: "user-selected",
 		cwd: fixture.projectDir,
 		createdAt,
@@ -293,22 +289,21 @@ describe("agent catalog", () => {
 		).not.toThrow();
 		expect(digestTree(fixture.root)).toEqual(before);
 	});
-	it("reads a cold chat subtree and its history without writing or taking a writer lease", () => {
+	it("reads a cold subtree and its history without writing or taking a writer lease", () => {
 		const fixture = createFixture();
 		const roleSnapshot: RoleSnapshot = {
 			version: 1,
 			agentType: "worker",
-			displayName: "Chat worker",
-			purpose: "Handle a user conversation in chat mode.",
-			systemPrompt: "Stay in chat mode and answer the user.",
+			displayName: "Conversation worker",
+			purpose: "Handle a user conversation.",
+			systemPrompt: "Answer the user.",
 			revision: "a".repeat(64),
 			source: "created",
 		};
 		const chat = createAgent(fixture.store, fixture.projectDir, {
 			id: CHAT_AGENT_ID,
-			name: "Chat worker",
+			name: "Conversation worker",
 			taskId: CHAT_TASK_ID,
-			mode: "chat",
 			roleSnapshot,
 		});
 		fixture.store.appendTaskState(CHAT_AGENT_ID, { taskId: CHAT_TASK_ID, status: "running" });
@@ -327,7 +322,6 @@ describe("agent catalog", () => {
 		expect(listed.agents).toHaveLength(1);
 		expect(listed.agents[0]).toMatchObject({
 			agentId: CHAT_AGENT_ID,
-			mode: "chat",
 			roleRevision: roleSnapshot.revision,
 			status: "running",
 			depth: 1,
@@ -489,7 +483,6 @@ describe("agent catalog", () => {
 		});
 		const otherManager = SessionManager.create(fixture.projectDir, fixture.sessionsRoot, {
 			id: OTHER_ROOT_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const otherStore = new AgentStore(otherManager, fixture.agentDir);

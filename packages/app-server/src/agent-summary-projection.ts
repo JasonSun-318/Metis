@@ -25,7 +25,6 @@ export function agentSummaryView(summary: AgentSummary): SessionSnapshot["agents
 	return {
 		agentId: summary.agentId,
 		...(summary.retry ? { retry: { ...summary.retry } } : {}),
-		...(summary.mode ? { mode: summary.mode } : {}),
 		...(summary.model ? { model: summary.model } : {}),
 		tools: [...summary.tools],
 		writePolicy: summary.writePolicy,

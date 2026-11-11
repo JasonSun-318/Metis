@@ -19,7 +19,7 @@ function fixture() {
 	const project = join(dir, "project");
 	mkdirSync(project);
 	const agentDir = join(dir, "agent");
-	const root = SessionManager.create(project, join(agentDir, "sessions"), { mode: "chat" });
+	const root = SessionManager.create(project, join(agentDir, "sessions"), {});
 	cleanup.push(() => root.close());
 	const sessionId = root.getSessionId();
 	const store = new AgentStore(root, agentDir);
@@ -52,7 +52,6 @@ function fixture() {
 		relativePath: "root.jsonl",
 		summary: {
 			sessionId,
-			mode: "chat",
 			cwd: project,
 			cwdOrigin: "user-selected",
 			createdAt: root.getHeader()!.timestamp,

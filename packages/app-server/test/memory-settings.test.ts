@@ -57,7 +57,6 @@ describe("MemoryService", () => {
 		// Session files must live under sessions/<encoded-cwd>/ for enumerateSessions to see them.
 		const manager = SessionManager.create(projectDir, getDefaultSessionDir(projectDir, agentDir), {
 			id,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		// Phase 1 skips sessions whose serialized transcript is empty.
@@ -76,7 +75,7 @@ describe("MemoryService", () => {
 
 	async function withSession(cwdOrigin: "user-selected" | "managed" = "user-selected") {
 		const ctx = service();
-		SessionManager.create(projectDir, sessionsRoot, { id: SESSION_ID, mode: "chat", cwdOrigin }).close();
+		SessionManager.create(projectDir, sessionsRoot, { id: SESSION_ID, cwdOrigin }).close();
 		await ctx.catalog.refresh();
 		return ctx;
 	}
@@ -116,7 +115,6 @@ describe("MemoryService", () => {
 		const ctx = service();
 		const manager = SessionManager.create(projectDir, sessionsRoot, {
 			id: SESSION_ID,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			contributeMemory: false,
 		});

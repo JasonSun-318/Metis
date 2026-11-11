@@ -3,7 +3,6 @@ import { type Dir, constants as fsConstants } from "node:fs";
 import { type FileHandle, lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-	type AgentMode,
 	type ClientParams,
 	type ClientResult,
 	type CwdOrigin,
@@ -57,7 +56,6 @@ interface ScannedSession {
 		readonly id: string;
 		readonly timestamp: string;
 		readonly cwd: string;
-		readonly mode: AgentMode;
 		readonly cwdOrigin: CwdOrigin;
 		readonly lastTurnOutcome?: "completed" | "failed";
 		readonly scheduled?: { readonly taskId: string; readonly runId: string };
@@ -83,8 +81,7 @@ export interface SessionCatalogOptions {
 	readonly sessionsRoot?: string;
 }
 
-export interface ModeProjectSnapshot {
-	readonly mode: AgentMode;
+export interface ProjectSnapshot {
 	readonly cwd: string;
 	readonly refs: readonly SessionRef[];
 	readonly revision: string;
@@ -224,16 +221,14 @@ function corruptSummary(
 	scanned: ScannedSession,
 	known: {
 		readonly cwd: string | null;
-		readonly mode: AgentMode;
 		readonly cwdOrigin: CwdOrigin;
 		readonly createdAt?: string;
 		readonly name?: string;
 		readonly scheduled?: { readonly taskId: string; readonly runId: string };
-	} = { cwd: null, mode: "code", cwdOrigin: "user-selected" },
+	} = { cwd: null, cwdOrigin: "user-selected" },
 ): SessionSummary {
 	return {
 		sessionId,
-		mode: known.mode,
 		cwdOrigin: known.cwdOrigin,
 		cwd: known.cwd,
 		createdAt: known.createdAt ?? scanned.updatedAt,
@@ -261,7 +256,6 @@ function scannedSummary(sessionId: string, scanned: ScannedSession, duplicate: b
 			header
 				? {
 						cwd: summaryCwd(header.cwd),
-						mode: header.mode,
 						cwdOrigin: header.cwdOrigin,
 						createdAt: header.timestamp,
 						...(scanned.name ? { name: scanned.name } : {}),
@@ -273,7 +267,6 @@ function scannedSummary(sessionId: string, scanned: ScannedSession, duplicate: b
 	const unsupported = header.unsupportedVersion !== undefined;
 	return {
 		sessionId,
-		mode: header.mode,
 		cwdOrigin: header.cwdOrigin,
 		cwd: summaryCwd(header.cwd),
 		createdAt: header.timestamp,
@@ -307,8 +300,8 @@ function isSameProjectCwd(cwd: string, canonicalCwd: string, cache: Map<string, 
 	return candidate === canonicalCwd;
 }
 
-function projectKey(mode: AgentMode, cwd: string): string {
-	return JSON.stringify([mode, cwd]);
+function projectKey(cwd: string): string {
+	return cwd;
 }
 
 function storageRoot(relativePath: string): string {
@@ -341,7 +334,6 @@ async function readHeader(
 	updatedAt: string;
 	lastTurnOutcome?: "completed" | "failed";
 	cwd: string;
-	mode: AgentMode;
 	cwdOrigin: CwdOrigin;
 	name?: string;
 	nameScannedThrough: number;
@@ -415,7 +407,6 @@ async function readHeader(
 				timestamp: value.timestamp,
 				updatedAt: value.timestamp,
 				cwd: value.cwd,
-				mode: value.mode === "chat" ? "chat" : "code",
 				cwdOrigin: value.cwdOrigin === "managed" ? "managed" : "user-selected",
 				nameScannedThrough: 0,
 				unsupportedVersion: value.version,
@@ -499,7 +490,6 @@ async function readHeader(
 			updatedAt,
 			...(tail.lastTurnOutcome ? { lastTurnOutcome: tail.lastTurnOutcome } : {}),
 			cwd: value.cwd,
-			mode: value.mode === "chat" || value.mode === "code" ? value.mode : "code",
 			cwdOrigin:
 				value.cwdOrigin === "managed" || value.cwdOrigin === "user-selected" ? value.cwdOrigin : "user-selected",
 			...(name ? { name } : {}),
@@ -744,7 +734,7 @@ export class SessionCatalog {
 		this.sessions = next;
 	}
 
-	async refreshModeProjectStorage(cwd: string): Promise<string> {
+	async refreshProjectStorage(cwd: string): Promise<string> {
 		const canonicalCwd = canonicalProjectCwd(cwd);
 		const storageKeys = new Set([encodePathForStorage(canonicalCwd)]);
 		const canonicalCwds = new Map<string, string>();
@@ -820,7 +810,6 @@ export class SessionCatalog {
 					header.id !== sessionId ||
 					header.scheduled?.taskId !== run.taskId ||
 					header.scheduled.runId !== run.id ||
-					header.mode !== "chat" ||
 					header.cwdOrigin !== expectedCwdOrigin ||
 					header.cwd !== run.snapshot.target.cwd
 				) {
@@ -832,7 +821,6 @@ export class SessionCatalog {
 				const metadata = readSessionDisplayMetadata(path);
 				const summary: SessionSummary = {
 					sessionId,
-					mode: header.mode,
 					cwdOrigin: header.cwdOrigin,
 					cwd: summaryCwd(header.cwd),
 					createdAt: header.timestamp,
@@ -883,9 +871,8 @@ export class SessionCatalog {
 			.map(([sessionId]) => sessionId);
 	}
 
-	modeProjectSnapshot(mode: AgentMode, cwd: string): ModeProjectSnapshot {
-		const canonicalCwd = canonicalProjectCwd(cwd);
-		return this.snapshotModeProject(mode, canonicalCwd);
+	projectSnapshot(cwd: string): ProjectSnapshot {
+		return this.snapshotProject(canonicalProjectCwd(cwd));
 	}
 
 	private async existingProjectStorageCwd(canonicalCwd: string): Promise<string | undefined> {
@@ -916,19 +903,18 @@ export class SessionCatalog {
 		}
 	}
 
-	async withModeProjectBlocked<T>(
+	async withProjectBlocked<T>(
 		input: {
-			readonly mode: AgentMode;
 			readonly cwd: string;
 			readonly expectedRevision: string;
 		},
-		operation: (snapshot: ModeProjectSnapshot) => Promise<T>,
+		operation: (snapshot: ProjectSnapshot) => Promise<T>,
 	): Promise<T> {
 		const canonicalCwd = canonicalProjectCwd(input.cwd);
-		const key = projectKey(input.mode, canonicalCwd);
+		const key = projectKey(canonicalCwd);
 		const snapshot = await this.mutate(async () => {
 			if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY");
-			const value = this.snapshotModeProject(input.mode, canonicalCwd);
+			const value = this.snapshotProject(canonicalCwd);
 			if (value.revision !== input.expectedRevision) throw new AppServerError("BUSY");
 			if (value.refs.some((ref) => this.activeSessionMutations.has(ref.summary.sessionId))) {
 				throw new AppServerError("BUSY");
@@ -941,7 +927,7 @@ export class SessionCatalog {
 			result = await operation(snapshot);
 		} catch (error) {
 			try {
-				await this.refreshModeProjectStorage(canonicalCwd);
+				await this.refreshProjectStorage(canonicalCwd);
 			} finally {
 				await this.mutate(() => {
 					this.blockedProjectKeys.delete(key);
@@ -972,7 +958,7 @@ export class SessionCatalog {
 			const deleted = (await Promise.all(snapshot.refs.map((ref) => isAbsent(ref.path)))).every(Boolean);
 			let refreshError: unknown;
 			try {
-				await this.refreshModeProjectStorage(canonicalCwd);
+				await this.refreshProjectStorage(canonicalCwd);
 			} catch (reconcileError) {
 				refreshError = reconcileError;
 			} finally {
@@ -991,7 +977,7 @@ export class SessionCatalog {
 			if (current.summary.state === "unsupported")
 				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
 			if (!current.scheduled && current.summary.cwdOrigin === "user-selected" && current.summary.cwd) {
-				const key = projectKey(current.summary.mode, canonicalProjectCwd(current.summary.cwd));
+				const key = projectKey(canonicalProjectCwd(current.summary.cwd));
 				if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
 			}
 			if (this.activeSessionMutations.has(sessionId)) throw new AppServerError("BUSY", { sessionId });
@@ -1007,14 +993,13 @@ export class SessionCatalog {
 		}
 	}
 
-	private snapshotModeProject(mode: AgentMode, canonicalCwd: string): ModeProjectSnapshot {
-		const key = projectKey(mode, canonicalCwd);
+	private snapshotProject(canonicalCwd: string): ProjectSnapshot {
+		const key = projectKey(canonicalCwd);
 		if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY");
 		const canonicalCwds = new Map<string, string>();
 		for (const ref of this.sessions.values()) {
 			if (
 				ref.summary.state === "unsupported" &&
-				ref.summary.mode === mode &&
 				!ref.scheduled &&
 				ref.summary.cwdOrigin === "user-selected" &&
 				ref.summary.cwd &&
@@ -1028,7 +1013,6 @@ export class SessionCatalog {
 				!ref.scheduled &&
 				ref.summary.state !== "corrupt" &&
 				ref.summary.state !== "unsupported" &&
-				ref.summary.mode === mode &&
 				ref.summary.cwdOrigin === "user-selected" &&
 				ref.summary.cwd !== null &&
 				isSameProjectCwd(ref.summary.cwd, canonicalCwd, canonicalCwds),
@@ -1061,7 +1045,7 @@ export class SessionCatalog {
 			}
 		}
 		refs.sort((left, right) => left.summary.sessionId.localeCompare(right.summary.sessionId));
-		const hash = createHash("sha256").update(mode).update("\0").update(canonicalCwd).update("\0");
+		const hash = createHash("sha256").update(canonicalCwd).update("\0");
 		for (const ref of refs) {
 			hash
 				.update(ref.summary.sessionId)
@@ -1073,7 +1057,7 @@ export class SessionCatalog {
 				.update(ref.storageUpdatedAt ?? ref.summary.updatedAt)
 				.update("\0");
 		}
-		return { mode, cwd: canonicalCwd, refs, revision: hash.digest("hex") };
+		return { cwd: canonicalCwd, refs, revision: hash.digest("hex") };
 	}
 
 	private mutate<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -1123,14 +1107,8 @@ export class SessionCatalog {
 
 	create(input: ClientParams<"session/create">): Promise<SessionSummary> {
 		return this.mutate(async () => {
-			const mode = input.mode ?? "code";
-			const projectCwd =
-				input.cwd !== undefined
-					? canonicalProjectCwd(input.cwd)
-					: mode === "code"
-						? canonicalProjectCwd(process.cwd())
-						: null;
-			if (projectCwd && this.blockedProjectKeys.has(projectKey(mode, projectCwd))) {
+			const projectCwd = input.cwd === undefined ? null : canonicalProjectCwd(input.cwd);
+			if (projectCwd && this.blockedProjectKeys.has(projectKey(projectCwd))) {
 				throw new AppServerError("BUSY", { requestId: input.requestId });
 			}
 			const requestedName = normalizedSessionName(input.name);
@@ -1142,7 +1120,6 @@ export class SessionCatalog {
 				kind: "session_create",
 				requestId: input.requestId,
 				params: {
-					...(input.mode === undefined ? {} : { mode: input.mode }),
 					...(input.cwd === undefined ? {} : { cwd: input.cwd }),
 					...(input.name === undefined ? {} : { name: input.name }),
 					...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
@@ -1171,17 +1148,13 @@ export class SessionCatalog {
 					const requestedCwd = input.cwd === undefined ? undefined : await realpath(resolve(input.cwd));
 					const workspaceMatches = requestedCwd
 						? manager.getCwd() === requestedCwd && manager.getCwdOrigin() === "user-selected"
-						: mode === "chat"
-							? getOwnedManagedWorkspace({
-									id: input.requestId,
-									cwd: manager.getCwd(),
-									cwdOrigin: manager.getCwdOrigin(),
-									agentDir: this.agentDir,
-								}) !== undefined
-							: manager.getCwd() === (await realpath(process.cwd())) &&
-								manager.getCwdOrigin() === "user-selected";
+						: getOwnedManagedWorkspace({
+								id: input.requestId,
+								cwd: manager.getCwd(),
+								cwdOrigin: manager.getCwdOrigin(),
+								agentDir: this.agentDir,
+							}) !== undefined;
 					if (
-						manager.getMode() !== mode ||
 						!workspaceMatches ||
 						name !== requestedName ||
 						manager.getPermissionPreset() !== requestedPermissionPreset ||
@@ -1212,7 +1185,6 @@ export class SessionCatalog {
 				? { cwd: existingStorageCwd, cwdOrigin: "user-selected" as const }
 				: resolveNewSessionWorkspace({
 						id: input.requestId,
-						mode,
 						requestedCwd: input.cwd,
 						hostCwd: process.cwd(),
 						agentDir: this.agentDir,
@@ -1222,7 +1194,6 @@ export class SessionCatalog {
 				try {
 					manager = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, this.agentDir), {
 						id: input.requestId,
-						mode,
 						cwdOrigin: workspace.cwdOrigin,
 						...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
 						...(input.useMemory === undefined ? {} : { useMemory: input.useMemory }),
@@ -1365,7 +1336,7 @@ export class SessionCatalog {
 			if (ref.summary.state === "unsupported")
 				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
 			if (!ref.scheduled && ref.summary.cwdOrigin === "user-selected" && ref.summary.cwd) {
-				const key = projectKey(ref.summary.mode, canonicalProjectCwd(ref.summary.cwd));
+				const key = projectKey(canonicalProjectCwd(ref.summary.cwd));
 				if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
 			}
 			const mutation: DurableSessionMutation = {

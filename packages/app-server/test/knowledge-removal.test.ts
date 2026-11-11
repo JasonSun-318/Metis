@@ -27,7 +27,6 @@ it("forgets removed directories in active and cold conversations without deletin
 	for (const id of sessions) {
 		const manager = SessionManager.create(cwd, sessionsRoot, {
 			id,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});
