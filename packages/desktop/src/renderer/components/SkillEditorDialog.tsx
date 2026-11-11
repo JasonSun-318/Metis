@@ -2,6 +2,7 @@ import type { SkillDetailView, WritableSkillSourceView } from "@metis/app-protoc
 import { type FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -97,7 +98,7 @@ export function SkillEditorDialog({
 			titleId="skill-editor-title"
 		>
 			<button aria-label={t("Close")} className="mcp-dialog-close" disabled={pending} onClick={close} type="button">
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="skill-editor-title">{t(mode === "create" ? "Write skill instructions" : "Edit Skill")}</h2>
 			<p className="sr-only" id="skill-editor-description">

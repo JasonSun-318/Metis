@@ -57,16 +57,38 @@
 	--collection-page-padding: var(--space-32);
 	--page-title-size: 24px;
 
-	/* shape: controls, cards, and dialogs use distinct radii. */
+	/* shape: compact chrome, controls, cards, dialogs, and pills. */
+	--radius-compact: 6px;
 	--radius-control: 8px;
 	--radius-card: 12px;
 	--radius-dialog: 16px;
+	--radius-full: 999px;
 
 	/* control tiers: forms, compact toolbars, and icon-only actions. */
 	--control-height: 36px;
 	--control-font-size: 13px;
 	--control-height-compact: 32px;
 	--control-icon-size: 28px;
+	--menu-item-height: var(--control-height-compact);
+	--menu-item-font-size: var(--control-font-size);
+
+	/* type scale: captions, compact UI, controls, body, titles. */
+	--font-size-2xs: 11px;
+	--font-size-xs: 12px;
+	--font-size-sm: var(--control-font-size);
+	--font-size-md: var(--content-font-size);
+	--font-size-lg: var(--dialog-title-size);
+	--font-size-xl: var(--page-title-size);
+	--font-size-display: 32px;
+	--font-weight-regular: 400;
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+
+	/* icon steps used by CSS and the shared TSX size constant. */
+	--icon-size-sm: 12px;
+	--icon-size-md: 14px;
+	--icon-size-lg: 16px;
+	--icon-size-xl: 18px;
 	--control-disabled-opacity: .48;
 	--switch-width: 36px;
 	--switch-height: 22px;
@@ -178,12 +200,20 @@
 	--button-primary-bg: #ededed;
 	--button-primary-bg-hover: #ffffff;
 	--button-primary-ink: #121212;
+	/* One secondary fill for form, dialog, and settings actions. */
+	--button-secondary-bg: var(--surface-06);
+	--button-secondary-bg-hover: var(--surface-08);
+	--button-secondary-ink: var(--text);
+	/* Form fields share one surface. Compact rows keep their own. */
+	--field-bg: var(--surface-06);
+	--dialog-title-size: 18px;
 	--overlay-dim: rgb(0 0 0 / 64%);
 	--overlay-dim-2: rgb(0 0 0 / 66%);
 	--overlay-dim-3: rgb(0 0 0 / 68%);
 	--backdrop-68: rgb(6 6 6 / 72%);
 	--backdrop-72: rgb(6 6 6 / 76%);
 	--shadow: 0 1px 3px rgb(0 0 0 / 12%);
+	--shadow-float: 0 8px 24px rgb(0 0 0 / 32%), 0 2px 8px rgb(0 0 0 / 22%);
 	--overlay-shadow: 0 10px 24px rgb(0 0 0 / 28%), 0 1px 4px rgb(0 0 0 / 18%);
 	--border-weak: rgb(255 255 255 / 6%);
 	--border: rgb(255 255 255 / 8%);
@@ -388,6 +418,7 @@
 	--backdrop-68: rgb(8 8 8 / 68%);
 	--backdrop-72: rgb(8 8 8 / 72%);
 	--shadow: 0 1px 3px rgb(41 37 32 / 14%);
+	--shadow-float: 0 8px 24px rgb(41 37 32 / 18%), 0 2px 6px rgb(41 37 32 / 10%);
 	--overlay-shadow: 0 12px 28px rgb(41 37 32 / 16%), 0 2px 6px rgb(41 37 32 / 9%);
 	--border-weak: rgb(41 37 32 / 12%);
 	--border: rgb(41 37 32 / 20%);

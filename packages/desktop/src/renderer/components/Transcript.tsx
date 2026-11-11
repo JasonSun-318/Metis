@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslation } from "react-i18next";
 import { useTranscriptScrollFade } from "../hooks/use-transcript-scroll-fade.ts";
 import { ArrowDown } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import {
 	ConversationInteractionContext,
@@ -816,14 +817,14 @@ export function Transcript({
 							setHasNewItems(false);
 						}}
 					>
-						<ArrowDown aria-hidden="true" size={14} />
+						<ArrowDown aria-hidden="true" size={iconSize.md} />
 						{t("View pending request")}
 					</button>
 				) : (
 					activeTurnId != null &&
 					hasNewItems && (
 						<button className="transcript-latest" onClick={scrollToLatest} type="button">
-							<ArrowDown aria-hidden="true" size={14} />
+							<ArrowDown aria-hidden="true" size={iconSize.md} />
 							{t("Scroll to bottom")}
 						</button>
 					)

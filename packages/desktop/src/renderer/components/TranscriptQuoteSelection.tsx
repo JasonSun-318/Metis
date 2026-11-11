@@ -3,6 +3,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ChatText } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { type ConversationQuoteInput, useConversationQuotes } from "./ConversationQuoteContext.tsx";
 
 function elementOf(node: Node): Element | null {
@@ -161,7 +162,7 @@ export function TranscriptQuoteSelection({
 						}
 					}}
 				>
-					<ChatText aria-hidden="true" size={14} />
+					<ChatText aria-hidden="true" size={iconSize.md} />
 					{t("Add to conversation")}
 				</button>
 			</div>

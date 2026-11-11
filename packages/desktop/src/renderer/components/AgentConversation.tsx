@@ -10,6 +10,7 @@ import { useAgentQueuedMessages } from "../hooks/use-agent-queued-messages.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import { ArrowLeft, Info, Stop } from "../icons.tsx";
 import { queuedTurnActionError } from "../session-view-utils.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { AgentConversationDetails } from "./AgentConversationDetails.tsx";
 import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
@@ -240,7 +241,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 			<div className="agent-conversation conversation-column" data-mode={mode} data-agent-id={target.agentId}>
 				<header className="agent-conversation-header">
 					<button aria-label={t("Open parent conversation")} onClick={openParent} type="button">
-						<ArrowLeft size={15} />
+						<ArrowLeft size={iconSize.lg} />
 						<span>{parent?.name ?? root?.name ?? t("Parent conversation")}</span>
 					</button>
 					<div className="agent-conversation-heading">
@@ -254,7 +255,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 									type="button"
 									onClick={() => void control("stop")}
 								>
-									<Stop aria-hidden="true" size={13} />
+									<Stop aria-hidden="true" size={iconSize.md} />
 									{t("Stop agent")}
 								</button>
 							)}
@@ -270,7 +271,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 								type="button"
 								onClick={() => setDetailsOpen(true)}
 							>
-								<Info aria-hidden="true" size={16} />
+								<Info aria-hidden="true" size={iconSize.lg} />
 							</button>
 						</div>
 					</div>

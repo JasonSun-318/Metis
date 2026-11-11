@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 
 export function KnowledgeLibraryRemove({
@@ -69,7 +70,7 @@ export function KnowledgeLibraryRemove({
 				title={t("Remove only from Metis. Local directories and files are kept.")}
 				onClick={() => setOpen(true)}
 			>
-				<Trash aria-hidden="true" size={15} />
+				<Trash aria-hidden="true" size={iconSize.lg} />
 				<span>{t("Remove knowledge libraries")}</span>
 			</button>
 			{open &&

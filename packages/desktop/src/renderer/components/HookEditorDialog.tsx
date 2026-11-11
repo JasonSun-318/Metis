@@ -2,6 +2,7 @@ import type { DeclarativeHookView, HookEventNameView, HookProtocolView, HookRunM
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretDown, CaretRight, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -183,7 +184,7 @@ export function HookEditorDialog({
 					onClick={onCancel}
 					type="button"
 				>
-					<X aria-hidden="true" size={17} />
+					<X aria-hidden="true" size={iconSize.xl} />
 				</button>
 				<h2 id="hook-editor-title">{t(mode === "create" ? "New Hook" : "Edit Hook")}</h2>
 				<p id="hook-editor-description">
@@ -314,9 +315,9 @@ export function HookEditorDialog({
 							type="button"
 						>
 							{showAdvanced ? (
-								<CaretDown aria-hidden="true" size={14} />
+								<CaretDown aria-hidden="true" size={iconSize.md} />
 							) : (
-								<CaretRight aria-hidden="true" size={14} />
+								<CaretRight aria-hidden="true" size={iconSize.md} />
 							)}
 							<span>{t("Advanced options")}</span>
 						</button>

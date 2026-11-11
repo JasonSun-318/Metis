@@ -42,15 +42,14 @@ describe("Composer visual states", () => {
 		expect(rule(".composer").borderRadius).toBe("var(--composer-radius)");
 		expect(css).not.toContain(".queued-turn-list + .composer");
 		expect(rule(".composer:hover").transform).toBe("");
-		expect(rule(".session-sidebar button:disabled").opacity).toBe("1");
-		expect(
-			rule(".composer .composer-plain-button:disabled, .composer .composer-selector-trigger:disabled").opacity,
-		).toBe("1");
+		expect(rule("button:disabled").opacity).toBe("var(--control-disabled-opacity)");
+		expect(css).not.toContain(".session-sidebar button:disabled { opacity: 1; }");
+		expect(css).not.toContain(".composer .composer-plain-button:disabled");
 	});
 
 	it("uses one compact square stop control for the running state", () => {
 		const stop = rule(".composer-stop.button-secondary");
-		expect(stop.borderRadius).toBe("9px");
+		expect(stop.borderRadius).toBe("var(--radius-control)");
 		expect(stop.background).toBe("var(--surface-13)");
 	});
 
@@ -85,7 +84,7 @@ describe("Composer visual states", () => {
 		expect(skillMenu.minWidth).toBe("180px");
 
 		const item = rule(".composer-add-menu button, .composer-skill-menu button, .session-action-menu button");
-		expect(item.fontSize).toBe("12px");
+		expect(item.fontSize).toBe("var(--menu-item-font-size)");
 		expect(item.gap).toBe("var(--space-8)");
 		expect(item.padding).toBe("0 var(--space-8)");
 	});
@@ -120,7 +119,7 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home-hero-main").position).toBe("relative");
 		expect(rule(".new-task-home-heading h1").fontFamily).toContain("Songti SC");
 		expect(rule(".new-task-home-heading h1").fontFamily).toContain("serif");
-		expect(rule(".new-task-home-heading h1").fontWeight).toBe("400");
+		expect(rule(".new-task-home-heading h1").fontWeight).toBe("var(--font-weight-regular)");
 		expect(rule(".new-task-home-heading h1").whiteSpace).not.toBe("nowrap");
 		expect(rule(".new-task-home-heading").textAlign).toBe("center");
 		expect(rule(".new-task-starter-grid").flexWrap).toBe("wrap");
@@ -140,7 +139,7 @@ describe("Composer visual states", () => {
 		expect(panel.display).toBe("grid");
 		expect(panel.gridTemplateRows).toBe("36px 1fr");
 		expect(panel.transition).toContain("grid-template-rows");
-		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderRadius).toBe("var(--radius-card) var(--radius-card) 0 0");
 		expect(panel.borderBottomWidth).toBe("0px");
 		expect(panel.background).toBe("var(--panel)");
 		expect(panel.marginBottom).toBe("0px");
@@ -178,7 +177,7 @@ describe("Composer visual states", () => {
 		expect(slot.margin).toBe("0 var(--space-16)");
 		const panel = rule(".permission-approval-panel");
 		expect(panel.borderBottom).toBe("0px");
-		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderRadius).toBe("var(--radius-card) var(--radius-card) 0 0");
 		expect(panel.background).toBe("var(--panel)");
 		expect(css).not.toContain(".permission-approval-panel { width: min(620px, 100%);");
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
@@ -189,7 +188,7 @@ describe("Composer visual states", () => {
 		expect(
 			rule(".permission-approval-panel .permission-approval-body > footer .button-secondary:hover:not(:disabled)")
 				.background,
-		).toBe("var(--surface-10)");
+		).toBe("var(--button-secondary-bg-hover)");
 
 		expect(css).toContain(".permission-approval-slot");
 	});
@@ -215,10 +214,10 @@ describe("Composer visual states", () => {
 		const codeComposer = rule(".composer-code");
 		expect(codeComposer.display).toBe("flex");
 		expect(codeComposer.background).toBe("transparent");
-		expect(rule(".composer-code .composer-box").borderRadius).toBe("9px");
+		expect(rule(".composer-code .composer-box").borderRadius).toBe("var(--radius-control)");
 		expect(rule(".composer-code .composer-box").background).toBe("var(--surface-03)");
 		expect(rule(".composer-code .composer-editable-input").fontSize).toBe("var(--code-body-size)");
-		expect(rule(".composer-code-submit, .composer-code-stop").borderRadius).toBe("5px");
+		expect(rule(".composer-code-submit, .composer-code-stop").borderRadius).toBe("var(--radius-compact)");
 		expect(rule(".composer-code .composer-actions").display).toBe("flex");
 	});
 

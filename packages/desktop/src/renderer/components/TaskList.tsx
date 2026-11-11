@@ -2,6 +2,8 @@ import type { SessionTaskView } from "@metis/app-protocol";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretRight, CheckCircle, CircleNotch, ListChecks } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
+
 export function TaskList({ tasks }: { readonly tasks: readonly SessionTaskView[] }) {
 	const { t } = useTranslation();
 	const completed = tasks.filter((task) => task.completed).length;
@@ -17,12 +19,12 @@ export function TaskList({ tasks }: { readonly tasks: readonly SessionTaskView[]
 				aria-expanded={expanded}
 				onClick={() => setExpanded(!expanded)}
 			>
-				<ListChecks aria-hidden="true" size={16} />
+				<ListChecks aria-hidden="true" size={iconSize.lg} />
 				<strong>{t(done ? "Completed" : "Tasks")}</strong>
 				<span>
 					{completed}/{tasks.length}
 				</span>
-				<CaretRight className="conversation-task-chevron" aria-hidden="true" size={13} />
+				<CaretRight className="conversation-task-chevron" aria-hidden="true" size={iconSize.md} />
 			</button>
 			<div
 				className="transcript-drawer"
@@ -36,9 +38,9 @@ export function TaskList({ tasks }: { readonly tasks: readonly SessionTaskView[]
 							/* biome-ignore lint/suspicious/noArrayIndexKey: Task snapshots are ordered and contain no row-local state. */
 							<li key={index} className={task.completed ? "is-completed" : undefined}>
 								{task.completed ? (
-									<CheckCircle aria-hidden="true" size={15} />
+									<CheckCircle aria-hidden="true" size={iconSize.lg} />
 								) : (
-									<CircleNotch aria-hidden="true" className="task-list-spinner" size={15} />
+									<CircleNotch aria-hidden="true" className="task-list-spinner" size={iconSize.lg} />
 								)}
 								<span>{task.task}</span>
 							</li>

@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight, ChatText, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export function MessageAnnotations({
 	quotes,
@@ -75,7 +76,7 @@ export function MessageAnnotations({
 				aria-haspopup="dialog"
 				onClick={() => setOpen((value) => !value)}
 			>
-				<ChatText aria-hidden="true" size={13} />
+				<ChatText aria-hidden="true" size={iconSize.md} />
 				{t("{{count}} annotations", { count: quotes.length })}
 			</button>
 			{open &&
@@ -95,7 +96,7 @@ export function MessageAnnotations({
 								ref={close}
 								onClick={() => setOpen(false)}
 							>
-								<X aria-hidden="true" size={14} />
+								<X aria-hidden="true" size={iconSize.md} />
 							</button>
 						</header>
 						<div className="message-annotations-list">
@@ -111,7 +112,7 @@ export function MessageAnnotations({
 													onJumpToSource(quote.sourceItemId, quote.sourceLiveItemId);
 												}}
 											>
-												<ArrowUpRight aria-hidden="true" size={12} />
+												<ArrowUpRight aria-hidden="true" size={iconSize.sm} />
 												{t("Go to original message")}
 											</button>
 										)}

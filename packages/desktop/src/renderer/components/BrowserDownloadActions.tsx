@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { DesktopDownloadControlType } from "../../shared/desktop-api.ts";
 import { ArrowCounterClockwise, ArrowSquareOut, type Icon, Pause, Play, Trash, X } from "../icons.tsx";
+import type { iconSize as iconSteps } from "../ui/icon-size.ts";
 import { DOWNLOAD_ACTION_LABELS } from "./browser-download-presentation.ts";
 
 const ACTION_ICONS: Readonly<Record<Exclude<DesktopDownloadControlType, "reveal">, Icon>> = {
@@ -24,7 +25,7 @@ export function BrowserDownloadActions({
 	readonly actions: readonly DesktopDownloadControlType[];
 	readonly className: string;
 	readonly downloadId: string;
-	readonly iconSize: 12 | 14;
+	readonly iconSize: typeof iconSteps.sm | typeof iconSteps.md;
 	readonly menuItem?: boolean;
 	readonly onAction: (type: DesktopDownloadControlType, downloadId: string) => void;
 	readonly revealIcon: Icon;

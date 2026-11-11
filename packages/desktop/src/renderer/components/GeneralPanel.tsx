@@ -11,6 +11,7 @@ import {
 import { APP_LOCALES, type AppLocale, setLocale } from "../i18n.ts";
 import { Desktop, Moon, Sun } from "../icons.tsx";
 import { APP_THEMES, type AppTheme } from "../theme.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { WebSearchSettingsPanel } from "./WebSearchSettingsPanel.tsx";
 
@@ -114,7 +115,7 @@ export function GeneralPanel({
 											title={t(label)}
 											type="button"
 										>
-											<Icon aria-hidden="true" size={17} />
+											<Icon aria-hidden="true" size={iconSize.xl} />
 										</button>
 									);
 								})}

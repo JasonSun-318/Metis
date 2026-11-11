@@ -2,6 +2,7 @@ import type { ClientResult } from "@metis/app-protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowsOut, DotsThree, Minus, Plus } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import {
 	createGraphSession,
 	type GraphSession,
@@ -136,7 +137,7 @@ export function KnowledgeGraph({
 				)}
 				<details className="knowledge-graph-options">
 					<summary aria-label={t("Graph options")} title={t("Graph options")}>
-						<DotsThree size={20} aria-hidden="true" />
+						<DotsThree size={iconSize.xl} aria-hidden="true" />
 					</summary>
 					<div>
 						<label>
@@ -175,7 +176,7 @@ export function KnowledgeGraph({
 					aria-label={t("Zoom out")}
 					onClick={() => interaction.zoom(0.8)}
 				>
-					<Minus aria-hidden="true" size={15} />
+					<Minus aria-hidden="true" size={iconSize.lg} />
 				</button>
 				<button
 					className="knowledge-icon-button"
@@ -184,7 +185,7 @@ export function KnowledgeGraph({
 					aria-label={t("Zoom in")}
 					onClick={() => interaction.zoom(1.25)}
 				>
-					<Plus aria-hidden="true" size={15} />
+					<Plus aria-hidden="true" size={iconSize.lg} />
 				</button>
 				<button
 					className="knowledge-icon-button"
@@ -193,7 +194,7 @@ export function KnowledgeGraph({
 					aria-label={t("Reset view")}
 					onClick={interaction.fit}
 				>
-					<ArrowsOut aria-hidden="true" size={15} />
+					<ArrowsOut aria-hidden="true" size={iconSize.lg} />
 				</button>
 				<span>{t("{{count}} links", { count: graph.edges.length })}</span>
 			</div>

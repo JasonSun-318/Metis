@@ -2,6 +2,7 @@ import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretRight, CheckCircle, CircleNotch, ClockCounterClockwise, TerminalWindow, Tool } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { PermissionReceipt } from "./ConversationInteractionCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -46,7 +47,7 @@ function ThinkingStep({ text }: { readonly text: string }) {
 	return (
 		<div className="activity-step activity-step-thinking">
 			<span className="activity-step-icon">
-				<ClockCounterClockwise aria-hidden="true" size={16} />
+				<ClockCounterClockwise aria-hidden="true" size={iconSize.lg} />
 			</span>
 			<div
 				className={`thinking-preview${expanded ? " is-expanded" : ""}${overflowing ? " is-overflowing" : ""}`}
@@ -68,7 +69,7 @@ function ThinkingStep({ text }: { readonly text: string }) {
 					onClick={() => setExpanded(!expanded)}
 					type="button"
 				>
-					<CaretRight aria-hidden="true" size={11} />
+					<CaretRight aria-hidden="true" size={iconSize.sm} />
 					{t(expanded ? "Show less" : "Show more")}
 				</button>
 			)}
@@ -132,7 +133,7 @@ export function ChatExecutionChain({
 						) : (
 							<span>{actionSummary(calls, t)}</span>
 						)}
-						<CaretRight aria-hidden="true" className="execution-chain-caret" size={14} />
+						<CaretRight aria-hidden="true" className="execution-chain-caret" size={iconSize.md} />
 					</summary>
 					<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 						<div>
@@ -162,7 +163,7 @@ export function ChatExecutionChain({
 											return (
 												<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
 													<span className="activity-step-icon">
-														<CheckCircle aria-hidden="true" size={16} />
+														<CheckCircle aria-hidden="true" size={iconSize.lg} />
 													</span>
 													<p>{presentation.label}</p>
 													<SafeToolDetails lines={presentation.detailLines} />
@@ -223,11 +224,11 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 			<div className="tool-step tool-step-static">
 				<div className="tool-step-static-label">
 					<span className="activity-step-icon">
-						<Tool aria-hidden="true" size={16} />
+						<Tool aria-hidden="true" size={iconSize.lg} />
 					</span>
 					<span>{presentation.label}</span>
 					{call.state === "running" && (
-						<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
+						<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={iconSize.lg} />
 					)}
 				</div>
 				<SafeToolDetails lines={presentation.detailLines} />
@@ -247,11 +248,11 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 		>
 			<summary>
 				<span className="activity-step-icon">
-					<TerminalWindow aria-hidden="true" size={16} />
+					<TerminalWindow aria-hidden="true" size={iconSize.lg} />
 				</span>
 				<span>{presentation.label}</span>
 				{call.state === "running" && (
-					<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
+					<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={iconSize.lg} />
 				)}
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>

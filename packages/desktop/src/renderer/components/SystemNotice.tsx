@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle, Info, Warning, X, XCircle } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export type SystemNoticeTone = "info" | "success" | "warning" | "error";
 
@@ -123,7 +124,7 @@ export function SystemNotice({ action, message, onDismiss, title, tone }: System
 			data-tone={tone}
 			role={tone === "error" || tone === "warning" ? "alert" : "status"}
 		>
-			<Icon aria-hidden="true" className="system-notice-icon" size={18} weight="regular" />
+			<Icon aria-hidden="true" className="system-notice-icon" size={iconSize.xl} weight="regular" />
 			<div className="system-notice-copy">
 				<strong>{t(title)}</strong>
 				{message && <span>{t(message)}</span>}
@@ -140,7 +141,7 @@ export function SystemNotice({ action, message, onDismiss, title, tone }: System
 					onClick={onDismiss}
 					type="button"
 				>
-					<X aria-hidden="true" size={14} />
+					<X aria-hidden="true" size={iconSize.md} />
 				</button>
 			)}
 		</div>

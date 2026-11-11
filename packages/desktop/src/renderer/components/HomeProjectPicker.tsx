@@ -1,6 +1,7 @@
 import type { AgentMode } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 import { FolderSimple, Plus, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export interface HomeProjectPickerProps {
 	readonly busy: boolean;
@@ -42,7 +43,7 @@ export function HomeProjectPicker({
 				title={folder ?? t("Choose workspace")}
 				type="button"
 			>
-				<FolderSimple aria-hidden="true" size={16} />
+				<FolderSimple aria-hidden="true" size={iconSize.lg} />
 				<span>{folderLabel}</span>
 			</button>
 			{mode === "code" && onCreateProject && (
@@ -54,7 +55,7 @@ export function HomeProjectPicker({
 					title={t("Create a new project")}
 					type="button"
 				>
-					<Plus aria-hidden="true" size={16} />
+					<Plus aria-hidden="true" size={iconSize.lg} />
 					<span>{t("Create a new project")}</span>
 				</button>
 			)}
@@ -67,7 +68,7 @@ export function HomeProjectPicker({
 					title={t("No project context")}
 					type="button"
 				>
-					<X aria-hidden="true" size={15} />
+					<X aria-hidden="true" size={iconSize.lg} />
 				</button>
 			)}
 		</div>

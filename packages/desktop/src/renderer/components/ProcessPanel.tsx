@@ -5,6 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Play, SkipBack, SkipForward } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { TERMINAL_THEMES } from "./TerminalPanel.tsx";
 
 interface ProcessPanelProps {
@@ -132,7 +133,7 @@ export function ProcessPanel({ api, sessionId, process: latest, panelId, theme, 
 			<footer className="process-history-footer">
 				{selection !== null && total > 0 ? (
 					<button className="process-return-live" type="button" onClick={() => setSelection(null)}>
-						<Play aria-hidden="true" size={15} />
+						<Play aria-hidden="true" size={iconSize.lg} />
 						{t("Return to live")}
 					</button>
 				) : null}
@@ -144,7 +145,7 @@ export function ProcessPanel({ api, sessionId, process: latest, panelId, theme, 
 						disabled={index <= 0 || !total}
 						onClick={() => select(index - 1)}
 					>
-						<SkipBack aria-hidden="true" size={14} />
+						<SkipBack aria-hidden="true" size={iconSize.md} />
 					</button>
 					<button
 						type="button"
@@ -153,7 +154,7 @@ export function ProcessPanel({ api, sessionId, process: latest, panelId, theme, 
 						disabled={!total || index >= total - 1}
 						onClick={() => select(index + 1)}
 					>
-						<SkipForward aria-hidden="true" size={14} />
+						<SkipForward aria-hidden="true" size={iconSize.md} />
 					</button>
 					<div className="process-history-timeline">
 						{dateLabel ? (

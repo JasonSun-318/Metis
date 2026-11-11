@@ -2,6 +2,7 @@ import type { SkillSummaryView } from "@metis/app-protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowsIn, Brain, Cube, Gauge, ListChecks, Plugs, Scroll, Target } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export type ComposerSlashCommand = "compact" | "goal" | "plan" | "model" | "thinking" | "status" | "mcp";
 
@@ -150,7 +151,7 @@ export function SlashCommandMenu({
 								role="option"
 								type="button"
 							>
-								<Scroll aria-hidden="true" size={16} />
+								<Scroll aria-hidden="true" size={iconSize.lg} />
 								<span>
 									<strong>{`skill:${option.skill.name}`}</strong>
 									<small>{option.skill.description}</small>
@@ -175,7 +176,7 @@ export function SlashCommandMenu({
 						role="option"
 						type="button"
 					>
-						<Icon aria-hidden="true" size={16} />
+						<Icon aria-hidden="true" size={iconSize.lg} />
 						<span>
 							<strong>{commandCopy[option.command].label}</strong>
 							<small>{t(disabledReasons[option.command] ?? commandCopy[option.command].description)}</small>

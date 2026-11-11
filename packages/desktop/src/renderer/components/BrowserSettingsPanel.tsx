@@ -11,6 +11,7 @@ import {
 } from "../../shared/desktop-api.ts";
 import { browserProfileLabel } from "../browser-display.ts";
 import { ArrowLeft, CaretDown, ClockCounterClockwise, DownloadSimple, FolderOpen, MagnifyingGlass } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { browserDownloadPresentation } from "./browser-download-presentation.ts";
@@ -113,7 +114,7 @@ function DownloadRow({
 				actions={actions}
 				className="browser-settings-download-actions"
 				downloadId={download.downloadId}
-				iconSize={14}
+				iconSize={iconSize.md}
 				onAction={onAction}
 				revealIcon={FolderOpen}
 			/>
@@ -290,7 +291,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 						onClick={() => setView("overview")}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={15} />
+						<ArrowLeft aria-hidden="true" size={iconSize.lg} />
 						{t("Browser")}
 					</button>
 					<div>
@@ -300,7 +301,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 				</div>
 				<div className="browser-settings-toolbar">
 					<label className="browser-settings-search">
-						<MagnifyingGlass aria-hidden="true" size={15} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 						<input
 							aria-label={t("Search browsing history")}
 							onChange={(event) => setSearch(event.target.value)}
@@ -352,7 +353,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 					</DelayedPlaceholder>
 				) : groupedHistory.length === 0 ? (
 					<div className="browser-settings-state">
-						<ClockCounterClockwise aria-hidden="true" size={24} />
+						<ClockCounterClockwise aria-hidden="true" size={iconSize.xl} />
 						<strong>{t(search.trim() ? "No matching history" : "No history yet")}</strong>
 					</div>
 				) : (
@@ -376,7 +377,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 										>
 											<span>{date}</span>
 											<span>{t("{{count}} visits", { count: entries.length })}</span>
-											<CaretDown aria-hidden="true" size={13} />
+											<CaretDown aria-hidden="true" size={iconSize.md} />
 										</button>
 									</h3>
 									{expanded && (
@@ -384,7 +385,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 											{entries.map((entry) => (
 												<li key={entry.entryId}>
 													<span className="browser-settings-history-icon">
-														<ClockCounterClockwise aria-hidden="true" size={14} />
+														<ClockCounterClockwise aria-hidden="true" size={iconSize.md} />
 													</span>
 													<div>
 														<strong>{entry.title}</strong>
@@ -427,7 +428,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 						onClick={() => setView("overview")}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={15} />
+						<ArrowLeft aria-hidden="true" size={iconSize.lg} />
 						{t("Browser")}
 					</button>
 					<div>
@@ -444,7 +445,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 				{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
 				{downloads.length === 0 ? (
 					<div className="browser-settings-state">
-						<DownloadSimple aria-hidden="true" size={24} />
+						<DownloadSimple aria-hidden="true" size={iconSize.xl} />
 						<strong>{t("No downloads in this run")}</strong>
 					</div>
 				) : (

@@ -2,6 +2,7 @@ import type { ClientParams } from "@metis/app-protocol";
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatText, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 
 export type ConversationQuoteInput = NonNullable<ClientParams<"turn/start">["conversationQuotes"]>[number];
@@ -90,7 +91,7 @@ export function ConversationQuoteChips({ sessionId }: { readonly sessionId?: str
 			className="composer-selections composer-conversation-quotes"
 			summary={
 				<>
-					<ChatText aria-hidden="true" size={13} />
+					<ChatText aria-hidden="true" size={iconSize.md} />
 					{t("{{count}} conversation quotes", { count: drafts.length })}
 				</>
 			}
@@ -105,7 +106,7 @@ export function ConversationQuoteChips({ sessionId }: { readonly sessionId?: str
 								aria-label={t("Remove conversation quote")}
 								onClick={() => context?.remove([draft.id])}
 							>
-								<X aria-hidden="true" size={13} />
+								<X aria-hidden="true" size={iconSize.md} />
 							</button>
 						</div>
 						<blockquote>{draft.input.selectedText}</blockquote>

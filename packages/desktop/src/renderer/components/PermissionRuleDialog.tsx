@@ -2,6 +2,7 @@ import type { PermissionRuleView } from "@metis/app-protocol";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import {
@@ -335,7 +336,7 @@ export function PermissionRuleDialog({
 							onClick={onCancel}
 							type="button"
 						>
-							<X aria-hidden="true" size={18} />
+							<X aria-hidden="true" size={iconSize.xl} />
 						</button>
 					</header>
 					<div className="model-provider-editor-body">
@@ -497,7 +498,7 @@ export function PermissionRuleDialog({
 															}
 															type="button"
 														>
-															<X aria-hidden="true" size={14} />
+															<X aria-hidden="true" size={iconSize.md} />
 														</button>
 													</div>
 												))}
@@ -515,7 +516,7 @@ export function PermissionRuleDialog({
 													}
 													type="button"
 												>
-													<Plus aria-hidden="true" size={13} />
+													<Plus aria-hidden="true" size={iconSize.md} />
 													{t("Add destination")}
 												</button>
 												<small>{t("Only these exact hostname and port pairs are allowed.")}</small>

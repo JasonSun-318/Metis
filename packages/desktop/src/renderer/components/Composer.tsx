@@ -15,6 +15,7 @@ import { Target as createTargetIcon } from "reicon/icons/Target";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ArrowRight, ArrowUp, Stop, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import { ComposerPanelStack } from "./ComposerPanelStack.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
@@ -785,13 +786,13 @@ export function Composer({
 												onClick={() => removeAttachment(attachment.path)}
 												type="button"
 											>
-												<X aria-hidden="true" size={12} />
+												<X aria-hidden="true" size={iconSize.sm} />
 											</button>
 										</div>
 									) : (
 										<div className="composer-file-card" key={attachment.path}>
 											<span className="composer-file-card-icon">
-												<WorkspaceFileIcon path={attachment.name} size={15} />
+												<WorkspaceFileIcon path={attachment.name} size={iconSize.lg} />
 											</span>
 											<span className="composer-file-card-copy">
 												<strong title={attachment.name}>{attachment.name}</strong>
@@ -802,7 +803,7 @@ export function Composer({
 												onClick={() => removeAttachment(attachment.path)}
 												type="button"
 											>
-												<X aria-hidden="true" size={12} />
+												<X aria-hidden="true" size={iconSize.sm} />
 											</button>
 										</div>
 									),
@@ -858,7 +859,7 @@ export function Composer({
 											onClick={() => void onInterrupt().catch(() => undefined)}
 											type="button"
 										>
-											<Stop aria-hidden="true" size={13} weight="fill" />
+											<Stop aria-hidden="true" size={iconSize.md} weight="fill" />
 										</button>
 									) : (
 										<button
@@ -867,7 +868,7 @@ export function Composer({
 											disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
 											type="submit"
 										>
-											<ArrowRight aria-hidden="true" size={13} />
+											<ArrowRight aria-hidden="true" size={iconSize.md} />
 										</button>
 									)}
 								</div>
@@ -879,7 +880,7 @@ export function Composer({
 							<ComposerAddMenu
 								commandRequest={commandRequest}
 								disabled={disabled || submitting}
-								iconSize={isCode ? 13 : 14}
+								iconSize={isCode ? iconSize.sm : iconSize.md}
 								knowledge={knowledge}
 								mcpServers={mcpServers}
 								onAddFiles={() => void addFiles().catch(() => undefined)}
@@ -919,7 +920,7 @@ export function Composer({
 										onClick={() => void onInterrupt().catch(() => undefined)}
 										type="button"
 									>
-										<Stop aria-hidden="true" size={13} weight="fill" />
+										<Stop aria-hidden="true" size={iconSize.md} weight="fill" />
 									</button>
 								) : (
 									<button
@@ -928,7 +929,7 @@ export function Composer({
 										disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
 										type="submit"
 									>
-										<ArrowUp aria-hidden="true" size={16} />
+										<ArrowUp aria-hidden="true" size={iconSize.lg} />
 									</button>
 								))}
 						</div>

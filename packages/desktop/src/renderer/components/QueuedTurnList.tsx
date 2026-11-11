@@ -2,6 +2,7 @@ import type { QueuedTurnView } from "@metis/app-protocol";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowBendUpLeft, Paperclip, PencilSimple, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface QueuedTurnListProps {
 	readonly disabled: boolean;
@@ -65,7 +66,7 @@ export function QueuedTurnList({
 								</span>
 								{turn.attachments.length > 0 && turn.text && (
 									<span className="queued-turn-attachments" title={attachmentNames}>
-										<Paperclip aria-hidden="true" size={12} />
+										<Paperclip aria-hidden="true" size={iconSize.sm} />
 										{attachmentNames}
 									</span>
 								)}
@@ -86,7 +87,7 @@ export function QueuedTurnList({
 									}
 									type="button"
 								>
-									<ArrowBendUpLeft aria-hidden="true" size={14} />
+									<ArrowBendUpLeft aria-hidden="true" size={iconSize.md} />
 									{t(running ? "Guide" : "Send")}
 								</button>
 								<button
@@ -97,7 +98,7 @@ export function QueuedTurnList({
 									onClick={() => void run(turn.queueItemId, () => onEdit(turn)).catch(() => undefined)}
 									type="button"
 								>
-									<PencilSimple aria-hidden="true" size={14} />
+									<PencilSimple aria-hidden="true" size={iconSize.md} />
 									{t("Edit")}
 								</button>
 								<button
@@ -107,7 +108,7 @@ export function QueuedTurnList({
 									onClick={() => void run(turn.queueItemId, () => onDelete(turn)).catch(() => undefined)}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={14} />
+									<Trash aria-hidden="true" size={iconSize.md} />
 								</button>
 							</div>
 						</fieldset>

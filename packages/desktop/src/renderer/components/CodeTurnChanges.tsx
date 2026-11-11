@@ -2,6 +2,7 @@ import type { CodeChangesView } from "@metis/app-protocol";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretRight } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { codeFileName, summarizeCodeChanges, type TurnFileChange } from "./code-change-summary.ts";
 import { CodeChangeCounts } from "./ToolCodeChanges.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
@@ -29,7 +30,7 @@ export function CodeTurnChanges({
 			onClick={() => onViewChanges?.(file.path)}
 			type="button"
 		>
-			<WorkspaceFileIcon path={file.path} size={14} />
+			<WorkspaceFileIcon path={file.path} size={iconSize.md} />
 			<span className="code-turn-file-name">{codeFileName(file.path)}</span>
 			{fileCounts && <CodeChangeCounts counts={fileCounts} />}
 		</button>
@@ -55,7 +56,7 @@ export function CodeTurnChanges({
 					type="button"
 				>
 					{t("View changes")}
-					<CaretRight aria-hidden="true" size={11} />
+					<CaretRight aria-hidden="true" size={iconSize.sm} />
 				</button>
 			</header>
 			{files.slice(0, 3).map(row)}
@@ -78,7 +79,7 @@ export function CodeTurnChanges({
 						onClick={() => setExpanded((value) => !value)}
 						type="button"
 					>
-						<CaretRight aria-hidden="true" size={12} />
+						<CaretRight aria-hidden="true" size={iconSize.sm} />
 						{t(expanded ? "Hide other file changes" : "View {{count}} other file changes", {
 							count: files.length - 3,
 						})}

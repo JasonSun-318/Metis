@@ -29,7 +29,7 @@ describe("Settings visual states", () => {
 		expect(rule(':root[data-platform="win32"] .settings-main-header').height).toBe("40px");
 		expect(rule(".settings-navigation-top").height).toBe("52px");
 		expect(rule(".settings-back-button").height).toBe("36px");
-		expect(rule(".settings-nav-divider").marginTop).toBe("3px");
+		expect(rule(".settings-nav-divider").margin).toBe("3px 4px var(--space-12)");
 	});
 
 	it("uses restrained overlays and a flatter content hierarchy", () => {
@@ -43,11 +43,11 @@ describe("Settings visual states", () => {
 		expect(rule(".model-settings-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
-		expect(rule(".usage-chart-axis").fontSize).toBe("11px");
+		expect(rule(".usage-chart-axis").fontSize).toBe("var(--font-size-2xs)");
 		expect(rule(".usage-detail-card li small").color).toBe("var(--text-09)");
 		expect(rule(".memory-history-meta").color).toBe("var(--text-10)");
 		expect(rule(".profile-section-heading small").color).toBe("var(--text-09)");
-		expect(rule(".profile-section-heading small").fontSize).toBe("11px");
+		expect(rule(".profile-section-heading small").fontSize).toBe("var(--font-size-2xs)");
 	});
 
 	it("lists Memory history as flat rows inside one shared surface", () => {
@@ -132,12 +132,12 @@ describe("Settings visual states", () => {
 		expect(
 			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip")
 				.borderRadius,
-		).toBe("999px");
+		).toBe("var(--radius-full)");
 		expect(
 			rule(
 				":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip > button",
 			).borderRadius,
-		).toBe("999px");
+		).toBe("var(--radius-full)");
 		expect(
 			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-empty")
 				.justifyItems,

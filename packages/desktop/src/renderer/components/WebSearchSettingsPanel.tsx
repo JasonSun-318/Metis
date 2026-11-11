@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Eye, EyeSlash, XCircle } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
@@ -285,9 +286,9 @@ export function WebSearchSettingsPanel({
 									type="button"
 								>
 									{revealedCredential === null ? (
-										<Eye aria-hidden="true" size={16} />
+										<Eye aria-hidden="true" size={iconSize.lg} />
 									) : (
-										<EyeSlash aria-hidden="true" size={16} />
+										<EyeSlash aria-hidden="true" size={iconSize.lg} />
 									)}
 								</button>
 							) : null}
@@ -319,7 +320,7 @@ export function WebSearchSettingsPanel({
 
 				{error ? (
 					<p className="settings-action-message error web-search-message" role="alert">
-						<XCircle aria-hidden="true" size={15} />
+						<XCircle aria-hidden="true" size={iconSize.lg} />
 						{error}
 					</p>
 				) : null}

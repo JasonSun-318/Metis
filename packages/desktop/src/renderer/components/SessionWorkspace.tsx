@@ -84,6 +84,7 @@ import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 import { WorkspacePaneResizer } from "./WorkspacePaneResizer.tsx";
 import { WorkspaceTabMotion } from "./WorkspaceTabMotion.tsx";
 import "../styles/workspace-pane-layout.css";
+import { iconSize } from "../ui/icon-size.ts";
 import { WorkspaceTabMenu, type WorkspaceTabMenuItem } from "./WorkspaceTabMenu.tsx";
 
 const BROWSER_PROFILE_STORAGE_KEY = "metis.browser-profile.v1";
@@ -1848,27 +1849,27 @@ export function SessionWorkspaceView({
 		return (
 			<nav aria-label={t("Available tools")} className="tool-sidebar-menu">
 				<button disabled={!target.sessionId} onClick={() => openProcess(target.sessionId)} type="button">
-					<ClockCounterClockwise aria-hidden="true" size={18} />
+					<ClockCounterClockwise aria-hidden="true" size={iconSize.xl} />
 					<span>{t("Activity log")}</span>
 				</button>
 				{codeWorkspace && (
 					<button onClick={() => addReview(codeWorkspace.sessionId)} type="button">
-						<ClipboardText aria-hidden="true" size={18} />
+						<ClipboardText aria-hidden="true" size={iconSize.xl} />
 						<span>{t("Review")}</span>
 					</button>
 				)}
 				<button disabled={!target.cwd} onClick={() => addTerminal(target)} type="button">
-					<TerminalWindow aria-hidden="true" size={18} />
+					<TerminalWindow aria-hidden="true" size={iconSize.xl} />
 					<span>{t("Terminal")}</span>
 				</button>
 				{codeWorkspace && (
 					<button onClick={() => addFiles(codeWorkspace)} type="button">
-						<FileText aria-hidden="true" size={18} />
+						<FileText aria-hidden="true" size={iconSize.xl} />
 						<span>{t("Files")}</span>
 					</button>
 				)}
 				<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} type="button">
-					<Books aria-hidden="true" size={18} />
+					<Books aria-hidden="true" size={iconSize.xl} />
 					<span>{t("Knowledge")}</span>
 				</button>
 			</nav>
@@ -1945,25 +1946,25 @@ export function SessionWorkspaceView({
 	const tabIcon = (tab: WorkspaceTab): ReactNode => {
 		if (tab.kind === "chat") return null;
 		return tab.kind === "knowledge" ? (
-			<Books aria-hidden="true" size={13} />
+			<Books aria-hidden="true" size={iconSize.md} />
 		) : tab.kind === "process" ? (
-			<ClockCounterClockwise aria-hidden="true" size={13} />
+			<ClockCounterClockwise aria-hidden="true" size={iconSize.md} />
 		) : tab.kind === "terminal" ? (
-			<TerminalWindow aria-hidden="true" size={13} />
+			<TerminalWindow aria-hidden="true" size={iconSize.md} />
 		) : tab.kind === "browser" ? (
-			<Globe aria-hidden="true" size={13} />
+			<Globe aria-hidden="true" size={iconSize.md} />
 		) : tab.kind === "file" ? (
 			tab.relativePath ? (
-				<WorkspaceFileIcon path={tab.relativePath} size={13} />
+				<WorkspaceFileIcon path={tab.relativePath} size={iconSize.md} />
 			) : (
-				<FileText aria-hidden="true" size={13} />
+				<FileText aria-hidden="true" size={iconSize.md} />
 			)
 		) : tab.kind === "review" ? (
-			<ClipboardText aria-hidden="true" size={13} />
+			<ClipboardText aria-hidden="true" size={iconSize.md} />
 		) : tab.kind === "plan" ? (
-			<FileText aria-hidden="true" size={13} />
+			<FileText aria-hidden="true" size={iconSize.md} />
 		) : (
-			<WorkspaceFileIcon path={tab.title} size={13} />
+			<WorkspaceFileIcon path={tab.title} size={iconSize.md} />
 		);
 	};
 
@@ -2077,7 +2078,7 @@ export function SessionWorkspaceView({
 					tabIndex={active ? 0 : -1}
 					type="button"
 				>
-					<X aria-hidden="true" size={11} />
+					<X aria-hidden="true" size={iconSize.sm} />
 				</button>
 			</div>
 		);
@@ -2255,7 +2256,7 @@ export function SessionWorkspaceView({
 						}}
 						type="button"
 					>
-						<Plus aria-hidden="true" size={13} />
+						<Plus aria-hidden="true" size={iconSize.md} />
 					</button>
 				</div>
 				<div aria-hidden="true" className="workspace-tabbar-fill" />
@@ -2586,7 +2587,7 @@ export function SessionWorkspaceView({
 							onClick={() => addBrowser(toolsTarget)}
 							type="button"
 						>
-							<Plus aria-hidden="true" size={13} />
+							<Plus aria-hidden="true" size={iconSize.md} />
 						</button>
 					</div>
 				)}
@@ -2814,7 +2815,7 @@ export function SessionWorkspaceView({
 																	}}
 																	type="button"
 																>
-																	<Plus aria-hidden="true" size={13} />
+																	<Plus aria-hidden="true" size={iconSize.md} />
 																	{t("Start a new task")}
 																</button>
 															)}

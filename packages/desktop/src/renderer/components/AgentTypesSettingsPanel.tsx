@@ -5,6 +5,7 @@ import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ArrowLeft, CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 const AGENT_TYPES_CACHE_KEY = "agentTypes";
@@ -214,7 +215,7 @@ export function AgentTypesSettingsPanel({
 					<header className="settings-section-heading">
 						<h3>{idLocked ? t("Edit agent type") : t("New agent type")}</h3>
 						<button className="settings-secondary-button" disabled={saving} onClick={closeEditor} type="button">
-							<ArrowLeft aria-hidden="true" size={13} />
+							<ArrowLeft aria-hidden="true" size={iconSize.md} />
 							{t("Back to agent types")}
 						</button>
 					</header>
@@ -363,7 +364,7 @@ export function AgentTypesSettingsPanel({
 					</button>
 				)}
 				<button className="settings-primary-button" disabled={!serverReady} onClick={startCreate} type="button">
-					<Plus aria-hidden="true" size={14} />
+					<Plus aria-hidden="true" size={iconSize.md} />
 					{t("New agent type")}
 				</button>
 			</div>
@@ -377,7 +378,7 @@ export function AgentTypesSettingsPanel({
 				<div className="agent-types-list">
 					{builtIn.map((view) => (
 						<article className="agent-types-card" data-builtin="true" key={view.id}>
-							<Robot aria-hidden="true" size={16} />
+							<Robot aria-hidden="true" size={iconSize.lg} />
 							<div className="agent-types-card-main">
 								<strong>{view.displayName}</strong>
 								<p>{t(view.description)}</p>
@@ -394,7 +395,7 @@ export function AgentTypesSettingsPanel({
 								onClick={() => startDuplicate(view)}
 								type="button"
 							>
-								<Copy aria-hidden="true" size={13} />
+								<Copy aria-hidden="true" size={iconSize.md} />
 								{t("Duplicate")}
 							</button>
 						</article>
@@ -428,7 +429,7 @@ export function AgentTypesSettingsPanel({
 					<div className="agent-types-list">
 						{custom.map((view) => (
 							<article className="agent-types-card" data-builtin="false" key={view.id}>
-								<CheckCircle aria-hidden="true" size={16} />
+								<CheckCircle aria-hidden="true" size={iconSize.lg} />
 								<div className="agent-types-card-main">
 									<strong>{view.displayName}</strong>
 									<p>{view.description || view.id}</p>
@@ -445,7 +446,7 @@ export function AgentTypesSettingsPanel({
 									onClick={() => startEdit(view)}
 									type="button"
 								>
-									<PencilSimple aria-hidden="true" size={13} />
+									<PencilSimple aria-hidden="true" size={iconSize.md} />
 									{t("Edit")}
 								</button>
 								<button
@@ -455,7 +456,7 @@ export function AgentTypesSettingsPanel({
 									onClick={() => void remove(view)}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={13} />
+									<Trash aria-hidden="true" size={iconSize.md} />
 									{t("Delete")}
 								</button>
 							</article>

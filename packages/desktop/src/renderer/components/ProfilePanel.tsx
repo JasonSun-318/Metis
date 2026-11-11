@@ -11,6 +11,7 @@ import {
 	useProfileIdentity,
 } from "../profile-identity.ts";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { UsagePanel } from "./UsagePanel.tsx";
 
 const DAY_MS = 86_400_000;
@@ -224,7 +225,7 @@ export function ProfilePanel({
 					<h1>{t("Couldn’t load your profile")}</h1>
 					<p>{error === "Personal profile could not be loaded." ? t(error) : error}</p>
 					<button disabled={!serverReady} onClick={load} type="button">
-						<ArrowClockwise aria-hidden="true" size={16} />
+						<ArrowClockwise aria-hidden="true" size={iconSize.lg} />
 						{t("Retry")}
 					</button>
 				</div>
@@ -274,7 +275,7 @@ export function ProfilePanel({
 										<span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>
 									)}
 									<i aria-hidden="true">
-										<Camera size={14} />
+										<Camera size={iconSize.md} />
 									</i>
 								</button>
 								{identity.avatarDataUrl ? (
@@ -284,7 +285,7 @@ export function ProfilePanel({
 										onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })}
 										type="button"
 									>
-										<Trash aria-hidden="true" size={14} />
+										<Trash aria-hidden="true" size={iconSize.md} />
 									</button>
 								) : null}
 								<input
@@ -324,7 +325,7 @@ export function ProfilePanel({
 										onClick={() => setEditingName(true)}
 										type="button"
 									>
-										<PencilSimple aria-hidden="true" size={15} />
+										<PencilSimple aria-hidden="true" size={iconSize.lg} />
 									</button>
 								</div>
 								<p>{t("Local profile")}</p>
@@ -436,7 +437,7 @@ export function ProfilePanel({
 										<ol className="profile-skill-list">
 											{profile.topSkills.map((skill) => (
 												<li key={skill.name}>
-													<Sparkle aria-hidden="true" size={15} />
+													<Sparkle aria-hidden="true" size={iconSize.lg} />
 													<strong>{skill.name}</strong>
 													<span>
 														{t(skill.count === 1 ? "{{count}} use" : "{{count}} uses", {

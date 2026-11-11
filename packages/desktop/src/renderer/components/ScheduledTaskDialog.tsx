@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { FolderSimple, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -334,7 +335,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 				<header>
 					<h2 id="scheduled-task-dialog-title">{t(task ? "Edit scheduled task" : "Create scheduled task")}</h2>
 					<button aria-label={t("Close")} disabled={busy} onClick={close} type="button">
-						<X aria-hidden="true" size={17} />
+						<X aria-hidden="true" size={iconSize.xl} />
 					</button>
 				</header>
 				<div className="scheduled-task-dialog-fields">
@@ -403,7 +404,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 									title={additionalWorkspaceCwd || undefined}
 									type="button"
 								>
-									<FolderSimple aria-hidden="true" size={17} />
+									<FolderSimple aria-hidden="true" size={iconSize.xl} />
 									<span>{additionalWorkspaceCwd || t("Choose folder (optional)")}</span>
 								</button>
 								{additionalWorkspaceCwd && (
@@ -413,7 +414,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 										onClick={() => setAdditionalWorkspaceCwd("")}
 										type="button"
 									>
-										<X aria-hidden="true" size={15} />
+										<X aria-hidden="true" size={iconSize.lg} />
 									</button>
 								)}
 							</div>

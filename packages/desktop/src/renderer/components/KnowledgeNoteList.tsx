@@ -1,6 +1,7 @@
 import type { KnowledgeNote } from "@metis/app-protocol";
 import { useMemo } from "react";
 import { CaretRight, FileText, Folder } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface NoteFolder {
 	readonly name: string;
@@ -48,8 +49,8 @@ export function KnowledgeNoteList({
 				.map((child) => (
 					<details className="knowledge-folder" key={child.path} open={expandAll || undefined}>
 						<summary title={child.path}>
-							<CaretRight aria-hidden="true" className="knowledge-folder-caret" size={12} />
-							<Folder aria-hidden="true" size={16} />
+							<CaretRight aria-hidden="true" className="knowledge-folder-caret" size={iconSize.sm} />
+							<Folder aria-hidden="true" size={iconSize.lg} />
 							<span>{child.name}</span>
 							<small>{child.count}</small>
 						</summary>
@@ -64,7 +65,7 @@ export function KnowledgeNoteList({
 					title={note.path}
 					onClick={() => onOpen(note.path)}
 				>
-					<FileText aria-hidden="true" size={16} />
+					<FileText aria-hidden="true" size={iconSize.lg} />
 					<span>{note.title}</span>
 				</button>
 			))}

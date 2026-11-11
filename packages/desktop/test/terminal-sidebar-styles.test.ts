@@ -62,7 +62,7 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".tool-tab.is-active").background).toBe("var(--surface-05)");
 		// No weight or padding change on selection: the close slot stays reserved.
 		expect(rule(".tool-tab.is-active").fontWeight).toBe("");
-		expect(rule(".tool-tab-select").paddingRight).toBe("28px");
+		expect(rule(".tool-tab-select").padding).toBe("0 28px 0 var(--space-12)");
 		expect(css).not.toMatch(/\.tool-tab\.is-active\s+\.tool-tab-select/u);
 		expect(css).not.toMatch(/\.tool-tab\.is-active::after/u);
 		expect(css).toMatch(/\.tool-tab-indicator\s*\{[^}]*transition:[^}]*transform[^}]*width/u);

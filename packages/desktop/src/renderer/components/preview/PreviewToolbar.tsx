@@ -10,6 +10,7 @@ import {
 	MagnifyingGlassPlus,
 	X,
 } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import { WorkspaceFileIcon } from "../WorkspaceFileIcon.tsx";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import type { PreviewZoom } from "./preview-layout.ts";
@@ -59,7 +60,7 @@ export function PreviewPageControls({
 				onClick={() => onChange(current - 1)}
 				type="button"
 			>
-				<CaretLeft size={13} />
+				<CaretLeft size={iconSize.md} />
 			</button>
 			<span className="preview-page-info" title={`${current} / ${total}`}>
 				{current} / {total}
@@ -71,7 +72,7 @@ export function PreviewPageControls({
 				onClick={() => onChange(current + 1)}
 				type="button"
 			>
-				<CaretRight size={13} />
+				<CaretRight size={iconSize.md} />
 			</button>
 		</div>
 	);
@@ -104,7 +105,7 @@ export function PreviewToolbar({
 	return (
 		<header className="file-preview-toolbar preview-toolbar">
 			<div className="preview-toolbar-meta">
-				<WorkspaceFileIcon path={fileName} size={15} />
+				<WorkspaceFileIcon path={fileName} size={iconSize.lg} />
 				<strong className="preview-toolbar-title" title={fileName}>
 					{fileName}
 				</strong>
@@ -120,7 +121,7 @@ export function PreviewToolbar({
 							onClick={onZoomOut}
 							type="button"
 						>
-							<MagnifyingGlassMinus size={14} />
+							<MagnifyingGlassMinus size={iconSize.md} />
 						</button>
 						{onZoomModeChange ? (
 							<select
@@ -166,7 +167,7 @@ export function PreviewToolbar({
 							onClick={onZoomIn}
 							type="button"
 						>
-							<MagnifyingGlassPlus size={14} />
+							<MagnifyingGlassPlus size={iconSize.md} />
 						</button>
 					</div>
 				)}
@@ -181,7 +182,7 @@ export function PreviewToolbar({
 							popoverTarget={menuId}
 							type="button"
 						>
-							<DotsThree size={18} />
+							<DotsThree size={iconSize.xl} />
 						</button>
 						<div
 							ref={menu}
@@ -246,7 +247,7 @@ export function PreviewToolbar({
 						onClick={expansion.toggle}
 						type="button"
 					>
-						{expansion.expanded ? <ArrowsIn size={14} /> : <ArrowsOut size={14} />}
+						{expansion.expanded ? <ArrowsIn size={iconSize.md} /> : <ArrowsOut size={iconSize.md} />}
 					</button>
 				)}
 				{onClose && (
@@ -256,7 +257,7 @@ export function PreviewToolbar({
 						onClick={onClose}
 						type="button"
 					>
-						<X size={14} />
+						<X size={iconSize.md} />
 					</button>
 				)}
 			</div>

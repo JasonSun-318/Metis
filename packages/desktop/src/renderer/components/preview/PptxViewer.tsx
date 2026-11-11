@@ -2,6 +2,7 @@ import type { PptxViewer as PptxRendererInstance } from "@aiden0z/pptx-renderer"
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SpinnerGap } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { mountPptxSelectionLayer } from "./pptx-selection.ts";
@@ -159,7 +160,7 @@ export function PptxViewer({ fileName, file, byteLength, bytes, onClose, onOpenD
 			>
 				{loading && (
 					<div className="preview-loading-state">
-						<SpinnerGap aria-hidden="true" className="is-spinning" size={28} />
+						<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 						<span>{t("Loading PowerPoint presentation…")}</span>
 					</div>
 				)}

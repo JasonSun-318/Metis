@@ -11,6 +11,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { CheckCircle, X, XCircle } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import {
@@ -23,7 +24,6 @@ import {
 	reasoningRows,
 } from "./ModelReasoningEditor.tsx";
 import { ModelSettingsCard } from "./ModelSettingsCard.tsx";
-
 import { FloatingSystemNotice, type SystemNoticeProps } from "./SystemNotice.tsx";
 
 const TIMEOUT_MIN = 1000;
@@ -602,13 +602,13 @@ export function ReviewerModelSettingsPanel({
 					/>
 					{error && !open ? (
 						<p className="settings-action-message error" role="alert">
-							<XCircle aria-hidden="true" size={15} />
+							<XCircle aria-hidden="true" size={iconSize.lg} />
 							{error}
 						</p>
 					) : null}
 					{notice && !open ? (
 						<output className="status-paragraph settings-action-message">
-							<CheckCircle aria-hidden="true" size={15} />
+							<CheckCircle aria-hidden="true" size={iconSize.lg} />
 							{notice}
 						</output>
 					) : null}
@@ -657,7 +657,7 @@ export function ReviewerModelSettingsPanel({
 									onClick={requestClose}
 									type="button"
 								>
-									<X aria-hidden="true" size={18} />
+									<X aria-hidden="true" size={iconSize.xl} />
 								</button>
 							</header>
 							<div className="model-provider-editor-body">
@@ -813,7 +813,7 @@ export function ReviewerModelSettingsPanel({
 								)}
 								{outputUnavailable ? (
 									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
+										<XCircle aria-hidden="true" size={iconSize.lg} />
 										{t(
 											"This model cannot be used for approval because its output limit is below 128 tokens.",
 										)}
@@ -890,13 +890,13 @@ export function ReviewerModelSettingsPanel({
 								) : null}
 								{error ? (
 									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
+										<XCircle aria-hidden="true" size={iconSize.lg} />
 										{error}
 									</p>
 								) : null}
 								{notice ? (
 									<output className="status-paragraph settings-action-message">
-										<CheckCircle aria-hidden="true" size={15} />
+										<CheckCircle aria-hidden="true" size={iconSize.lg} />
 										{notice}
 									</output>
 								) : null}

@@ -3,6 +3,7 @@ import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEf
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Archive, CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
@@ -210,9 +211,9 @@ export function ConversationActions({
 				type="button"
 			>
 				{variant === "header" ? (
-					<CaretDown aria-hidden="true" size={13} />
+					<CaretDown aria-hidden="true" size={iconSize.md} />
 				) : (
-					<DotsThree aria-hidden="true" size={17} weight="bold" />
+					<DotsThree aria-hidden="true" size={iconSize.xl} weight="bold" />
 				)}
 			</button>
 			{menuOpen &&
@@ -254,16 +255,16 @@ export function ConversationActions({
 								type="button"
 							>
 								{pinned ? (
-									<PushPin aria-hidden="true" size={15} />
+									<PushPin aria-hidden="true" size={iconSize.lg} />
 								) : (
-									<PushPinSimple aria-hidden="true" size={15} />
+									<PushPinSimple aria-hidden="true" size={iconSize.lg} />
 								)}
 								{t(pinned ? "Unpin" : "Pin")}
 							</button>
 						)}
 						{onCopy && (
 							<button disabled={pending} onClick={() => void copyTitle()} role="menuitem" type="button">
-								<CopySimple aria-hidden="true" size={15} /> {t("Copy title")}
+								<CopySimple aria-hidden="true" size={iconSize.lg} /> {t("Copy title")}
 							</button>
 						)}
 						{allowRename && (
@@ -278,7 +279,7 @@ export function ConversationActions({
 								role="menuitem"
 								type="button"
 							>
-								<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
+								<PencilSimple aria-hidden="true" size={iconSize.lg} /> {t("Rename")}
 							</button>
 						)}
 						{onArchive && (
@@ -297,7 +298,7 @@ export function ConversationActions({
 								}
 								onClick={() => void archive()}
 							>
-								<Archive size={15} aria-hidden="true" />
+								<Archive size={iconSize.lg} aria-hidden="true" />
 								{t(archiving ? "Archiving conversation…" : "Archive conversation")}
 							</button>
 						)}
@@ -312,7 +313,7 @@ export function ConversationActions({
 							role="menuitem"
 							type="button"
 						>
-							<Trash aria-hidden="true" size={15} /> {t("Delete")}
+							<Trash aria-hidden="true" size={iconSize.lg} /> {t("Delete")}
 						</button>
 						{error && (
 							<p className="session-action-menu-error" role="alert">

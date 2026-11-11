@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { DotsThree, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
 
@@ -73,7 +74,7 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 				ref={trigger}
 				type="button"
 			>
-				<DotsThree aria-hidden="true" size={17} weight="bold" />
+				<DotsThree aria-hidden="true" size={iconSize.xl} weight="bold" />
 			</button>
 			{menuOpen &&
 				createPortal(
@@ -95,7 +96,7 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 							role="menuitem"
 							type="button"
 						>
-							<Trash aria-hidden="true" size={15} /> {t("Delete")}
+							<Trash aria-hidden="true" size={iconSize.lg} /> {t("Delete")}
 						</button>
 					</div>,
 					document.body,

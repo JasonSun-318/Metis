@@ -33,6 +33,7 @@ import {
 	X,
 	XCircle,
 } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -610,7 +611,11 @@ export function PluginMarketplacePanel({
 							}
 							type="button"
 						>
-							<ArrowsClockwise aria-hidden="true" className={reloading ? "plugins-spin" : undefined} size={16} />
+							<ArrowsClockwise
+								aria-hidden="true"
+								className={reloading ? "plugins-spin" : undefined}
+								size={iconSize.lg}
+							/>
 							{t("Reload")}
 						</button>
 						<button
@@ -622,7 +627,7 @@ export function PluginMarketplacePanel({
 							}}
 							type="button"
 						>
-							<Plus aria-hidden="true" size={16} />
+							<Plus aria-hidden="true" size={iconSize.lg} />
 							<span>{t("Add Market")}</span>
 						</button>
 					</>,
@@ -630,7 +635,7 @@ export function PluginMarketplacePanel({
 				)}
 			<div className="plugins-list-controls plugins-installed-controls">
 				<div className="plugins-search">
-					<MagnifyingGlass aria-hidden="true" size={18} />
+					<MagnifyingGlass aria-hidden="true" size={iconSize.xl} />
 					<input
 						aria-label={t(searchLabel)}
 						placeholder={t(searchLabel)}
@@ -695,7 +700,7 @@ export function PluginMarketplacePanel({
 						}}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={15} />
+						<ArrowLeft aria-hidden="true" size={iconSize.lg} />
 						{t("Markets")}
 					</button>
 				) : (
@@ -744,13 +749,13 @@ export function PluginMarketplacePanel({
 									type="button"
 								>
 									<span className="plugins-row-icon">
-										<Package aria-hidden="true" size={22} />
+										<Package aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span className="plugins-row-copy">
 										<strong>{marketName(market)}</strong>
 										<small>{market.url}</small>
 									</span>
-									<CaretRight aria-hidden="true" size={17} />
+									<CaretRight aria-hidden="true" size={iconSize.xl} />
 								</button>
 								<button
 									aria-label={t("Remove market {{name}}", { name: marketName(market) })}
@@ -760,7 +765,7 @@ export function PluginMarketplacePanel({
 									onClick={() => handleRemoveMarket(market.id)}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={16} />
+									<Trash aria-hidden="true" size={iconSize.lg} />
 								</button>
 							</div>
 						))
@@ -793,7 +798,7 @@ export function PluginMarketplacePanel({
 							pagedCatalogEntries.map((entry) => (
 								<div className="plugins-list-row plugins-market-row" key={entry.id}>
 									<span className="plugins-row-icon">
-										<Package aria-hidden="true" size={22} />
+										<Package aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span className="plugins-row-copy">
 										<strong>{entry.name}</strong>
@@ -855,7 +860,7 @@ export function PluginMarketplacePanel({
 							pagedInstalledList.map((plugin) => (
 								<div className="plugins-list-row plugins-installed-row" key={plugin.id}>
 									<span className="plugins-row-icon">
-										<Package aria-hidden="true" size={22} />
+										<Package aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span className="plugins-row-copy">
 										<strong>{plugin.displayName || plugin.name}</strong>
@@ -876,9 +881,9 @@ export function PluginMarketplacePanel({
 											type="button"
 										>
 											{plugin.enabled ? (
-												<XCircle aria-hidden="true" size={16} />
+												<XCircle aria-hidden="true" size={iconSize.lg} />
 											) : (
-												<CheckCircle aria-hidden="true" size={16} />
+												<CheckCircle aria-hidden="true" size={iconSize.lg} />
 											)}
 											{t(plugin.enabled ? "Disable" : "Enable")}
 										</button>
@@ -889,7 +894,7 @@ export function PluginMarketplacePanel({
 											type="button"
 										>
 											{t("Manage")}
-											<CaretRight aria-hidden="true" size={14} />
+											<CaretRight aria-hidden="true" size={iconSize.md} />
 										</button>
 									</div>
 								</div>
@@ -1001,7 +1006,7 @@ function PluginListPager({
 			</span>
 			<div className="plugins-pagination-pager">
 				<button aria-label={t("Previous page")} disabled={page <= 1} onClick={() => onPage(page - 1)} type="button">
-					<CaretLeft aria-hidden="true" size={15} />
+					<CaretLeft aria-hidden="true" size={iconSize.lg} />
 				</button>
 				<MenuSelect
 					ariaLabel={t("Go to page")}
@@ -1015,7 +1020,7 @@ function PluginListPager({
 					}))}
 				/>
 				<button aria-label={t("Next page")} disabled={page >= pages} onClick={() => onPage(page + 1)} type="button">
-					<CaretRight aria-hidden="true" size={15} />
+					<CaretRight aria-hidden="true" size={iconSize.lg} />
 				</button>
 			</div>
 		</nav>
@@ -1060,7 +1065,7 @@ function AddMarketDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="add-market-title">{t("Add Market")}</h2>
 			<p id="add-market-description">{t("Enter GitHub repository URL or owner/repo")}</p>
@@ -1145,7 +1150,7 @@ function InspectPluginDialog({
 				onClick={onClose}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="inspect-plugin-title">{inspection?.plugin.displayName || entry.name}</h2>
 			<p id="inspect-plugin-description">{inspection?.plugin.description || entry.description}</p>
@@ -1161,7 +1166,7 @@ function InspectPluginDialog({
 			) : installResult ? (
 				/* biome-ignore lint/a11y/useSemanticElements: This status banner groups block content and actions; output only accepts phrasing content. */
 				<div className="plugins-install-success-banner" role="status">
-					<CheckCircle aria-hidden="true" color="var(--success-action)" size={24} />
+					<CheckCircle aria-hidden="true" color="var(--success-action)" size={iconSize.xl} />
 					<div>
 						<strong>{t("Plugin installed", { name: installResult.name })}</strong>
 						<p>
@@ -1203,7 +1208,7 @@ function InspectPluginDialog({
 								target="_blank"
 							>
 								{t("Repository")}
-								<ArrowSquareOut aria-hidden="true" size={13} />
+								<ArrowSquareOut aria-hidden="true" size={iconSize.md} />
 							</a>
 						)}
 					</div>
@@ -1221,13 +1226,13 @@ function InspectPluginDialog({
 									<li className="plugins-component-item" key={c.componentId}>
 										<div className="plugins-component-icon">
 											{c.kind === "skill" ? (
-												<PuzzlePiece aria-hidden="true" size={16} />
+												<PuzzlePiece aria-hidden="true" size={iconSize.lg} />
 											) : c.kind === "mcp" ? (
-												<Plug aria-hidden="true" size={16} />
+												<Plug aria-hidden="true" size={iconSize.lg} />
 											) : c.kind === "hook" ? (
-												<Lightning aria-hidden="true" size={16} />
+												<Lightning aria-hidden="true" size={iconSize.lg} />
 											) : (
-												<WarningCircle aria-hidden="true" size={16} />
+												<WarningCircle aria-hidden="true" size={iconSize.lg} />
 											)}
 										</div>
 										<div className="plugins-component-copy">
@@ -1252,7 +1257,7 @@ function InspectPluginDialog({
 								{inspection.issues.map((issue, idx) => (
 									/* biome-ignore lint/suspicious/noArrayIndexKey: Issues belong to one immutable inspection snapshot and have no unique issue IDs or local row state. */
 									<li className={`plugins-issue-item status-${issue.status}`} key={idx}>
-										<Warning aria-hidden="true" size={15} />
+										<Warning aria-hidden="true" size={iconSize.lg} />
 										<span>{issue.message}</span>
 									</li>
 								))}
@@ -1263,7 +1268,7 @@ function InspectPluginDialog({
 					{/* Unsupported warning / allowPartial */}
 					{hasUnsupported && !allUnsupported && (
 						<div className="plugins-partial-notice">
-							<Warning aria-hidden="true" size={18} />
+							<Warning aria-hidden="true" size={iconSize.xl} />
 							<div>
 								<p>{t("This plugin contains unsupported components which will be skipped.")}</p>
 								<label className="plugins-partial-checkbox">
@@ -1281,7 +1286,7 @@ function InspectPluginDialog({
 
 					{allUnsupported && (
 						<div className="plugins-unsupported-banner" role="alert">
-							<XCircle aria-hidden="true" size={18} />
+							<XCircle aria-hidden="true" size={iconSize.xl} />
 							<p>{t("No compatible components can be installed from this plugin.")}</p>
 						</div>
 					)}
@@ -1366,7 +1371,7 @@ function InstalledPluginDetailDialog({
 				onClick={onClose}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="installed-detail-title">{detail?.plugin.displayName || detail?.plugin.name || t("Plugin Details")}</h2>
 			<p id="installed-detail-description">{detail?.plugin.repository || ""}</p>
@@ -1435,7 +1440,7 @@ function InstalledPluginDetailDialog({
 								{detail.runtimeErrors.map((runtimeError, index) => (
 									<li className="plugins-component-item" key={`${runtimeError.componentId}-${index}`}>
 										<div className="plugins-component-icon">
-											<WarningCircle aria-hidden="true" size={16} />
+											<WarningCircle aria-hidden="true" size={iconSize.lg} />
 										</div>
 										<div className="plugins-component-copy">
 											<strong>
@@ -1459,13 +1464,13 @@ function InstalledPluginDetailDialog({
 								<li className="plugins-component-item" key={c.componentId}>
 									<div className="plugins-component-icon">
 										{c.kind === "skill" ? (
-											<PuzzlePiece aria-hidden="true" size={16} />
+											<PuzzlePiece aria-hidden="true" size={iconSize.lg} />
 										) : c.kind === "mcp" ? (
-											<Plug aria-hidden="true" size={16} />
+											<Plug aria-hidden="true" size={iconSize.lg} />
 										) : c.kind === "hook" ? (
-											<Lightning aria-hidden="true" size={16} />
+											<Lightning aria-hidden="true" size={iconSize.lg} />
 										) : (
-											<WarningCircle aria-hidden="true" size={16} />
+											<WarningCircle aria-hidden="true" size={iconSize.lg} />
 										)}
 									</div>
 									<div className="plugins-component-copy">
@@ -1591,7 +1596,7 @@ function UpdatePluginDialog({
 				onClick={onClose}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="update-plugin-title">{t("Plugin Update Available")}</h2>
 			<p id="update-plugin-description">
@@ -1623,11 +1628,11 @@ function UpdatePluginDialog({
 							<li className="plugins-component-item" key={c.componentId}>
 								<div className="plugins-component-icon">
 									{c.kind === "skill" ? (
-										<PuzzlePiece aria-hidden="true" size={16} />
+										<PuzzlePiece aria-hidden="true" size={iconSize.lg} />
 									) : c.kind === "mcp" ? (
-										<Plug aria-hidden="true" size={16} />
+										<Plug aria-hidden="true" size={iconSize.lg} />
 									) : (
-										<Lightning aria-hidden="true" size={16} />
+										<Lightning aria-hidden="true" size={iconSize.lg} />
 									)}
 								</div>
 								<div className="plugins-component-copy">
@@ -1646,7 +1651,7 @@ function UpdatePluginDialog({
 								{inspection.issues.map((issue, index) => (
 									/* biome-ignore lint/suspicious/noArrayIndexKey: Issues belong to one immutable inspection snapshot and have no unique issue IDs or local row state. */
 									<li className={`plugins-issue-item status-${issue.status}`} key={index}>
-										<Warning aria-hidden="true" size={15} />
+										<Warning aria-hidden="true" size={iconSize.lg} />
 										<span>{issue.message}</span>
 									</li>
 								))}
@@ -1666,7 +1671,7 @@ function UpdatePluginDialog({
 					)}
 					{allUnsupported && (
 						<div className="plugins-unsupported-banner" role="alert">
-							<XCircle aria-hidden="true" size={18} />
+							<XCircle aria-hidden="true" size={iconSize.xl} />
 							<p>{t("No compatible components can be installed from this plugin.")}</p>
 						</div>
 					)}
@@ -1728,7 +1733,7 @@ function RemovePluginDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="remove-plugin-title">{t("Uninstall Plugin?")}</h2>
 			<p id="remove-plugin-description">

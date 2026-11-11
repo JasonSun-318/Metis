@@ -26,6 +26,7 @@ import {
 	SpinnerGap,
 	Trash,
 } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
@@ -687,7 +688,7 @@ export function FilePanel({
 											onClick={() => void save().catch(onError)}
 											type="button"
 										>
-											<FloppyDisk aria-hidden="true" size={14} />
+											<FloppyDisk aria-hidden="true" size={iconSize.md} />
 										</button>
 									</ToolbarTooltip>
 								)}
@@ -699,9 +700,9 @@ export function FilePanel({
 											type="button"
 										>
 											{previewMode ? (
-												<Code aria-hidden="true" size={14} />
+												<Code aria-hidden="true" size={iconSize.md} />
 											) : (
-												<Eye aria-hidden="true" size={14} />
+												<Eye aria-hidden="true" size={iconSize.md} />
 											)}
 										</button>
 									</ToolbarTooltip>
@@ -712,7 +713,7 @@ export function FilePanel({
 										onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))}
 										type="button"
 									>
-										<Copy aria-hidden="true" size={14} />
+										<Copy aria-hidden="true" size={iconSize.md} />
 									</button>
 								</ToolbarTooltip>
 								{displayedFile.kind === "text" && (
@@ -727,7 +728,7 @@ export function FilePanel({
 											}
 											type="button"
 										>
-											<FileText aria-hidden="true" size={14} />
+											<FileText aria-hidden="true" size={iconSize.md} />
 										</button>
 									</ToolbarTooltip>
 								)}
@@ -740,7 +741,7 @@ export function FilePanel({
 											onClick={() => setActionMenuOpen((value) => !value)}
 											type="button"
 										>
-											<DotsThree aria-hidden="true" size={16} />
+											<DotsThree aria-hidden="true" size={iconSize.lg} />
 										</button>
 									</ToolbarTooltip>
 									{actionMenuOpen && (
@@ -764,7 +765,7 @@ export function FilePanel({
 								onClick={() => setTreeOpen((val) => !val)}
 								type="button"
 							>
-								<SidebarSimple aria-hidden="true" size={14} />
+								<SidebarSimple aria-hidden="true" size={iconSize.md} />
 							</button>
 						</ToolbarTooltip>
 					</div>
@@ -783,18 +784,18 @@ export function FilePanel({
 				>
 					{!activePath ? (
 						<div className="file-empty-state">
-							<FolderOpen aria-hidden="true" size={29} />
+							<FolderOpen aria-hidden="true" size={iconSize.xl} />
 							<strong>{t("Open file")}</strong>
 							<span>{t("Choose a file from the workspace tree")}</span>
 						</div>
 					) : previewLoading ? (
 						<div className="file-empty-state">
-							<SpinnerGap aria-hidden="true" className="is-spinning" size={24} />
+							<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 							<span>{t("Opening file…")}</span>
 						</div>
 					) : previewError ? (
 						<div className="file-empty-state is-error" role="alert">
-							<File aria-hidden="true" size={27} />
+							<File aria-hidden="true" size={iconSize.xl} />
 							<strong>{t("File could not be opened")}</strong>
 							<span>{previewError}</span>
 							<button
@@ -831,7 +832,7 @@ export function FilePanel({
 						/>
 					) : displayedFile?.kind === "unsupported" ? (
 						<div className="file-empty-state">
-							<File aria-hidden="true" size={27} />
+							<File aria-hidden="true" size={iconSize.xl} />
 							<strong>
 								{t(
 									displayedFile.reason === "too-large"
@@ -932,7 +933,7 @@ export function FilePanel({
 				)}
 				<div className="file-tree-toolbar">
 					<div className="file-search-field">
-						<MagnifyingGlass aria-hidden="true" size={14} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 						<input
 							aria-label={t("Filter files")}
 							onChange={(event) => setQuery(event.target.value)}
@@ -940,7 +941,7 @@ export function FilePanel({
 							type="search"
 							value={query}
 						/>
-						{searching && <SpinnerGap aria-hidden="true" className="is-spinning" size={13} />}
+						{searching && <SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.md} />}
 					</div>
 				</div>
 				<div
@@ -976,7 +977,7 @@ export function FilePanel({
 										<CaretRight
 											aria-hidden="true"
 											className={`file-tree-caret ${isExpanded ? "is-expanded" : ""}`}
-											size={12}
+											size={iconSize.sm}
 										/>
 									) : (
 										<span className="file-tree-caret" />
@@ -1022,7 +1023,7 @@ export function FilePanel({
 											{query.trim() ? entry.relativePath : entry.name}
 										</span>
 									)}
-									{loading && <SpinnerGap aria-hidden="true" className="is-spinning" size={12} />}
+									{loading && <SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.sm} />}
 								</>
 							);
 							return (
@@ -1067,7 +1068,7 @@ export function FilePanel({
 						<output className="status-block file-tree-empty">
 							{rootLoading ? (
 								<DelayedPlaceholder>
-									<SpinnerGap aria-hidden="true" className="is-spinning" size={14} />
+									<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.md} />
 									<span>{t("Loading…")}</span>
 								</DelayedPlaceholder>
 							) : (
@@ -1105,7 +1106,7 @@ export function FilePanel({
 										role="menuitem"
 										type="button"
 									>
-										<FilePlus aria-hidden="true" size={13} />
+										<FilePlus aria-hidden="true" size={iconSize.md} />
 										{t("New file")}
 									</button>
 									<button
@@ -1113,7 +1114,7 @@ export function FilePanel({
 										role="menuitem"
 										type="button"
 									>
-										<FolderPlus aria-hidden="true" size={13} />
+										<FolderPlus aria-hidden="true" size={iconSize.md} />
 										{t("New folder")}
 									</button>
 									{menuEntry && <div className="file-tree-menu-separator" />}
@@ -1129,7 +1130,7 @@ export function FilePanel({
 										role="menuitem"
 										type="button"
 									>
-										<PencilSimple aria-hidden="true" size={13} />
+										<PencilSimple aria-hidden="true" size={iconSize.md} />
 										{t("Rename")}
 									</button>
 									<button
@@ -1141,7 +1142,7 @@ export function FilePanel({
 										role="menuitem"
 										type="button"
 									>
-										<Trash aria-hidden="true" size={13} />
+										<Trash aria-hidden="true" size={iconSize.md} />
 										{t("Move to Trash")}
 									</button>
 								</>

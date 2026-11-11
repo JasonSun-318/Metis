@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopChangelog, DesktopUpdateState } from "../../shared/desktop-api.ts";
 import { ArrowsClockwise, CaretDown, GearSix } from "../icons.tsx";
 import { useProfileIdentity } from "../profile-identity.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { ReleaseNotesDialog } from "./ReleaseNotesDialog.tsx";
 
 const NO_UPDATE: DesktopUpdateState = { status: "unavailable" };
@@ -133,7 +134,7 @@ export const AccountMenu = memo(function AccountMenu({
 					role="menuitem"
 					type="button"
 				>
-					<GearSix aria-hidden="true" size={15} />
+					<GearSix aria-hidden="true" size={iconSize.lg} />
 					<span className="account-menu-item-label">{t("Settings")}</span>
 				</button>
 				{loadChangelog && (
@@ -164,7 +165,7 @@ export const AccountMenu = memo(function AccountMenu({
 						<ArrowsClockwise
 							aria-hidden="true"
 							className={checking || downloading ? "is-spinning" : undefined}
-							size={15}
+							size={iconSize.lg}
 						/>
 						<span className="account-menu-item-label">{t("Get updates")}</span>
 						{updateDetail && <span className="account-menu-item-detail">{updateDetail}</span>}
@@ -209,7 +210,7 @@ export const AccountMenu = memo(function AccountMenu({
 							data-unread={notificationsUnread || undefined}
 						/>
 					)}
-					<CaretDown aria-hidden="true" size={14} />
+					<CaretDown aria-hidden="true" size={iconSize.md} />
 				</button>
 			</div>
 		</div>

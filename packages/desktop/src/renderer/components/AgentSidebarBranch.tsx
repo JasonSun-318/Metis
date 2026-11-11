@@ -11,6 +11,7 @@ import { shouldReuseMutationRequest } from "../rpc-error.ts";
 import { ConversationActions } from "./SessionActions.tsx";
 import "../styles/agent-sidebar-actions.css";
 import { agentIndicator, type SessionIndicator } from "../session-view-utils.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { SessionStatusIndicator } from "./SessionStatusIndicator.tsx";
 
 export interface AgentSidebarNavigation {
@@ -300,7 +301,7 @@ export function AgentSidebarBranch({
 								aria-label={t(expanded ? "Collapse agent tasks" : "Expand agent tasks")}
 								onClick={() => toggleChild(agent.agentId, expanded)}
 							>
-								{expanded ? <CaretDown size={11} /> : <CaretRight size={11} />}
+								{expanded ? <CaretDown size={iconSize.sm} /> : <CaretRight size={iconSize.sm} />}
 							</button>
 						)}
 					</div>
@@ -329,7 +330,7 @@ export function AgentSidebarBranch({
 						aria-label={t(open ? "Collapse agent tasks" : "Expand agent tasks")}
 						onClick={() => toggle(!open)}
 					>
-						{open ? <CaretDown size={10} /> : <CaretRight size={10} />}
+						{open ? <CaretDown size={iconSize.sm} /> : <CaretRight size={iconSize.sm} />}
 					</button>
 				) : null,
 			)}
@@ -363,7 +364,7 @@ export function AgentSidebarBranch({
 					onClick={reload}
 					title={t("Some agent conversations could not be read. Retry loading to check again.")}
 				>
-					<WarningCircle size={12} />
+					<WarningCircle size={iconSize.sm} />
 					{t("Unreadable agents: {{count}}", { count: unreadableAgentCount })}
 				</button>
 			)}

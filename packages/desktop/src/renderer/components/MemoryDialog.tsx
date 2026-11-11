@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 /** Native modal: isolates focus/background, restores the trigger, and guards unsaved edits. */
 export function MemoryDialog({
@@ -97,7 +98,7 @@ export function MemoryDialog({
 					onClick={close}
 					type="button"
 				>
-					<X aria-hidden="true" size={18} />
+					<X aria-hidden="true" size={iconSize.xl} />
 				</button>
 			</header>
 			<div className="memory-dialog-body">{children}</div>

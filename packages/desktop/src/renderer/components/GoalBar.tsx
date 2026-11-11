@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatElapsed } from "../format-elapsed.ts";
 import { Pause, Play, Target, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface GoalBarProps {
 	readonly goal: SessionGoalView | null;
@@ -54,7 +55,7 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 			<section aria-label={t(statusLabelKey(goal.status))} className="goal-bar-panel">
 				<header className="goal-bar-heading">
 					<span aria-hidden="true" className="goal-bar-icon">
-						<Target size={14} />
+						<Target size={iconSize.md} />
 					</span>
 					<div className="goal-bar-copy">
 						<strong>{t(statusLabelKey(goal.status))}</strong>
@@ -67,16 +68,16 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 					</span>
 					<div className="goal-bar-controls">
 						<button aria-label={t("Delete goal")} className="goal-bar-action" onClick={onClear} type="button">
-							<Trash aria-hidden="true" size={14} />
+							<Trash aria-hidden="true" size={iconSize.md} />
 						</button>
 						{canPause ? (
 							<button aria-label={t("Pause goal")} className="goal-bar-action" onClick={onPause} type="button">
-								<Pause aria-hidden="true" size={14} />
+								<Pause aria-hidden="true" size={iconSize.md} />
 							</button>
 						) : null}
 						{canResume ? (
 							<button aria-label={t("Resume goal")} className="goal-bar-action" onClick={onResume} type="button">
-								<Play aria-hidden="true" size={14} />
+								<Play aria-hidden="true" size={iconSize.md} />
 							</button>
 						) : null}
 					</div>

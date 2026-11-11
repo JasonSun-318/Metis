@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
 import type { ProjectDeletePreview, ProjectSessionGroup } from "../session-groups.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
@@ -179,7 +180,7 @@ export function ProjectActions({
 					ref={actionsButton}
 					type="button"
 				>
-					<DotsThree aria-hidden="true" size={17} weight="bold" />
+					<DotsThree aria-hidden="true" size={iconSize.xl} weight="bold" />
 				</button>
 				<button
 					aria-label={t("New task in {{name}}", { name: group.name })}
@@ -192,7 +193,7 @@ export function ProjectActions({
 					onPointerDown={(event) => event.stopPropagation()}
 					type="button"
 				>
-					<NotePencil aria-hidden="true" size={15} />
+					<NotePencil aria-hidden="true" size={iconSize.lg} />
 				</button>
 			</div>
 			{menuOpen &&
@@ -232,7 +233,7 @@ export function ProjectActions({
 							role="menuitem"
 							type="button"
 						>
-							<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
+							<PencilSimple aria-hidden="true" size={iconSize.lg} /> {t("Rename")}
 						</button>
 						<button
 							onClick={() => {
@@ -243,9 +244,9 @@ export function ProjectActions({
 							type="button"
 						>
 							{group.pinned ? (
-								<PushPin aria-hidden="true" size={15} />
+								<PushPin aria-hidden="true" size={iconSize.lg} />
 							) : (
-								<PushPinSimple aria-hidden="true" size={15} />
+								<PushPinSimple aria-hidden="true" size={iconSize.lg} />
 							)}
 							{t(group.pinned ? "Unpin" : "Pin")}
 						</button>
@@ -261,7 +262,7 @@ export function ProjectActions({
 							role="menuitem"
 							type="button"
 						>
-							<Trash aria-hidden="true" size={15} /> {t("Delete")}
+							<Trash aria-hidden="true" size={iconSize.lg} /> {t("Delete")}
 						</button>
 					</div>,
 					document.body,

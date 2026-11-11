@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
 import { BellRing, X } from "../icons.tsx";
 import "../styles/release-notes.css";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { Markdown } from "./Markdown.tsx";
 
@@ -179,7 +180,7 @@ export function ReleaseNotesDialog({
 				)}
 				type="button"
 			>
-				<BellRing aria-hidden="true" size={17} />
+				<BellRing aria-hidden="true" size={iconSize.xl} />
 				{variant === "menu" && <span>{t("Notifications")}</span>}
 				{unread && (
 					<span
@@ -210,7 +211,7 @@ export function ReleaseNotesDialog({
 								ref={closeButtonRef}
 								type="button"
 							>
-								<X aria-hidden="true" size={18} />
+								<X aria-hidden="true" size={iconSize.xl} />
 							</button>
 						</header>
 						<div className="release-notes-layout">

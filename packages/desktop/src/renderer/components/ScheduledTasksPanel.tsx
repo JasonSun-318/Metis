@@ -7,6 +7,7 @@ import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "../icons.tsx";
 import type { ScheduleStore } from "../store/schedule-store.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ScheduledTaskDetail, scheduleLabel } from "./ScheduledTaskDetail.tsx";
@@ -50,8 +51,12 @@ function NewTaskMenu({
 				else if (action === "manual") onManual();
 			}}
 			options={[
-				{ value: "assisted", label: t("Create with Metis"), icon: <ChatCircleDots aria-hidden="true" size={17} /> },
-				{ value: "manual", label: t("Set up manually"), icon: <Gear aria-hidden="true" size={17} /> },
+				{
+					value: "assisted",
+					label: t("Create with Metis"),
+					icon: <ChatCircleDots aria-hidden="true" size={iconSize.xl} />,
+				},
+				{ value: "manual", label: t("Set up manually"), icon: <Gear aria-hidden="true" size={iconSize.xl} /> },
 			]}
 			placeholder={t("New task")}
 			value=""
@@ -126,19 +131,19 @@ function AssistedScheduleWorkspaceDialog({
 						<p>{t("Choose a folder for project files, or use a dedicated task workspace.")}</p>
 					</div>
 					<button aria-label={t("Close")} disabled={busy} onClick={onClose} type="button">
-						<X aria-hidden="true" size={17} />
+						<X aria-hidden="true" size={iconSize.xl} />
 					</button>
 				</header>
 				<div className="scheduled-task-workspace-options">
 					<button disabled={busy} onClick={() => void chooseFolder()} type="button">
-						<FolderSimple aria-hidden="true" size={21} />
+						<FolderSimple aria-hidden="true" size={iconSize.xl} />
 						<span>
 							<strong>{t("Choose folder")}</strong>
 							<small>{t("Work directly in a folder on your computer.")}</small>
 						</span>
 					</button>
 					<button disabled={busy} onClick={() => void create(null)} type="button">
-						<ChatCircleDots aria-hidden="true" size={21} />
+						<ChatCircleDots aria-hidden="true" size={iconSize.xl} />
 						<span>
 							<strong>{t("Use default workspace")}</strong>
 							<small>{t("Use a dedicated workspace managed by Metis.")}</small>
@@ -351,7 +356,7 @@ export function ScheduledTasksPanel({
 			<div className="scheduled-tasks-scroll">
 				<div className="scheduled-tasks-layout">
 					<div className="scheduled-tasks-toolbar">
-						<MagnifyingGlass aria-hidden="true" size={16} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 						<input
 							aria-label={t("Search scheduled tasks")}
 							onChange={(event) => setQuery(event.target.value)}
@@ -361,11 +366,11 @@ export function ScheduledTasksPanel({
 					</div>
 					<div className="scheduled-tasks-notice">
 						<span>
-							<Info aria-hidden="true" size={16} />
+							<Info aria-hidden="true" size={iconSize.lg} />
 							{t("Scheduled tasks run only while Metis is open and your computer is awake and online.")}
 						</span>
 						<label>
-							<Sun aria-hidden="true" size={16} />
+							<Sun aria-hidden="true" size={iconSize.lg} />
 							{t("Keep awake")}{" "}
 							<input
 								checked={keepAwake}

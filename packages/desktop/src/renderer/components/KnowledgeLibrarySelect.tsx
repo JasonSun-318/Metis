@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Books, CaretDown, Check } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export function KnowledgeLibrarySelect({
 	libraries,
@@ -115,11 +116,11 @@ export function KnowledgeLibrarySelect({
 				title={selected?.path}
 				type="button"
 			>
-				<Books aria-hidden="true" size={17} />
+				<Books aria-hidden="true" size={iconSize.xl} />
 				<span className="menu-select-value" id={`${id}-value`}>
 					{selected?.name ?? t("Choose knowledge library")}
 				</span>
-				<CaretDown aria-hidden="true" className="menu-select-caret" size={13} />
+				<CaretDown aria-hidden="true" className="menu-select-caret" size={iconSize.md} />
 			</button>
 			{open &&
 				createPortal(
@@ -180,13 +181,13 @@ export function KnowledgeLibrarySelect({
 									type="button"
 								>
 									<span className="menu-select-option-label">
-										<Books aria-hidden="true" size={15} />
+										<Books aria-hidden="true" size={iconSize.lg} />
 										<span className="menu-select-option-copy">
 											<span>{library.name}</span>
 											<small>{library.path}</small>
 										</span>
 									</span>
-									{library.id === value && <Check aria-hidden="true" size={15} weight="bold" />}
+									{library.id === value && <Check aria-hidden="true" size={iconSize.lg} weight="bold" />}
 								</button>
 							</div>
 						))}
