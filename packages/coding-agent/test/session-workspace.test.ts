@@ -185,9 +185,7 @@ describe("managed session workspaces", () => {
 		session.close();
 
 		const previousPath = process.env.PATH;
-		// An empty PATH can still search the system default on some platforms.
-		// Point at a directory that exists and does not contain trash.
-		process.env.PATH = mkdtempSync(join(tmpdir(), "metis-no-trash-"));
+		process.env.PATH = "";
 		try {
 			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toMatchObject({
 				ok: false,
