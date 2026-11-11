@@ -105,6 +105,13 @@ describe("Composer visual states", () => {
 		expect(css).not.toContain(".new-task-home-heading > svg");
 	});
 
+	it("keeps the composer quiet on click and hints keyboard focus", () => {
+		expect(rule(".composer textarea:focus-visible, .composer .composer-editable-input:focus-visible").outline).toBe(
+			"none",
+		);
+		expect(css).toContain(':root[data-focus-modality="keyboard"]');
+	});
+
 	it("preserves a separate workspace bar below the composer", () => {
 		expect(rule(".new-task-home .composer").borderBottom).toBe("1px solid var(--home-border)");
 		expect(rule(".new-task-home-project-control").minHeight).toBe("38px");

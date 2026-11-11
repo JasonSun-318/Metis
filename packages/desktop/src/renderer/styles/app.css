@@ -1753,7 +1753,8 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .new-task-home .composer:hover { border-color: var(--home-border); box-shadow: none; transform: none; }
 .composer textarea, .composer .composer-editable-input { width: 100%; min-height: 42px; max-height: 180px; border: 0; background: transparent; color: var(--text); padding: 7px 5px 0; font-size: var(--chat-control-size); font-weight: var(--font-weight-regular); line-height: 1.5; outline: none; }
 .composer textarea::placeholder { color: var(--placeholder); }
-.composer textarea:focus-visible, .composer .composer-editable-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.composer textarea:focus-visible, .composer .composer-editable-input:focus-visible { outline: none; }
+:root[data-focus-modality="keyboard"] .composer textarea:focus-visible, :root[data-focus-modality="keyboard"] .composer .composer-editable-input:focus-visible { border-radius: var(--radius-compact); outline: 1px solid color-mix(in srgb, var(--focus) 55%, transparent); outline-offset: -1px; }
 .composer .composer-editable-input { position: relative; overflow-y: auto; white-space: pre-wrap; word-break: break-word; scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
 .composer .composer-editable-input[data-empty="true"]::before { content: attr(data-placeholder); color: var(--text-10); pointer-events: none; position: absolute; top: 7px; left: 5px; right: var(--space-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .composer-actions { display: flex; min-width: 0; min-height: 32px; align-items: center; justify-content: space-between; gap: var(--space-4) var(--space-8); flex-wrap: wrap; color: var(--muted); font-size: var(--font-size-2xs); }

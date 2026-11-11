@@ -5,6 +5,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary.tsx";
 import "./i18n.ts";
 import { AppStore } from "./store/app-store.ts";
 import { applyThemeToDocument, loadTheme } from "./theme.ts";
+import { installFocusModality } from "./ui/focus-modality.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/transcript-navigation.css";
@@ -12,6 +13,8 @@ import "./styles/knowledge.css";
 import "./styles/markdown.css";
 import "./styles/markdown-embeds.css";
 import "katex/dist/katex.min.css";
+
+installFocusModality();
 
 // Apply the persisted theme before the first paint to avoid a flash.
 applyThemeToDocument(loadTheme(localStorage));

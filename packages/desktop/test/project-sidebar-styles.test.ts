@@ -151,11 +151,9 @@ describe("Project sidebar motion", () => {
 		);
 		expect(rule(".file-search-field input:focus-visible").outlineOffset).toBe("2px");
 		expect(rule(".composer textarea:focus-visible, .composer .composer-editable-input:focus-visible").outline).toBe(
-			"2px solid var(--focus)",
+			"none",
 		);
-		expect(
-			rule(".composer textarea:focus-visible, .composer .composer-editable-input:focus-visible").outlineOffset,
-		).toBe("2px");
+		expect(css).toContain(':root[data-focus-modality="keyboard"] .composer textarea:focus-visible');
 		expect(rule(".file-search-field").border).toBe("1px solid var(--control-border)");
 		expect(rule(".browser-address-field").border).toBe("1px solid var(--control-border)");
 		expect(rule(".plugins-search").border).toBe("1px solid var(--control-border)");
