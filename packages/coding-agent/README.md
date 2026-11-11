@@ -32,29 +32,35 @@ Metis runs in four modes: interactive, print or JSON, RPC for process integratio
 
 ## Quick Start
 
-```bash
-npm install -g --ignore-scripts @metis/coding-agent
-```
+`@metis/coding-agent` is not published on npm. Run Metis from a checkout of this repository. Node.js 22.19 or newer is required. The repository address is https://gitee.com/sun124578963_0/metis.git.
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Metis does not require install scripts for normal npm installs.
-
-Installer alternative:
+From the repository root:
 
 ```bash
-curl -fsSL https://gitee.com/sun124578963_0/metis/install.sh | sh
+npm ci --ignore-scripts
+./metis-test.sh
 ```
+
+`npm ci --ignore-scripts` installs the locked dependencies and skips package lifecycle scripts. `./metis-test.sh` starts the interactive CLI from source. Invoke it by path when the project you want to work on is not the Metis checkout; Metis keeps that working directory:
+
+```bash
+cd /path/to/project
+/path/to/metis/metis-test.sh
+```
+
+Examples below spell the CLI as `metis`. From a source checkout, pass the same arguments to `./metis-test.sh`.
 
 Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-metis
+./metis-test.sh
 ```
 
 Or store an API key interactively:
 
 ```bash
-metis
+./metis-test.sh
 /login  # Then select an API-key provider
 ```
 

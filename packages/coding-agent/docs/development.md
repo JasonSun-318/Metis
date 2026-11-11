@@ -1,14 +1,13 @@
 # Development
 
-See [AGENTS.md](https://github.com/metis/metis/blob/main/AGENTS.md) for additional guidelines.
+See [AGENTS.md](../../../AGENTS.md) for additional guidelines.
 
 ## Setup
 
+Requires Node.js 22.19 or newer. Clone https://gitee.com/sun124578963_0/metis.git, then from the repository root:
+
 ```bash
-git clone https://github.com/metis/metis
-cd metis
-npm install
-npm run build
+npm ci --ignore-scripts
 ```
 
 Run from source:
@@ -17,7 +16,7 @@ Run from source:
 /path/to/metis/metis-test.sh
 ```
 
-The script can be run from any directory. Metis keeps the caller's current working directory.
+The script can be run from any directory. Metis keeps the caller's current working directory. It starts the CLI with `tsx`, so a package build is not required.
 
 ## Forking / Rebranding
 

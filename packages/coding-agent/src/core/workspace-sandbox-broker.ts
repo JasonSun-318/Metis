@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, write
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, win32 } from "node:path";
 import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
 	getDefaultWritePaths,
@@ -21,10 +22,6 @@ import {
 	type SandboxNetworkEndpoint,
 	type SandboxResponse,
 } from "./workspace-sandbox-protocol.ts";
-
-function send(response: SandboxResponse): boolean {
-	return process.stdout.write(`${JSON.stringify(response)}\n`);
-}
 
 function runtimeReadPaths(): string[] {
 	const systemPaths =
@@ -293,7 +290,21 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 	return `${fallback}: ${error.message.split(/\r?\n/, 1)[0]}`.slice(0, 512);
 }
 
-export async function runWorkspaceSandboxBroker(): Promise<void> {
+function commandFailureMessage(error: unknown): string {
+	if (error instanceof Error) return sanitizedMessage(error, "Sandbox command failed");
+	if (typeof error === "string" && error.length > 0) {
+		return sanitizedMessage(new Error(error), "Sandbox command failed");
+	}
+	return "Sandbox command failed";
+}
+
+export async function runWorkspaceSandboxBroker(io?: {
+	readonly input?: Readable;
+	readonly output?: Writable;
+}): Promise<void> {
+	const input = io?.input ?? process.stdin;
+	const output = io?.output ?? process.stdout;
+	const send = (response: SandboxResponse): boolean => output.write(`${JSON.stringify(response)}\n`);
 	let workspaceRoots: readonly string[] | undefined;
 	let windowsCommandDir: string | undefined;
 	let explicitWriteRoots: readonly string[] = [];
@@ -463,12 +474,13 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				);
 				const exitCode = await waitForChildProcess(child);
 				send({ type: "result", id: request.id, exitCode });
-			} catch {
+			} catch (error) {
+				// Send before releasing the slot. The command id keeps this from closing the broker.
 				send({
 					type: "error",
 					id: request.id,
 					code: "SANDBOX_CLOSED",
-					message: "Sandbox command failed",
+					message: commandFailureMessage(error),
 				});
 			} finally {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -483,7 +495,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 		})();
 	};
 
-	const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
+	const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
 	lines.on("line", (line) => {
 		void (async () => {
 			let request: ReturnType<typeof parseSandboxRequest>;

@@ -1,5 +1,6 @@
 import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
 import type { CompactionSummaryMessage } from "../../../core/messages.ts";
+import { sanitizeTerminalText } from "../../../utils/ansi.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
 
@@ -40,7 +41,7 @@ export class CompactionSummaryMessageComponent extends Box {
 		if (this.expanded) {
 			const header = `**Compacted from ${tokenStr} tokens**\n\n`;
 			this.addChild(
-				new Markdown(header + this.message.summary, 0, 0, this.markdownTheme, {
+				new Markdown(header + sanitizeTerminalText(this.message.summary), 0, 0, this.markdownTheme, {
 					color: (text: string) => theme.fg("customMessageText", text),
 				}),
 			);

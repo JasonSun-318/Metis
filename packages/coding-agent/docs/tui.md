@@ -4,7 +4,7 @@
 
 Extensions and custom tools can render custom TUI components for interactive user interfaces. This page covers the component system and available building blocks.
 
-**Source:** [`@metis/tui`](https://github.com/metis/metis/tree/main/packages/tui)
+**Source:** [`@metis/tui`](../../tui)
 
 ## Component Interface
 

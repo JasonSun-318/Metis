@@ -1,6 +1,32 @@
 #!/usr/bin/env bash
 set -e
 
+# fd and rg are invoked by unit tests. Linux also invokes the trash CLI;
+# macOS moves files with osascript and does not require it. Fail before npm so
+# a missing binary is an install hint instead of a later command-not-found
+# failure. Debian/Ubuntu ship fd as fdfind; tests look up the fd command by name.
+missing=""
+if ! command -v fd >/dev/null 2>&1; then
+    missing="fd"
+fi
+if ! command -v rg >/dev/null 2>&1; then
+    missing="${missing:+$missing, }rg"
+fi
+if [ "$(/usr/bin/uname -s 2>/dev/null || true)" = "Linux" ] && ! command -v trash >/dev/null 2>&1; then
+    missing="${missing:+$missing, }trash"
+fi
+if [ -n "$missing" ]; then
+    echo "Missing test tools: ${missing}." >&2
+    if [ "$(/usr/bin/uname -s 2>/dev/null || true)" = "Linux" ]; then
+        echo "Unit tests need fd, rg (ripgrep), and trash on PATH." >&2
+    else
+        echo "Unit tests need fd and rg (ripgrep) on PATH." >&2
+    fi
+    echo 'Debian/Ubuntu: sudo apt-get install -y fd-find ripgrep trash-cli && sudo ln -sfn "$(command -v fdfind)" /usr/local/bin/fd' >&2
+    echo 'macOS: brew install fd ripgrep' >&2
+    exit 1
+fi
+
 testAgentDir="$(mktemp -d "${TMPDIR:-/tmp}/metis-tests.XXXXXXXX")"
 export METIS_CODING_AGENT_DIR="$testAgentDir"
 unset METIS_CODING_AGENT_SESSION_DIR

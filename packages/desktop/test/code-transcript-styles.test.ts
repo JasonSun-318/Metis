@@ -35,7 +35,7 @@ describe("Code transcript visual contract", () => {
 			"var(--code-prose-font)",
 		);
 		expect(rule(".transcript-code .code-command-output").maxHeight).toBe("310px");
-		expect(rule(".transcript-code .code-execution-card").borderRadius).toBe("8px");
+		expect(rule(".transcript-code .code-execution-card").borderRadius).toBe("var(--radius-control)");
 	});
 
 	it("uses neutral shared surfaces and separated Code Markdown table cells", () => {

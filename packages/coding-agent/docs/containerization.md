@@ -46,7 +46,7 @@ Requirements: Node.js >= 23.6.0 for `@metis/gondolin`, plus QEMU (requires insta
 
 Run the whole `metis` process in Docker when you want the simplest local container boundary.
 
-`Dockerfile.metis`:
+Save `Dockerfile.metis` in the Metis repository root. `@metis/coding-agent` is not published on npm, so the image installs that checkout:
 
 ```dockerfile
 FROM node:24-bookworm-slim
@@ -54,13 +54,15 @@ FROM node:24-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash ca-certificates git ripgrep \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g --ignore-scripts @metis/coding-agent
+WORKDIR /opt/metis
+COPY . .
+RUN npm ci --ignore-scripts
 
 WORKDIR /workspace
-ENTRYPOINT ["metis"]
+ENTRYPOINT ["/opt/metis/metis-test.sh"]
 ```
 
-Build and run:
+Build from the repository root and run:
 
 ```bash
 docker build -t metis-sandbox -f Dockerfile.metis .
