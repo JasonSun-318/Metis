@@ -156,8 +156,8 @@ function sessionFailure(
 	return { operation, reason, retryable: true, cause };
 }
 
-export function sessionProjectKey(mode: AgentMode, cwd: string): string {
-	return JSON.stringify([mode, cwd]);
+export function sessionProjectKey(cwd: string): string {
+	return cwd;
 }
 
 export function shouldResnapshotAfterReady(before: AppStoreSnapshot, next: SupervisorView): boolean {
@@ -613,9 +613,9 @@ export class SessionWorkspaceWorkflow {
 		}
 	}
 
-	createSessionInProject(mode: AgentMode, cwd: string): Promise<void> {
+	createSessionInProject(cwd: string): Promise<void> {
 		const lifecycle = this.lifecycleGeneration;
-		const key = sessionProjectKey(mode, cwd);
+		const key = sessionProjectKey(cwd);
 		const existing = this.projectCreateRequests.get(key);
 		if (existing?.promise) return existing.promise;
 		this.clearDraftRequests();
@@ -727,7 +727,7 @@ export class SessionWorkspaceWorkflow {
 			this.commit({ failure: failure("delete-project", cause) });
 			return Promise.reject(cause);
 		}
-		const key = sessionProjectKey(target.mode, target.cwd);
+		const key = sessionProjectKey(target.cwd);
 		const existing = this.projectDeleteRequests.get(key);
 		if (existing?.revision === preview.revision && existing.promise) return existing.promise;
 		const requestId = existing?.revision === preview.revision ? existing.requestId : this.requestId();

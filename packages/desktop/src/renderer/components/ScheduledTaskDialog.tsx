@@ -43,7 +43,6 @@ function projectSessions(sessions: readonly SessionSummary[]): SessionSummary[] 
 	const byCwd = new Map<string, SessionSummary>();
 	for (const session of sessions) {
 		if (
-			session.mode !== "chat" ||
 			session.archived ||
 			session.scheduled ||
 			session.cwdOrigin !== "user-selected" ||

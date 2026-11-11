@@ -82,7 +82,7 @@ describe("background completion tracker", () => {
 		expect(setBadgeCount).toHaveBeenLastCalledWith(1);
 		tracker.forgetSession("session-1");
 		expect(setBadgeCount).toHaveBeenCalledTimes(3);
-		tracker.forgetProject("code", "/tmp/other");
+		tracker.forgetProject("/tmp/other");
 		expect(setBadgeCount).toHaveBeenLastCalledWith(0);
 	});
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ScheduleTaskView } from "@metis/app-protocol";
+import type { ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import { act, type ReactNode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,23 @@ const TASK: ScheduleTaskView = {
 	nextRunAt: "2026-08-01T00:00:00Z",
 	unreadCount: 0,
 };
+
+function sessionSummary(overrides: Partial<SessionSummary>): SessionSummary {
+	return {
+		sessionId: "session",
+		mode: "chat",
+		cwdOrigin: "user-selected",
+		cwd: "/work",
+		createdAt: 1,
+		updatedAt: 1,
+		state: "idle",
+		archived: false,
+		unread: false,
+		useMemory: true,
+		contributeMemory: true,
+		...overrides,
+	} as SessionSummary;
+}
 
 function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
 	Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set?.call(element, value);
@@ -82,6 +99,25 @@ afterEach(() => {
 });
 
 describe("ScheduledTaskDialog", () => {
+	it("offers projects created in either work mode", async () => {
+		const { container } = await mount(
+			<ScheduledTaskDialog
+				api={{} as MetisDesktopApi}
+				models={[]}
+				sessions={[
+					sessionSummary({ sessionId: "chat-1", mode: "chat", cwd: "/work/chat" }),
+					sessionSummary({ sessionId: "code-1", mode: "code", cwd: "/work/code" }),
+				]}
+				onClose={vi.fn()}
+				onSaved={vi.fn()}
+			/>,
+		);
+		await selectOption(container, "Work in", "chat — /work/chat");
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Work in"]')!.click());
+		const labels = [...container.querySelectorAll('[role="option"]')].map((option) => option.textContent);
+		expect(labels).toContain("code — /work/code");
+	});
+
 	it("focuses the name field and restores the create button after closing", async () => {
 		function Host() {
 			const [open, setOpen] = useState(false);

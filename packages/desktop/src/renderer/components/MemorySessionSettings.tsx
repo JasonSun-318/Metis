@@ -2,7 +2,7 @@ import type { SessionSummary } from "@metis/app-protocol";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "../icons.tsx";
+import { CaretRight, ChatCircle, MagnifyingGlass } from "../icons.tsx";
 import { iconSize } from "../ui/icon-size.ts";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 
@@ -189,12 +189,11 @@ export function MemorySessionSettings({
 						<ul className="memory-session-list">
 							{filtered.slice(0, visibleCount).map((session) => {
 								const name = nameOf(session);
-								const Icon = session.mode === "code" ? Code : ChatCircle;
 								return (
 									<li className="memory-session-row" key={session.sessionId}>
 										<header className="memory-session-heading">
 											<span className="memory-session-icon">
-												<Icon size={iconSize.xl} aria-hidden="true" />
+												<ChatCircle size={iconSize.xl} aria-hidden="true" />
 											</span>
 											<div className="memory-session-identity">
 												<strong>{name}</strong>

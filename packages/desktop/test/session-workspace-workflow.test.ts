@@ -592,7 +592,7 @@ describe("SessionWorkspaceWorkflow", () => {
 		const { api, workflow } = harness();
 		const pending = deferred<{ session: SessionSummary }>();
 		vi.mocked(api.createSession).mockReturnValue(pending.promise);
-		const creating = workflow.createSessionInProject("code", "/work/old-lifecycle");
+		const creating = workflow.createSessionInProject("/work/old-lifecycle");
 		await vi.waitFor(() => expect(api.createSession).toHaveBeenCalledOnce());
 
 		workflow.dispose();
@@ -737,8 +737,8 @@ describe("SessionWorkspaceWorkflow", () => {
 		vi.mocked(api.createSession).mockReturnValue(pending.promise);
 		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
 
-		const first = workflow.createSessionInProject("code", "/work/project");
-		const second = workflow.createSessionInProject("code", "/work/project");
+		const first = workflow.createSessionInProject("/work/project");
+		const second = workflow.createSessionInProject("/work/project");
 		pending.resolve({ session: created });
 		await Promise.all([first, second]);
 
@@ -753,9 +753,9 @@ describe("SessionWorkspaceWorkflow", () => {
 			.mockResolvedValue({ session: created });
 		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
 
-		await expect(workflow.createSessionInProject("code", "/work/retry")).rejects.toThrow("create rejected");
+		await expect(workflow.createSessionInProject("/work/retry")).rejects.toThrow("create rejected");
 		const rejectedRequestId = vi.mocked(api.createSession).mock.calls[0]![0].requestId;
-		await workflow.createSessionInProject("code", "/work/retry");
+		await workflow.createSessionInProject("/work/retry");
 
 		expect(vi.mocked(api.createSession).mock.calls[1]![0].requestId).not.toBe(rejectedRequestId);
 	});
@@ -768,9 +768,9 @@ describe("SessionWorkspaceWorkflow", () => {
 			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.OPERATION_FAILED, "open rejected"))
 			.mockResolvedValue(snapshot(created.sessionId, "code"));
 
-		await expect(workflow.createSessionInProject("code", "/work/open-retry")).rejects.toThrow("open rejected");
+		await expect(workflow.createSessionInProject("/work/open-retry")).rejects.toThrow("open rejected");
 		const completedCreateRequestId = vi.mocked(api.createSession).mock.calls[0]![0].requestId;
-		await workflow.createSessionInProject("code", "/work/open-retry");
+		await workflow.createSessionInProject("/work/open-retry");
 
 		expect(vi.mocked(api.createSession).mock.calls[1]![0].requestId).toBe(completedCreateRequestId);
 	});

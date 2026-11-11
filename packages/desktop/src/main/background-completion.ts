@@ -54,9 +54,9 @@ export function createBackgroundCompletionTracker(options: {
 			else userInterrupts.delete(sessionId);
 		},
 		forgetSession,
-		forgetProject(mode: SessionSummary["mode"], cwd: string): void {
+		forgetProject(cwd: string): void {
 			for (const [sessionId, session] of sessions) {
-				if (session.mode === mode && session.cwd === cwd) forgetSession(sessionId);
+				if (session.cwd === cwd) forgetSession(sessionId);
 			}
 		},
 		view(sessionId: string): void {

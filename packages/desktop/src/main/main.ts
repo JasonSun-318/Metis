@@ -274,7 +274,7 @@ async function launch(): Promise<void> {
 		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),
 		onSessionUpdated: (session) => completionTracker.update(session),
 		onSessionDeleted: (sessionId) => completionTracker.forgetSession(sessionId),
-		onProjectDeleted: (mode, cwd) => completionTracker.forgetProject(mode, cwd),
+		onProjectDeleted: (_mode, cwd) => completionTracker.forgetProject(cwd),
 		onUserInterruptPending: (sessionId, pending) => completionTracker.setUserInterruptPending(sessionId, pending),
 		onSessionOpened: (sessionId) => {
 			suppressNextFocusAcknowledgement = false;

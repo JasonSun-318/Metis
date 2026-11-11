@@ -763,12 +763,12 @@ export function App({ api, store }: AppProps) {
 		void restoreWindowsNavigation(target).catch(reportError);
 	}, [currentNavigationLocation, navigationBusy, navigationForward, reportError, restoreWindowsNavigation]);
 	const createEmptySessionInProject = useCallback(
-		async (projectMode: AgentMode, cwd: string): Promise<void> => {
+		async (cwd: string): Promise<void> => {
 			rememberCurrentNavigation();
 			cancelHomeTransition();
 			closeCodeProjectSetup();
 			setDestination("tasks");
-			await workspaceWorkflow.createSessionInProject(projectMode, cwd);
+			await workspaceWorkflow.createSessionInProject(cwd);
 			const created = store.getSnapshot().activeSessionId;
 			if (created) requestChatFocus(created);
 		},
@@ -783,7 +783,7 @@ export function App({ api, store }: AppProps) {
 	);
 
 	const createEmptyProjectSession = useCallback(
-		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
+		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.cwd),
 		[createEmptySessionInProject],
 	);
 	const deleteProject = useCallback(
@@ -984,7 +984,7 @@ export function App({ api, store }: AppProps) {
 			const session = store.getSnapshot().sessionsById.get(sessionId);
 			if (!session?.cwd || session.cwdOrigin === "managed") return null;
 			const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
-			const alias = projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
+			const alias = projectPreferences.get(sessionProjectKey(session.cwd))?.alias;
 			return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
 		},
 		[projectPreferences, store],
@@ -1108,7 +1108,7 @@ export function App({ api, store }: AppProps) {
 				: (visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null);
 		if (!cwd) return "Metis";
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
-		return projectPreferences.get(sessionProjectKey("chat", cwd))?.alias ?? name;
+		return projectPreferences.get(sessionProjectKey(cwd))?.alias ?? name;
 	})();
 
 	useEffect(() => {
@@ -1670,10 +1670,7 @@ export function App({ api, store }: AppProps) {
 		[api, activeAgentConversation, openAgentConversation, removeAgentConversations, renameAgentConversation],
 	);
 	const sidebarProjectBusy = useCallback(
-		(group: ProjectSessionGroup) =>
-			(["chat", "code"] as const).some((value) =>
-				workspaceState.busyProjectKeys.has(sessionProjectKey(value, group.cwd)),
-			),
+		(group: ProjectSessionGroup) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.cwd)),
 		[workspaceState.busyProjectKeys],
 	);
 	const sidebarWorkspace = useMemo(
@@ -2051,7 +2048,7 @@ export function App({ api, store }: AppProps) {
 								onError={reportError}
 								onLiveSessionsChange={handleLiveSessionsChange}
 								onNewSession={(target) => {
-									if (target) void createEmptySessionInProject(target.mode, target.cwd);
+									if (target) void createEmptySessionInProject(target.cwd);
 									else startNewTask();
 								}}
 								planPreviewRequest={planPreviewRequest}
