@@ -564,7 +564,7 @@ export class ClientBroker {
 				const outcome = await this.projectCall("project/delete", params);
 				if (!outcome.ok) return outcome;
 				const deletedSessionIds = [...this.subscribedSessionScopes]
-					.filter(([, scope]) => scope.mode === params.mode && scope.cwd === params.cwd)
+					.filter(([, scope]) => scope.cwd === params.cwd)
 					.map(([sessionId]) => sessionId);
 				this.forgetSessions(deletedSessionIds);
 				return outcome;
@@ -1147,7 +1147,9 @@ export class ClientBroker {
 			mode: session.mode,
 			...(session.cwd ? { cwd: session.cwd } : {}),
 		});
-		if (session.mode === "code" && session.cwd) this.workspaceFiles.authorize(session.sessionId, session.cwd);
+		// Conversations are no longer split into chat/code session types: the work mode is a
+		// UI concern, so any session with a working directory may use workspace tools.
+		if (session.cwd) this.workspaceFiles.authorize(session.sessionId, session.cwd);
 		else this.workspaceFiles.revoke(sessionId);
 		for (const event of this.browserManager.replayEvents(sessionId)) this.sendBrowserEvent(event);
 		return subscribed.snapshot;

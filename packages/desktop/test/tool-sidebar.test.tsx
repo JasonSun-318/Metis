@@ -220,7 +220,7 @@ describe("per-session tools sidebar", () => {
 		expect(document.querySelector(".tool-add-menu")).toBeNull();
 	});
 
-	it("uses the owning session's mode for Files and Review", async () => {
+	it("offers Files and Review for code work regardless of the session creation mode", async () => {
 		const view = mount();
 		await view.render({
 			sessionsById: new Map([
@@ -230,14 +230,14 @@ describe("per-session tools sidebar", () => {
 		});
 
 		const menu = () => view.container.querySelector(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu")!;
+		// Switching the work mode to Code keeps historical sessions on their creation
+		// mode, but code tools still apply to the session being viewed.
 		const chatTools = [...menu().querySelectorAll("button")].map((tool) => tool.textContent?.trim());
 		expect(chatTools).toContain("Terminal");
-		expect(chatTools).not.toContain("Files");
-		expect(chatTools).not.toContain("Review");
-		expect(view.api.listWorkspaceDirectory).not.toHaveBeenCalled();
-		expect(view.api.getWorkspaceReview).not.toHaveBeenCalled();
+		expect(chatTools).toContain("Files");
+		expect(chatTools).toContain("Review");
 
-		await view.render({ chatSessionId: OTHER, chatCwd: "/work/two", mode: "chat" });
+		await view.render({ chatSessionId: OTHER, chatCwd: "/work/two", mode: "code" });
 		await act(async () => button(menu(), "Files").click());
 		expect(view.api.listWorkspaceDirectory).toHaveBeenCalledExactlyOnceWith({ sessionId: OTHER, relativePath: "" });
 		await act(async () => button(view.toolsSlot, "New tab").click());
@@ -246,6 +246,22 @@ describe("per-session tools sidebar", () => {
 			sessionId: OTHER,
 			revision: "working-tree",
 		});
+	});
+
+	it("hides code tools for chat work even when the session history says code", async () => {
+		const view = mount();
+		await view.render({
+			chatCwd: "/work/one",
+			chatSessionId: SESSION,
+			mode: "chat",
+			sessionsById: new Map([[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "code" }]]),
+		});
+
+		const menu = () => view.container.querySelector(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu")!;
+		const tools = [...menu().querySelectorAll("button")].map((tool) => tool.textContent?.trim());
+		expect(tools).toContain("Terminal");
+		expect(tools).not.toContain("Files");
+		expect(tools).not.toContain("Review");
 	});
 
 	it("closes the sidebar after the last tool tab is closed", async () => {

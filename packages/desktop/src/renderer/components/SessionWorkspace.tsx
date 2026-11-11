@@ -1300,9 +1300,13 @@ export function SessionWorkspaceView({
 	const codeWorkspaceFor = useCallback(
 		(sessionId: string) => {
 			const session = sessionsById.get(sessionId);
-			return session?.mode === "code" && session.cwd ? { sessionId, cwd: session.cwd } : null;
+			const cwd = session?.cwd ?? (sessionId === chatSessionId ? chatCwd : null);
+			if (!cwd) return null;
+			// Chat and Code are one conversation type now: the work mode only decides
+			// which UI and sidebar tools are shown, never whether tools exist.
+			return mode === "code" ? { sessionId, cwd } : null;
 		},
-		[sessionsById],
+		[chatCwd, chatSessionId, mode, sessionsById],
 	);
 
 	const addFiles = ({ sessionId: ownerSessionId, cwd }: { sessionId: string; cwd: string }) => {

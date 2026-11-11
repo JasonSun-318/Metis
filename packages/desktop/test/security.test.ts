@@ -1267,11 +1267,12 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
-	it("authorizes workspace files only from the subscribed Code session", async () => {
+	it("authorizes workspace files for any subscribed session with a working directory", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { setView, supervisor } = supervisorHarness();
 		const codeSessionId = "10000000-0000-4000-8000-000000000091";
 		const chatSessionId = "10000000-0000-4000-8000-000000000092";
+		const noCwdSessionId = "10000000-0000-4000-8000-000000000093";
 		supervisor.request.mockImplementation(async (request) => ({
 			jsonrpc: "2.0",
 			id: request.id,
@@ -1282,7 +1283,9 @@ describe("desktop trust boundaries", () => {
 								session:
 									request.params.sessionId === codeSessionId
 										? { sessionId: codeSessionId, mode: "code", cwd: "/work/project" }
-										: { sessionId: chatSessionId, mode: "chat", cwd: "/work/chat" },
+										: request.params.sessionId === chatSessionId
+											? { sessionId: chatSessionId, mode: "chat", cwd: "/work/chat" }
+											: { sessionId: noCwdSessionId, mode: "chat" },
 							},
 						}
 					: {},
@@ -1437,7 +1440,9 @@ describe("desktop trust boundaries", () => {
 		expect(workspaceFiles.revoke).toHaveBeenCalledWith(codeSessionId);
 
 		await openSession(event, { sessionId: chatSessionId });
-		expect(workspaceFiles.revoke).toHaveBeenCalledWith(chatSessionId);
+		expect(workspaceFiles.authorize).toHaveBeenCalledWith(chatSessionId, "/work/chat");
+		await openSession(event, { sessionId: noCwdSessionId });
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(noCwdSessionId);
 		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!(event, {
 			sessionId: chatSessionId,
 			requestId: "11111111-1111-4111-8111-111111111392",
