@@ -4,6 +4,7 @@ import { canonicalizeActionPath, isPathInside } from "../utils/paths.ts";
 import type { PermissionAction, PermissionAuthorization } from "./permissions/approval.ts";
 import { classifyAction } from "./permissions/classify.ts";
 import type { BashOperations } from "./tools/bash.ts";
+import { isBlockedUnattendedHost, UNATTENDED_BLOCKED_FETCH_REASON } from "./unattended-fetch-guard.ts";
 
 export const UNATTENDED_TOOL_NAMES = Object.freeze([
 	"read",
@@ -43,6 +44,12 @@ export function createUnattendedExecutionProfile(input: {
 function isAllowed(profile: UnattendedExecutionProfile, action: PermissionAction): boolean {
 	if (action.provenance !== "builtin") return false;
 	if (action.toolName === "bash") return action.risks.length === 1 && action.risks[0] === "shell";
+	if (action.toolName === "web_fetch") {
+		return (
+			action.risks.every((risk) => risk === "network") &&
+			action.networkTargets.every((target) => !isBlockedUnattendedHost(target.host))
+		);
+	}
 	if (HOST_NETWORK_TOOLS.has(action.toolName)) return action.risks.every((risk) => risk === "network");
 	if (!STRUCTURED_TOOLS.has(action.toolName)) return false;
 	if (action.risks.some((risk) => risk !== "ordinary-read" && risk !== "workspace-write")) return false;
@@ -59,21 +66,27 @@ export function authorizeUnattendedAction(input: {
 	readonly cwd: string;
 }): PermissionAuthorization {
 	const executionTarget = input.action.toolName === "bash" ? "sandbox" : "host";
-	return isAllowed(input.profile, input.action)
-		? {
-				decision: "allow",
-				source: "automatic",
-				reason: "Allowed by unattended workspace-write policy",
-				action: input.action,
-				executionTarget,
-			}
-		: {
-				decision: "deny",
-				source: "fallback",
-				reason: "Denied by unattended workspace-write policy",
-				action: input.action,
-				executionTarget,
-			};
+	if (isAllowed(input.profile, input.action)) {
+		return {
+			decision: "allow",
+			source: "automatic",
+			reason: "Allowed by unattended workspace-write policy",
+			action: input.action,
+			executionTarget,
+		};
+	}
+	const blockedFetch =
+		input.action.toolName === "web_fetch" &&
+		input.action.provenance === "builtin" &&
+		input.action.risks.every((risk) => risk === "network") &&
+		input.action.networkTargets.some((target) => isBlockedUnattendedHost(target.host));
+	return {
+		decision: "deny",
+		source: "fallback",
+		reason: blockedFetch ? UNATTENDED_BLOCKED_FETCH_REASON : "Denied by unattended workspace-write policy",
+		action: input.action,
+		executionTarget,
+	};
 }
 
 export function revalidateUnattendedAction(input: {

@@ -1,11 +1,33 @@
+import { lookup } from "node:dns/promises";
 import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import { NodeHtmlMarkdown } from "node-html-markdown";
 import { type Static, Type } from "typebox";
+import {
+	Agent,
+	type Dispatcher,
+	ProxyAgent,
+	type RequestInit as UndiciRequestInit,
+	fetch as undiciFetch,
+} from "undici";
 import { keyText } from "../../presentation/keybinding-hints.ts";
 import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import {
+	createUndiciClient,
+	createUndiciOriginDispatcher,
+	requestProxyUrl,
+	withUndiciErrorListener,
+} from "../http-dispatcher.ts";
 import { exactNetworkEndpoint, permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
+import {
+	createUnattendedPinnedLookup,
+	isBlockedUnattendedHost,
+	normalizeUnattendedHost,
+	type ResolvedAddress,
+	UNATTENDED_BLOCKED_FETCH_REASON,
+	unattendedLiteralAddress,
+} from "../unattended-fetch-guard.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -14,6 +36,53 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 10;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const REQUEST_HEADERS = { accept: "text/html, text/markdown;q=0.9, text/plain;q=0.8" };
+const UNATTENDED_UNRESOLVED_HOST_REASON = "Unattended web_fetch could not resolve the host";
+
+export interface WebFetchToolOptions {
+	/** Reject loopback, unspecified, and link-local targets, including DNS results and redirects. */
+	unattended?: boolean;
+	/** Request implementation for unattended fetches. Defaults to undici so the pinned dispatcher matches the client. */
+	fetch?: (url: URL, init: RequestInit & { dispatcher?: object }) => Promise<Response>;
+}
+
+type WebFetchRequest = (url: URL, init: UndiciRequestInit) => Promise<Response>;
+
+interface PinnedConnection {
+	readonly dispatcher: Dispatcher;
+	close(): Promise<void>;
+}
+
+/**
+ * undici fetch removes Host before dispatch. Put the original host back and
+ * point the proxy at an address we already accepted, so the proxy is not asked
+ * to resolve the name again.
+ */
+function pinProxyDispatch(proxy: ProxyAgent, pinnedOrigin: string, hostHeader: string): ProxyAgent {
+	const dispatch = proxy.dispatch.bind(proxy);
+	proxy.dispatch = ((options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
+		dispatch(
+			{ ...options, origin: pinnedOrigin, headers: headersWithHost(options.headers, hostHeader) },
+			handler,
+		)) as typeof proxy.dispatch;
+	return proxy;
+}
+
+function headersWithHost(headers: Dispatcher.DispatchOptions["headers"], host: string): Record<string, string> {
+	const next: Record<string, string> = {};
+	if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+		for (const [key, value] of Object.entries(headers)) {
+			if (key.toLowerCase() === "host" || value == null) continue;
+			next[key] = Array.isArray(value) ? value.join(", ") : String(value);
+		}
+	}
+	next.host = host;
+	return next;
+}
+
+function pinnedOrigin(url: URL, address: ResolvedAddress): string {
+	const host = address.family === 6 ? `[${address.address}]` : address.address;
+	return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
+}
 
 const webFetchSchema = Type.Object({
 	url: Type.String({ description: "HTTP(S) URL to fetch", minLength: 1, maxLength: 8192 }),
@@ -46,26 +115,118 @@ function networkTarget(url: URL): string {
 	return `${url.hostname}:${url.port || (url.protocol === "https:" ? "443" : "80")}`;
 }
 
-async function fetchWithRedirects(url: URL, signal: AbortSignal): Promise<{ response: Response; url: URL }> {
+async function resolveUnattendedRecords(hostname: string): Promise<readonly ResolvedAddress[]> {
+	if (isBlockedUnattendedHost(hostname)) throw new Error(UNATTENDED_BLOCKED_FETCH_REASON);
+	const literal = unattendedLiteralAddress(hostname);
+	if (literal) return [literal];
+	const name = normalizeUnattendedHost(hostname);
+	if (!name) throw new Error(UNATTENDED_UNRESOLVED_HOST_REASON);
+	let records: readonly { address: string; family: number }[];
+	try {
+		records = await lookup(name, { all: true, verbatim: true });
+	} catch {
+		throw new Error(UNATTENDED_UNRESOLVED_HOST_REASON);
+	}
+	const resolved: ResolvedAddress[] = [];
+	for (const record of records) {
+		if (isBlockedUnattendedHost(record.address)) throw new Error(UNATTENDED_BLOCKED_FETCH_REASON);
+		const address = unattendedLiteralAddress(record.address);
+		if (!address) throw new Error(UNATTENDED_UNRESOLVED_HOST_REASON);
+		resolved.push(address);
+	}
+	if (resolved.length === 0) throw new Error(UNATTENDED_UNRESOLVED_HOST_REASON);
+	return resolved;
+}
+
+function openDispatcher(dispatcher: Dispatcher): PinnedConnection {
+	return {
+		dispatcher: withUndiciErrorListener(dispatcher),
+		async close() {
+			try {
+				await dispatcher.close();
+			} catch {
+				// Shutdown follows the fetch outcome and must not replace it.
+			}
+		},
+	};
+}
+
+async function openPinnedConnection(url: URL): Promise<PinnedConnection> {
+	const records = await resolveUnattendedRecords(url.hostname);
+	const proxy = requestProxyUrl(url);
+	const address = records[0];
+	if (proxy && address) {
+		const servername = normalizeUnattendedHost(url.hostname);
+		const proxyAgent = withUndiciErrorListener(
+			new ProxyAgent({
+				uri: proxy,
+				allowH2: false,
+				clientFactory: createUndiciClient,
+				factory: createUndiciOriginDispatcher,
+				// Certificate checks stay on. servername is the name the caller asked for.
+				...(url.protocol === "https:" ? { requestTls: { servername } } : {}),
+			}),
+		);
+		return openDispatcher(pinProxyDispatch(proxyAgent, pinnedOrigin(url, address), url.host));
+	}
+	return openDispatcher(
+		new Agent({
+			allowH2: false,
+			connect: { lookup: createUnattendedPinnedLookup(url.hostname, records) },
+			factory: createUndiciOriginDispatcher,
+		}),
+	);
+}
+
+async function fetchWithRedirects(
+	url: URL,
+	signal: AbortSignal,
+	request: WebFetchRequest | undefined,
+): Promise<{ response: Response; url: URL; release: () => Promise<void> }> {
+	const unattended = request !== undefined;
 	let currentUrl = url;
 	for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-		const response = await fetch(currentUrl, {
-			headers: REQUEST_HEADERS,
-			redirect: "manual",
-			signal,
-		});
-		if (!REDIRECT_STATUSES.has(response.status)) return { response, url: currentUrl };
+		const connection = unattended ? await openPinnedConnection(currentUrl) : undefined;
+		let released = false;
+		const release = async () => {
+			if (released) return;
+			released = true;
+			await connection?.close();
+		};
+		try {
+			const response = request
+				? await request(currentUrl, {
+						headers: REQUEST_HEADERS,
+						redirect: "manual",
+						signal,
+						dispatcher: connection?.dispatcher,
+					})
+				: await fetch(currentUrl, {
+						headers: REQUEST_HEADERS,
+						redirect: "manual",
+						signal,
+					});
+			if (!REDIRECT_STATUSES.has(response.status)) return { response, url: currentUrl, release };
 
-		const location = response.headers.get("location");
-		await response.body?.cancel();
-		if (!location) throw new Error(`Redirect response from ${currentUrl.href} is missing Location`);
-		if (redirects === MAX_REDIRECTS) throw new Error(`Request exceeded ${MAX_REDIRECTS} redirects`);
+			const location = response.headers.get("location");
+			await response.body?.cancel();
+			await release();
+			if (!location) throw new Error(`Redirect response from ${currentUrl.href} is missing Location`);
+			if (redirects === MAX_REDIRECTS) throw new Error(`Request exceeded ${MAX_REDIRECTS} redirects`);
 
-		const nextUrl = parseUrl(location, currentUrl);
-		if (networkTarget(nextUrl) !== networkTarget(url)) {
-			throw new Error(`Redirect target requires separate network permission; call web_fetch with: ${nextUrl.href}`);
+			const nextUrl = parseUrl(location, currentUrl);
+			// A blocked redirect must not be handed back as the next web_fetch URL.
+			if (unattended) await resolveUnattendedRecords(nextUrl.hostname);
+			if (networkTarget(nextUrl) !== networkTarget(url)) {
+				throw new Error(
+					`Redirect target requires separate network permission; call web_fetch with: ${nextUrl.href}`,
+				);
+			}
+			currentUrl = nextUrl;
+		} catch (error) {
+			await release();
+			throw error;
 		}
-		currentUrl = nextUrl;
 	}
 	throw new Error(`Request exceeded ${MAX_REDIRECTS} redirects`);
 }
@@ -138,7 +299,12 @@ function convertToMarkdown(text: string, mediaType: string, baseUrl: URL): strin
 	throw new Error(`Unsupported content type: ${mediaType}`);
 }
 
-export function createWebFetchToolDefinition(): ToolDefinition<typeof webFetchSchema, WebFetchToolDetails> {
+export function createWebFetchToolDefinition(
+	options?: WebFetchToolOptions,
+): ToolDefinition<typeof webFetchSchema, WebFetchToolDetails> {
+	const unattendedRequest: WebFetchRequest | undefined = options?.unattended
+		? ((options.fetch ?? undiciFetch) as WebFetchRequest)
+		: undefined;
 	return {
 		name: "web_fetch",
 		label: "Web fetch",
@@ -152,21 +318,25 @@ export function createWebFetchToolDefinition(): ToolDefinition<typeof webFetchSc
 			const url = parseUrl(params.url);
 			const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 			const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-			const { response, url: finalUrl } = await fetchWithRedirects(url, requestSignal);
-			if (!response.ok) throw new Error(`Request failed with HTTP ${response.status}`);
+			const fetched = await fetchWithRedirects(url, requestSignal, unattendedRequest);
+			try {
+				if (!fetched.response.ok) throw new Error(`Request failed with HTTP ${fetched.response.status}`);
 
-			const { mediaType, charset } = parseContentType(response.headers.get("content-type"));
-			const { data, bytes } = await readBoundedResponseBytes(response, MAX_WEB_RESPONSE_BYTES);
-			const text = decodeResponse(data, mediaType, charset);
-			return {
-				content: [{ type: "text", text: convertToMarkdown(text, mediaType, finalUrl) }],
-				details: {
-					url: finalUrl.href,
-					status: response.status,
-					contentType: mediaType,
-					bytes,
-				},
-			};
+				const { mediaType, charset } = parseContentType(fetched.response.headers.get("content-type"));
+				const { data, bytes } = await readBoundedResponseBytes(fetched.response, MAX_WEB_RESPONSE_BYTES);
+				const text = decodeResponse(data, mediaType, charset);
+				return {
+					content: [{ type: "text", text: convertToMarkdown(text, mediaType, fetched.url) }],
+					details: {
+						url: fetched.url.href,
+						status: fetched.response.status,
+						contentType: mediaType,
+						bytes,
+					},
+				};
+			} finally {
+				await fetched.release();
+			}
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -188,6 +358,8 @@ export function createWebFetchToolDefinition(): ToolDefinition<typeof webFetchSc
 	};
 }
 
-export function createWebFetchTool(): AgentTool<typeof webFetchSchema, WebFetchToolDetails> {
-	return wrapToolDefinition(createWebFetchToolDefinition());
+export function createWebFetchTool(
+	options?: WebFetchToolOptions,
+): AgentTool<typeof webFetchSchema, WebFetchToolDetails> {
+	return wrapToolDefinition(createWebFetchToolDefinition(options));
 }

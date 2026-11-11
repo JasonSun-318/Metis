@@ -850,6 +850,7 @@ export {
 	truncateTail,
 	type WebFetchToolDetails,
 	type WebFetchToolInput,
+	type WebFetchToolOptions,
 	type WebResult,
 	type WebSearchResponse,
 	type WebSearchToolDetails,
