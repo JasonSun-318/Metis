@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MagnifyingGlass, ShieldCheck, X } from "../icons.tsx";
 import { useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -151,13 +152,13 @@ export function RememberedPermissionsDialog({
 						onClick={onClose}
 						type="button"
 					>
-						<X aria-hidden="true" size={18} />
+						<X aria-hidden="true" size={iconSize.xl} />
 					</button>
 				</header>
 				{totalCount > 0 ? (
 					<div className="remembered-permissions-toolbar">
 						<div className="remembered-permissions-search">
-							<MagnifyingGlass aria-hidden="true" size={18} />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.xl} />
 							<input
 								aria-label={t("Search remembered permissions")}
 								onChange={(event) => setSearch(event.target.value)}
@@ -224,7 +225,7 @@ export function RememberedPermissionsDialog({
 						<output aria-label={t("Loading remembered permissions")} className="status-block settings-loading" />
 					) : visibleGroups.length === 0 ? (
 						<div className="remembered-permissions-empty">
-							<ShieldCheck aria-hidden="true" size={28} />
+							<ShieldCheck aria-hidden="true" size={iconSize.xl} />
 							<strong>
 								{totalCount === 0
 									? t("No remembered permissions yet.")

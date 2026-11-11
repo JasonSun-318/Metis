@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { ArrowDown, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface TerminalPanelProps {
 	readonly api: MetisDesktopApi;
@@ -195,7 +196,7 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 					onClick={() => terminalRef.current?.scrollToBottom()}
 					type="button"
 				>
-					<ArrowDown aria-hidden="true" size={13} />
+					<ArrowDown aria-hidden="true" size={iconSize.md} />
 					<span className="terminal-action-tooltip" id={`terminal-scroll-hint-${terminalId}`} role="tooltip">
 						{t("Scroll to bottom")}
 					</span>
@@ -207,7 +208,7 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 					onClick={() => terminalRef.current?.clear()}
 					type="button"
 				>
-					<Trash aria-hidden="true" size={13} />
+					<Trash aria-hidden="true" size={iconSize.md} />
 					<span className="terminal-action-tooltip" id={`terminal-clear-hint-${terminalId}`} role="tooltip">
 						{t("Clear terminal")}
 					</span>

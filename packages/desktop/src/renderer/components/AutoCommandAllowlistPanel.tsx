@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { DotsThree, MagnifyingGlass, Plus, Trash } from "../icons.tsx";
 import { useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { PermissionRuleDialog, type RestoreDefaultEntry, RestoreDefaultsDialog } from "./PermissionRuleDialog.tsx";
 import {
 	applyDefaultRestore,
@@ -287,7 +288,7 @@ export function AutoCommandAllowlistPanel({
 				<div className="settings-card permission-rules-card">
 					<div className="permission-rules-toolbar">
 						<div className="permission-rules-search">
-							<MagnifyingGlass aria-hidden="true" size={15} />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 							<input
 								aria-label={t("Search commands")}
 								onChange={(event) => setSearch(event.target.value)}
@@ -305,7 +306,7 @@ export function AutoCommandAllowlistPanel({
 							}}
 							type="button"
 						>
-							<Plus aria-hidden="true" size={14} />
+							<Plus aria-hidden="true" size={iconSize.md} />
 							{t("Add command")}
 						</button>
 						<button
@@ -329,7 +330,7 @@ export function AutoCommandAllowlistPanel({
 							ref={cardMenuAnchor}
 							type="button"
 						>
-							<DotsThree aria-hidden="true" size={18} />
+							<DotsThree aria-hidden="true" size={iconSize.xl} />
 						</button>
 					</div>
 					{saveError ? (
@@ -389,7 +390,7 @@ export function AutoCommandAllowlistPanel({
 												title={t("Delete rule")}
 												type="button"
 											>
-												<Trash aria-hidden="true" size={15} />
+												<Trash aria-hidden="true" size={iconSize.lg} />
 											</button>
 										</li>
 									);

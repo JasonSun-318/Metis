@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { CaretLeft, CaretRight, CheckCircle, Key, MagnifyingGlass, Plus, Trash, X, XCircle } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { ImageGenerationSettingsPanel } from "./ImageGenerationSettingsPanel.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -1017,7 +1018,7 @@ export function ModelSettingsPanel({
 				) : null}
 				<div className="model-provider-toolbar">
 					<div className="plugins-search">
-						<MagnifyingGlass aria-hidden="true" size={16} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 						<input
 							type="search"
 							aria-label={t("Search providers")}
@@ -1032,7 +1033,7 @@ export function ModelSettingsPanel({
 						onClick={openCatalog}
 						type="button"
 					>
-						<Plus aria-hidden="true" size={15} />
+						<Plus aria-hidden="true" size={iconSize.lg} />
 						{t("Add provider")}
 					</button>
 					<button
@@ -1041,7 +1042,7 @@ export function ModelSettingsPanel({
 						onClick={() => openCustomEditor()}
 						type="button"
 					>
-						<Plus aria-hidden="true" size={15} />
+						<Plus aria-hidden="true" size={iconSize.lg} />
 						{t("Add custom provider")}
 					</button>
 				</div>
@@ -1091,13 +1092,13 @@ export function ModelSettingsPanel({
 										onClick={() => setCatalogOpen(false)}
 										type="button"
 									>
-										<X aria-hidden="true" size={18} />
+										<X aria-hidden="true" size={iconSize.xl} />
 									</button>
 								</div>
 							</header>
 							<div className="model-provider-editor-body model-provider-catalog-body">
 								<div className="plugins-search">
-									<MagnifyingGlass aria-hidden="true" size={16} />
+									<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 									<input
 										type="search"
 										aria-label={t("Search providers")}
@@ -1125,7 +1126,7 @@ export function ModelSettingsPanel({
 										onClick={() => setCatalogPage(catalogCurrentPage - 1)}
 										type="button"
 									>
-										<CaretLeft aria-hidden="true" size={15} />
+										<CaretLeft aria-hidden="true" size={iconSize.lg} />
 									</button>
 									<span>
 										{t("Page {{page}} of {{pages}}", {
@@ -1139,7 +1140,7 @@ export function ModelSettingsPanel({
 										onClick={() => setCatalogPage(catalogCurrentPage + 1)}
 										type="button"
 									>
-										<CaretRight aria-hidden="true" size={15} />
+										<CaretRight aria-hidden="true" size={iconSize.lg} />
 									</button>
 								</div>
 								<button
@@ -1148,7 +1149,7 @@ export function ModelSettingsPanel({
 									onClick={() => openCustomEditor(undefined, true)}
 									type="button"
 								>
-									<Plus aria-hidden="true" size={15} />
+									<Plus aria-hidden="true" size={iconSize.lg} />
 									{t("Add custom provider")}
 								</button>
 							</footer>
@@ -1191,9 +1192,9 @@ export function ModelSettingsPanel({
 									{selectedProvider ? (
 										<span className={selectedProvider.auth.configured ? "configured" : ""}>
 											{selectedProvider.auth.configured ? (
-												<CheckCircle aria-hidden="true" size={14} />
+												<CheckCircle aria-hidden="true" size={iconSize.md} />
 											) : (
-												<Key aria-hidden="true" size={14} />
+												<Key aria-hidden="true" size={iconSize.md} />
 											)}
 											{selectedProvider.auth.configured ? t("Configured") : t("Not configured")}
 										</span>
@@ -1205,7 +1206,7 @@ export function ModelSettingsPanel({
 										onClick={requestCloseEditor}
 										type="button"
 									>
-										<X aria-hidden="true" size={18} />
+										<X aria-hidden="true" size={iconSize.xl} />
 									</button>
 								</div>
 							</header>
@@ -1434,13 +1435,13 @@ export function ModelSettingsPanel({
 								{draft.apiKey.trim() ? <p>{t("Save the new key before testing the connection.")}</p> : null}
 								{error ? (
 									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
+										<XCircle aria-hidden="true" size={iconSize.lg} />
 										{error}
 									</p>
 								) : null}
 								{notice ? (
 									<output className="status-paragraph settings-action-message">
-										<CheckCircle aria-hidden="true" size={15} />
+										<CheckCircle aria-hidden="true" size={iconSize.lg} />
 										{notice}
 									</output>
 								) : null}
@@ -1485,7 +1486,7 @@ export function ModelSettingsPanel({
 										onClick={requestCloseEditor}
 										type="button"
 									>
-										<X aria-hidden="true" size={18} />
+										<X aria-hidden="true" size={iconSize.xl} />
 									</button>
 								</div>
 							</header>
@@ -1606,7 +1607,7 @@ export function ModelSettingsPanel({
 												}}
 												type="button"
 											>
-												<Plus aria-hidden="true" size={14} />
+												<Plus aria-hidden="true" size={iconSize.md} />
 												{t("Add model")}
 											</button>
 										</div>
@@ -1628,7 +1629,7 @@ export function ModelSettingsPanel({
 														<strong>{model.name || model.modelId || t("New model")}</strong>
 														<span>{model.modelId || t("Enter a model ID to get started.")}</span>
 													</div>
-													<CaretRight aria-hidden="true" size={14} />
+													<CaretRight aria-hidden="true" size={iconSize.md} />
 												</summary>
 												<div className="model-custom-model-detail">
 													<button
@@ -1638,7 +1639,7 @@ export function ModelSettingsPanel({
 														onClick={() => removeCustomModel(index)}
 														type="button"
 													>
-														<Trash aria-hidden="true" size={15} />
+														<Trash aria-hidden="true" size={iconSize.lg} />
 													</button>
 													<div className="model-custom-model-fields model-custom-model-identity">
 														<label>
@@ -1804,13 +1805,13 @@ export function ModelSettingsPanel({
 							<footer className="model-provider-editor-footer">
 								{error ? (
 									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
+										<XCircle aria-hidden="true" size={iconSize.lg} />
 										{error}
 									</p>
 								) : null}
 								{notice ? (
 									<output className="status-paragraph settings-action-message">
-										<CheckCircle aria-hidden="true" size={15} />
+										<CheckCircle aria-hidden="true" size={iconSize.lg} />
 										{notice}
 									</output>
 								) : null}
@@ -1887,7 +1888,7 @@ export function ModelSettingsPanel({
 			) : null}
 			{error && !draft && !customDraft ? (
 				<p className="settings-action-message error" role="alert">
-					<XCircle aria-hidden="true" size={15} />
+					<XCircle aria-hidden="true" size={iconSize.lg} />
 					{error}
 				</p>
 			) : null}

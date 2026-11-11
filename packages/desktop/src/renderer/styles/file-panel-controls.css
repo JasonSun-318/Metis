@@ -1,7 +1,7 @@
 .file-tree-row-icon {
 	display: grid;
-	width: 14px;
-	height: 14px;
+	width: var(--icon-size-md);
+	height: var(--icon-size-md);
 	min-width: 14px;
 	max-width: 14px;
 	flex: 0 0 14px;
@@ -11,8 +11,8 @@
 
 .file-tree-row-icon > .sidebar-folder-icon {
 	display: grid;
-	width: 14px;
-	height: 14px;
+	width: var(--icon-size-md);
+	height: var(--icon-size-md);
 	place-items: center;
 }
 
@@ -62,8 +62,8 @@
 	box-shadow: var(--overlay-shadow);
 	color: var(--text);
 	padding: 5px 8px;
-	font-size: 11px;
-	font-weight: 400;
+	font-size: var(--font-size-2xs);
+	font-weight: var(--font-weight-regular);
 	line-height: 1.4;
 	text-overflow: ellipsis;
 	white-space: nowrap;

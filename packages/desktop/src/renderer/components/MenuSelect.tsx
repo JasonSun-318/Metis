@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { CaretDown, Check } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 export interface MenuSelectOption<T extends string> {
 	readonly value: T;
@@ -185,7 +186,7 @@ export function MenuSelect<T extends string>({
 								<span>{option.label}</span>
 							)}
 						</span>
-						{active && <Check aria-hidden="true" size={16} weight="bold" />}
+						{active && <Check aria-hidden="true" size={iconSize.lg} weight="bold" />}
 					</button>
 				);
 			})}
@@ -219,7 +220,7 @@ export function MenuSelect<T extends string>({
 					{prefix && <span className="menu-select-prefix">{prefix}</span>}
 					{selected?.label ?? t(placeholder)}
 				</span>
-				<CaretDown aria-hidden="true" className="menu-select-caret" size={13} />
+				<CaretDown aria-hidden="true" className="menu-select-caret" size={iconSize.md} />
 			</button>
 			{popover && createPortal(popover, portalTarget)}
 		</div>

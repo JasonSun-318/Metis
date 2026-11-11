@@ -14,7 +14,7 @@
 	background: var(--surface-02);
 	padding: 14px 16px;
 	color: var(--text);
-	font-size: 13px;
+	font-size: var(--font-size-sm);
 	line-height: 1.5;
 	overflow-wrap: anywhere;
 }
@@ -32,7 +32,7 @@
 .conversation-interaction-card .ask-user-options { gap: var(--space-8); }
 .conversation-interaction-card .ask-user-actions button,
 .conversation-interaction-card .ask-user-resume button,
-.conversation-interaction-card .plan-card-actions button { min-height: 28px; padding: 4px var(--space-12); border-radius: var(--radius-control); font-size: 12px; }
+.conversation-interaction-card .plan-card-actions button { min-height: 28px; padding: 4px var(--space-12); border-radius: var(--radius-control); font-size: var(--font-size-xs); }
 .conversation-interaction-card .ask-user-header-actions button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
 .conversation-interaction-card .permission-approval-command { margin-block: var(--space-12); padding: var(--space-12) 12px; border-radius: var(--radius-control); background: var(--surface-04); }
 .conversation-interaction-card .ask-user-resume { background: transparent; padding: 0; border: 0; }
@@ -40,21 +40,21 @@
 .conversation-card-heading { display: flex; align-items: center; gap: var(--space-8); width: 100%; padding: 14px 16px; border-radius: inherit; text-align: left; color: inherit; --button-hover-bg: transparent; }
 .conversation-card-heading:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
 .conversation-card-heading > svg { color: var(--text); }
-.conversation-card-heading strong { flex: 1; font-weight: 500; }
-.conversation-card-heading > span { color: var(--text-muted); font-size: 12px; }
+.conversation-card-heading strong { flex: 1; font-weight: var(--font-weight-medium); }
+.conversation-card-heading > span { color: var(--text-muted); font-size: var(--font-size-xs); }
 .conversation-task-items { display: grid; gap: var(--space-12); list-style: none; margin: 0; padding: 0 16px 14px; }
 .conversation-task-items li { display: flex; gap: 9px; align-items: flex-start; }
 .conversation-task-items svg { flex: none; margin-top: 2px; color: var(--text-muted); }
 .conversation-task-items .is-completed { color: var(--text-muted); }
 .conversation-card-status { color: var(--text-muted); }
 .conversation-interaction-card summary { cursor: pointer; color: var(--text-19); }
-.transcript :is(.code-command, .tool-step) .conversation-permission-receipt { width: auto; margin: 8px var(--space-12); padding: 8px var(--space-12); border-radius: var(--radius-control); background: transparent; font-size: 12px; }
+.transcript :is(.code-command, .tool-step) .conversation-permission-receipt { width: auto; margin: 8px var(--space-12); padding: 8px var(--space-12); border-radius: var(--radius-control); background: transparent; font-size: var(--font-size-xs); }
 .conversation-interaction-card.plan-card { display: grid; gap: var(--space-12); box-shadow: none; }
 .conversation-interaction-card .plan-card-title { margin: 0; color: var(--text); }
 .conversation-interaction-card .plan-card-actions { justify-content: flex-end; }
 .conversation-interaction-card .plan-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); }
 .conversation-interaction-card .plan-card-header > div { display: grid; gap: var(--space-4); min-width: 0; }
-.conversation-interaction-card [data-plan-action="open"] { flex: none; padding: 2px 0; color: var(--text-muted); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; --button-hover-bg: transparent; }
+.conversation-interaction-card [data-plan-action="open"] { flex: none; padding: 2px 0; color: var(--text-muted); font-size: var(--font-size-xs); text-decoration: underline; text-underline-offset: 3px; --button-hover-bg: transparent; }
 .conversation-interaction-card .plan-card-actions [data-plan-action="start"] { background: var(--button-primary-bg); color: var(--button-primary-ink); border-color: transparent; --button-hover-bg: var(--button-primary-bg-hover); }
 .transcript-plan-row > .conversation-interaction-card { margin: 0; }
 .transcript :is(.transcript-turn, .code-transcript-turn, .transcript-plan-row)[data-continues] { padding-bottom: var(--space-12); }

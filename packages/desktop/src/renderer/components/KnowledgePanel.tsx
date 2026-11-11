@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { ArrowLeft, ArrowsClockwise, Books, FileText, FolderPlus, Graph, MagnifyingGlass, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { KnowledgeGraph } from "./KnowledgeGraph.tsx";
 import { KnowledgeLibraryRemove } from "./KnowledgeLibraryRemove.tsx";
 import { KnowledgeLibrarySelect } from "./KnowledgeLibrarySelect.tsx";
@@ -263,7 +264,7 @@ export function KnowledgePanel({
 						title={t("Choose knowledge directory")}
 						onClick={() => void chooseDirectory()}
 					>
-						<FolderPlus aria-hidden="true" size={17} />
+						<FolderPlus aria-hidden="true" size={iconSize.xl} />
 						<span>{t("New knowledge library")}</span>
 					</button>
 					<KnowledgeLibraryRemove
@@ -281,7 +282,11 @@ export function KnowledgePanel({
 						title={t("Refresh knowledge")}
 						onClick={() => setRefresh((value) => value + 1)}
 					>
-						<ArrowsClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={17} />
+						<ArrowsClockwise
+							aria-hidden="true"
+							className={loading ? "is-spinning" : undefined}
+							size={iconSize.xl}
+						/>
 					</button>
 				</div>
 			</div>
@@ -315,12 +320,12 @@ export function KnowledgePanel({
 			)}
 			{catalogLoading || loading ? (
 				<output className="status-block knowledge-empty">
-					<ArrowsClockwise aria-hidden="true" className="is-spinning" size={24} />
+					<ArrowsClockwise aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 					{t("Loading…")}
 				</output>
 			) : !library ? (
 				<div className="knowledge-empty">
-					<Books aria-hidden="true" size={32} weight="light" />
+					<Books aria-hidden="true" size={iconSize.xl} weight="light" />
 					<strong>{t("Your knowledge, in one place")}</strong>
 					<p>{t("Choose a directory as your knowledge library.")}</p>
 					<button
@@ -329,13 +334,13 @@ export function KnowledgePanel({
 						disabled={adding || busy}
 						onClick={() => void chooseDirectory()}
 					>
-						<FolderPlus aria-hidden="true" size={15} />
+						<FolderPlus aria-hidden="true" size={iconSize.lg} />
 						{t("New knowledge library")}
 					</button>
 				</div>
 			) : !graph.notes.length ? (
 				<div className="knowledge-empty">
-					<FileText aria-hidden="true" size={32} weight="light" />
+					<FileText aria-hidden="true" size={iconSize.xl} weight="light" />
 					<strong>{t("No usable content in this knowledge library yet.")}</strong>
 					<p>{t("Use + → Knowledge to link this library, then send a material and ask Metis to organize it.")}</p>
 				</div>
@@ -349,7 +354,7 @@ export function KnowledgePanel({
 							title={t("Back to knowledge library")}
 							onClick={() => setSelectedPath(null)}
 						>
-							<ArrowLeft aria-hidden="true" size={17} />
+							<ArrowLeft aria-hidden="true" size={iconSize.xl} />
 						</button>
 						<span title={selectedPath}>{note?.title ?? selectedPath}</span>
 					</div>
@@ -388,16 +393,16 @@ export function KnowledgePanel({
 					<div className="knowledge-view-controls">
 						<fieldset className="control-group knowledge-view-switch" aria-label={t("Knowledge view")}>
 							<button type="button" aria-pressed={mode === "graph"} onClick={() => setMode("graph")}>
-								<Graph aria-hidden="true" size={14} />
+								<Graph aria-hidden="true" size={iconSize.md} />
 								{t("Graph")}
 							</button>
 							<button type="button" aria-pressed={mode === "notes"} onClick={() => setMode("notes")}>
-								<FileText aria-hidden="true" size={14} />
+								<FileText aria-hidden="true" size={iconSize.md} />
 								{t("Knowledge notes")}
 							</button>
 						</fieldset>
 						<div className="knowledge-search">
-							<MagnifyingGlass aria-hidden="true" size={14} />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 							<input
 								aria-label={t("Search knowledge notes")}
 								placeholder={t("Search notes")}
@@ -406,7 +411,7 @@ export function KnowledgePanel({
 							/>
 							{query && (
 								<button type="button" aria-label={t("Clear search")} onClick={() => setQuery("")}>
-									<X aria-hidden="true" size={12} />
+									<X aria-hidden="true" size={iconSize.sm} />
 								</button>
 							)}
 						</div>
@@ -422,7 +427,7 @@ export function KnowledgePanel({
 						/>
 					) : !filtered.notes.length ? (
 						<div className="knowledge-empty">
-							<MagnifyingGlass aria-hidden="true" size={28} weight="light" />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.xl} weight="light" />
 							<strong>{t("No matching notes")}</strong>
 							<button className="knowledge-action" type="button" onClick={() => setQuery("")}>
 								{t("Clear search")}

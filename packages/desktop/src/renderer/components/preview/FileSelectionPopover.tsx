@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUp, ChatText, NotePencil, SpinnerGap, X } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import type { DraftFileSelection } from "./file-selection.ts";
 
 export function FileSelectionPopover({
@@ -160,7 +161,7 @@ export function FileSelectionPopover({
 							<blockquote title={selection.input.selectedText}>{selection.input.selectedText}</blockquote>
 						</div>
 						<button type="button" aria-label={t("Cancel")} onClick={onDismiss}>
-							<X size={14} />
+							<X size={iconSize.md} />
 						</button>
 					</div>
 					<div className="selection-request-input">
@@ -186,9 +187,9 @@ export function FileSelectionPopover({
 							disabled={!enabled || sending || !instruction.trim()}
 						>
 							{sending ? (
-								<SpinnerGap aria-hidden="true" className="is-spinning" size={16} />
+								<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.lg} />
 							) : (
-								<ArrowUp aria-hidden="true" size={17} />
+								<ArrowUp aria-hidden="true" size={iconSize.xl} />
 							)}
 						</button>
 					</div>
@@ -204,7 +205,7 @@ export function FileSelectionPopover({
 							onEditing?.();
 						}}
 					>
-						<NotePencil aria-hidden="true" size={14} />
+						<NotePencil aria-hidden="true" size={iconSize.md} />
 						{t("Request changes")}
 					</button>
 					{!requestOnly && (
@@ -221,7 +222,7 @@ export function FileSelectionPopover({
 								}
 							}}
 						>
-							<ChatText aria-hidden="true" size={14} />
+							<ChatText aria-hidden="true" size={iconSize.md} />
 							{t("Add to conversation")}
 						</button>
 					)}

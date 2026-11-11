@@ -40,7 +40,7 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-list-row").minHeight).toBe("64px");
 		expect(rule(".plugins-row-icon").width).toBe("36px");
 		expect(rule(".plugins-detail-actions button").minHeight).toBe("var(--control-height)");
-		expect(rule(".plugins-detail-document").fontSize).toBe("13px");
+		expect(rule(".plugins-detail-document").fontSize).toBe("var(--font-size-sm)");
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
 		expect(rule(".scheduled-tasks-empty").minHeight).toBe("260px");
 		expect(rule(".scheduled-tasks-empty-icon").width).toBe("96px");
@@ -50,14 +50,14 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".mcp-dialog").borderRadius).toBe("var(--radius-dialog)");
 		expect(rule(".mcp-dialog").background).toBe("var(--panel-raised)");
 		expect(rule(".mcp-dialog h2").fontSize).toBe("var(--dialog-title-size)");
-		expect(rule(".mcp-dialog label").fontSize).toBe("12px");
+		expect(rule(".mcp-dialog label").fontSize).toBe("var(--font-size-xs)");
 		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select, .mcp-dialog textarea').fontSize).toBe(
 			"var(--control-font-size)",
 		);
 		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select').height).toBe("var(--control-height)");
 		expect(rule(".skill-create-methods > button").minHeight).toBe("72px");
-		expect(rule(".skill-create-methods strong").fontSize).toBe("14px");
-		expect(rule(".skill-create-methods small").fontSize).toBe("12px");
+		expect(rule(".skill-create-methods strong").fontSize).toBe("var(--font-size-sm)");
+		expect(rule(".skill-create-methods small").fontSize).toBe("var(--font-size-xs)");
 		expect(rule(".skill-create-github").gridTemplateColumns).toBe("");
 		expect(rule(".skill-create-folder").height).toBe("var(--control-height)");
 		expect(rule(".skill-upload-dropzone").minHeight).toBe("174px");

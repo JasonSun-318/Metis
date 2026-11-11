@@ -13,6 +13,7 @@ import {
 	Trash,
 } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
 const PERSONALIZATION_VIEW_CACHE_KEY = "personalization";
@@ -142,7 +143,7 @@ export function PersonalizationPanel({
 						onClick={() => setRequest((value) => value + 1)}
 						type="button"
 					>
-						<ArrowClockwise aria-hidden="true" size={15} />
+						<ArrowClockwise aria-hidden="true" size={iconSize.lg} />
 						{t("Retry")}
 					</button>
 				</div>
@@ -155,7 +156,7 @@ export function PersonalizationPanel({
 			<section className="settings-section personalization-section">
 				<div className="personalization-presets-block">
 					<span className="personalization-presets-label">
-						<Sparkle aria-hidden="true" size={14} />
+						<Sparkle aria-hidden="true" size={iconSize.md} />
 						{t("Quick presets")}
 					</span>
 					<div className="personalization-presets-grid">
@@ -169,7 +170,7 @@ export function PersonalizationPanel({
 									onClick={() => applyPreset(t(preset.text))}
 									type="button"
 								>
-									<Icon aria-hidden="true" size={14} />
+									<Icon aria-hidden="true" size={iconSize.md} />
 									{t(preset.label)}
 								</button>
 							);
@@ -228,7 +229,7 @@ export function PersonalizationPanel({
 									}}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={14} />
+									<Trash aria-hidden="true" size={iconSize.md} />
 									{t("Clear")}
 								</button>
 							) : null}

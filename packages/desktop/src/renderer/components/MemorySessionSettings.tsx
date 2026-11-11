@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "../icons.tsx";
-
+import { iconSize } from "../ui/icon-size.ts";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 
 type MemorySessionApi = Pick<MetisDesktopApi, "listSessions" | "setSessionMemoryFlags">;
@@ -106,7 +106,7 @@ export function MemorySessionSettings({
 				}}
 				type="button"
 			>
-				<ChatCircle aria-hidden="true" size={19} />
+				<ChatCircle aria-hidden="true" size={iconSize.xl} />
 				<span className="memory-manage-copy">
 					<strong>{t("Conversation memory")}</strong>
 					<span>{t("Choose which conversations can use and save memories.")}</span>
@@ -114,7 +114,7 @@ export function MemorySessionSettings({
 				<span className="memory-section-caption">
 					{sessions ? t("{{count}} with exceptions", { count: excludedCount }) : t("Loading…")}
 				</span>
-				<CaretRight aria-hidden="true" size={14} />
+				<CaretRight aria-hidden="true" size={iconSize.md} />
 			</button>
 			{open && (
 				<MemoryDialog
@@ -128,7 +128,7 @@ export function MemorySessionSettings({
 				>
 					<div className="memory-session-toolbar">
 						<label className="memory-notes-search">
-							<MagnifyingGlass aria-hidden="true" size={15} />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.lg} />
 							<input
 								aria-label={t("Search conversations by name or project")}
 								type="search"
@@ -182,7 +182,7 @@ export function MemorySessionSettings({
 						)
 					) : filtered.length === 0 ? (
 						<div className="memory-empty-state">
-							<ChatCircle size={24} aria-hidden="true" />
+							<ChatCircle size={iconSize.xl} aria-hidden="true" />
 							<strong>{t("No matching conversations")}</strong>
 						</div>
 					) : (
@@ -194,7 +194,7 @@ export function MemorySessionSettings({
 									<li className="memory-session-row" key={session.sessionId}>
 										<header className="memory-session-heading">
 											<span className="memory-session-icon">
-												<Icon size={19} aria-hidden="true" />
+												<Icon size={iconSize.xl} aria-hidden="true" />
 											</span>
 											<div className="memory-session-identity">
 												<strong>{name}</strong>

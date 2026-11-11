@@ -24,6 +24,7 @@ import {
 	FolderOpen,
 	type Icon,
 } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { classifyPreviewKind } from "./preview/preview-kinds.ts";
 
@@ -70,7 +71,7 @@ const FILE_ICON_BY_EXTENSION: Record<string, Icon> = {
 function DeliveredFileIcon({ name }: { readonly name: string }) {
 	const extension = name.match(/\.([^.]+)$/u)?.[1]?.toLowerCase();
 	const IconComponent = (extension && FILE_ICON_BY_EXTENSION[extension]) || File;
-	return <IconComponent aria-hidden="true" size={26} weight="duotone" />;
+	return <IconComponent aria-hidden="true" size={iconSize.xl} weight="duotone" />;
 }
 
 export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCardProps) {
@@ -166,7 +167,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 					ref={triggerRef}
 					type="button"
 				>
-					<CaretDown aria-hidden="true" size={12} />
+					<CaretDown aria-hidden="true" size={iconSize.sm} />
 				</button>
 			</div>
 			{available && menuOpen
@@ -190,7 +191,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 								role="menuitem"
 								type="button"
 							>
-								<FolderOpen aria-hidden="true" size={14} />
+								<FolderOpen aria-hidden="true" size={iconSize.md} />
 								{t("Show in folder")}
 							</button>
 						</div>,

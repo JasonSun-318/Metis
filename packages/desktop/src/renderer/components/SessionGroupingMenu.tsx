@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Check, ListBullets } from "../icons.tsx";
 import type { SessionGroupBy } from "../store/session-grouping.ts";
+import { iconSize } from "../ui/icon-size.ts";
 
 const OPTIONS = [
 	{ value: "date", label: "Date" },
@@ -117,7 +118,7 @@ export function SessionGroupingMenu({
 				title={t("Group by {{label}}", { label: currentLabel })}
 				type="button"
 			>
-				<ListBullets aria-hidden="true" size={16} />
+				<ListBullets aria-hidden="true" size={iconSize.lg} />
 			</button>
 			{open &&
 				createPortal(
@@ -161,7 +162,7 @@ export function SessionGroupingMenu({
 									type="button"
 								>
 									<span>{t(option.label, { context: "session_grouping" })}</span>
-									{option.value === value && <Check aria-hidden="true" size={16} weight="bold" />}
+									{option.value === value && <Check aria-hidden="true" size={iconSize.lg} weight="bold" />}
 								</button>
 							</div>
 						))}

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { SpinnerGap } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import { PdfPage } from "./PdfPage.tsx";
 import { usePreviewViewport } from "./preview-layout.ts";
 import { usePdfDocument } from "./use-pdf-document.ts";
@@ -29,7 +30,7 @@ export function InlinePdfPreview({ bytes, page, fileName, onOpen }: InlinePdfPre
 				</div>
 			) : !doc ? (
 				<div className="preview-loading-state">
-					<SpinnerGap className="is-spinning" size={20} />
+					<SpinnerGap className="is-spinning" size={iconSize.xl} />
 					<span>{t("Loading PDF document…")}</span>
 				</div>
 			) : (

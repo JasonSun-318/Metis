@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMenuDismiss } from "../hooks/use-menu-dismiss.ts";
 import { CaretDown, Question } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
@@ -269,7 +270,7 @@ export function ThinkingSelector({
 				type="button"
 			>
 				<span>{open ? previewLabel : label}</span>
-				<CaretDown aria-hidden="true" size={12} />
+				<CaretDown aria-hidden="true" size={iconSize.sm} />
 			</button>
 			{open && (
 				<div aria-label={t("Effort")} className="effort-popover" role="dialog">
@@ -283,7 +284,7 @@ export function ThinkingSelector({
 							</strong>
 						</span>
 						<span title={t("Higher effort can improve difficult answers but may take longer.")}>
-							<Question aria-hidden="true" size={16} />
+							<Question aria-hidden="true" size={iconSize.lg} />
 						</span>
 					</div>
 					<div className="effort-axis">

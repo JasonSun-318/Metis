@@ -38,6 +38,7 @@ import {
 	X,
 } from "../icons.tsx";
 import { useModalPresence } from "../modal-presence.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { BrowserStartPage } from "./BrowserStartPage.tsx";
@@ -100,7 +101,7 @@ function BrowserDownloadRow({
 					actions={actions}
 					className="browser-download-actions"
 					downloadId={download.downloadId}
-					iconSize={12}
+					iconSize={iconSize.sm}
 					menuItem
 					onAction={onAction}
 					revealIcon={Folder}
@@ -901,7 +902,7 @@ export function BrowserPanel({
 						label: profileLabel(candidate),
 					}))}
 					popoverClassName="browser-profile-popover"
-					triggerIcon={<User aria-hidden="true" size={13} weight="fill" />}
+					triggerIcon={<User aria-hidden="true" size={iconSize.md} weight="fill" />}
 					value={profile.profileId}
 				/>
 				<div className="browser-navigation">
@@ -912,7 +913,7 @@ export function BrowserPanel({
 						onClick={() => control("back")}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={14} />
+						<ArrowLeft aria-hidden="true" size={iconSize.md} />
 					</button>
 					<button
 						aria-label={t("Forward")}
@@ -921,7 +922,7 @@ export function BrowserPanel({
 						onClick={() => control("forward")}
 						type="button"
 					>
-						<ArrowRight aria-hidden="true" size={14} />
+						<ArrowRight aria-hidden="true" size={iconSize.md} />
 					</button>
 					<button
 						aria-label={t("Reload")}
@@ -930,7 +931,11 @@ export function BrowserPanel({
 						onClick={() => control("reload")}
 						type="button"
 					>
-						<ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} />
+						<ArrowClockwise
+							aria-hidden="true"
+							className={state.loading ? "is-spinning" : undefined}
+							size={iconSize.md}
+						/>
 					</button>
 				</div>
 				<form
@@ -967,7 +972,7 @@ export function BrowserPanel({
 								title={t("Source code")}
 								type="button"
 							>
-								<Code aria-hidden="true" size={13} />
+								<Code aria-hidden="true" size={iconSize.md} />
 							</button>
 						) : (
 							<button
@@ -977,7 +982,7 @@ export function BrowserPanel({
 								onClick={() => control("open-external")}
 								type="button"
 							>
-								<ArrowSquareOut aria-hidden="true" size={13} />
+								<ArrowSquareOut aria-hidden="true" size={iconSize.md} />
 							</button>
 						)}
 					</div>
@@ -992,7 +997,7 @@ export function BrowserPanel({
 						onClick={toggleHistory}
 						type="button"
 					>
-						<ClockCounterClockwise aria-hidden="true" size={14} />
+						<ClockCounterClockwise aria-hidden="true" size={iconSize.md} />
 					</button>
 					{historyOpen && (
 						<div aria-label={t("History")} className="browser-downloads-menu" role="menu">
@@ -1049,7 +1054,7 @@ export function BrowserPanel({
 						onClick={toggleDownloads}
 						type="button"
 					>
-						<DownloadSimple aria-hidden="true" size={14} />
+						<DownloadSimple aria-hidden="true" size={iconSize.md} />
 						{downloads.some((download) => download.state === "progressing" || download.state === "paused") && (
 							<span aria-hidden="true" className="browser-download-badge" />
 						)}
@@ -1093,7 +1098,7 @@ export function BrowserPanel({
 						onClick={toggleMore}
 						type="button"
 					>
-						<DotsThreeVertical aria-hidden="true" size={16} weight="bold" />
+						<DotsThreeVertical aria-hidden="true" size={iconSize.lg} weight="bold" />
 					</button>
 					{moreOpen && (
 						<div className="browser-more-menu" role="menu">
@@ -1104,7 +1109,7 @@ export function BrowserPanel({
 								role="menuitem"
 								type="button"
 							>
-								<MagnifyingGlass aria-hidden="true" size={14} />
+								<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 								<span>{t("Find in page")}</span>
 								<kbd>{api.platform === "darwin" ? "⌘F" : "Ctrl+F"}</kbd>
 							</button>
@@ -1114,7 +1119,7 @@ export function BrowserPanel({
 								role="menuitem"
 								type="button"
 							>
-								<Printer aria-hidden="true" size={14} />
+								<Printer aria-hidden="true" size={iconSize.md} />
 								<span>{t("Print")}</span>
 								<kbd>{api.platform === "darwin" ? "⌘P" : "Ctrl+P"}</kbd>
 							</button>
@@ -1128,7 +1133,7 @@ export function BrowserPanel({
 									role="menuitem"
 									type="button"
 								>
-									<Minus aria-hidden="true" size={13} />
+									<Minus aria-hidden="true" size={iconSize.md} />
 								</button>
 								<label className="browser-zoom-value">
 									<input
@@ -1160,7 +1165,7 @@ export function BrowserPanel({
 									role="menuitem"
 									type="button"
 								>
-									<Plus aria-hidden="true" size={13} />
+									<Plus aria-hidden="true" size={iconSize.md} />
 								</button>
 								<button
 									aria-label={t("Reset zoom")}
@@ -1169,7 +1174,7 @@ export function BrowserPanel({
 									role="menuitem"
 									type="button"
 								>
-									<ArrowCounterClockwise aria-hidden="true" size={13} />
+									<ArrowCounterClockwise aria-hidden="true" size={iconSize.md} />
 								</button>
 							</fieldset>
 							<button
@@ -1178,7 +1183,7 @@ export function BrowserPanel({
 								role="menuitem"
 								type="button"
 							>
-								<Camera aria-hidden="true" size={14} />
+								<Camera aria-hidden="true" size={iconSize.md} />
 								<span>{t("Screenshot")}</span>
 							</button>
 							<hr className="browser-menu-separator" />
@@ -1192,7 +1197,7 @@ export function BrowserPanel({
 								role="menuitem"
 								type="button"
 							>
-								<DownloadSimple aria-hidden="true" size={14} />
+								<DownloadSimple aria-hidden="true" size={iconSize.md} />
 								<span>{t("Import browser data…")}</span>
 							</button>
 							<button
@@ -1204,7 +1209,7 @@ export function BrowserPanel({
 								role="menuitem"
 								type="button"
 							>
-								<Trash aria-hidden="true" size={14} />
+								<Trash aria-hidden="true" size={iconSize.md} />
 								<span>{t("Clear browsing data")}</span>
 							</button>
 						</div>
@@ -1252,7 +1257,7 @@ export function BrowserPanel({
 			{findOpen && (
 				<search aria-label={t("Find in page")} className="browser-find-panel">
 					<div className="browser-find-query">
-						<MagnifyingGlass aria-hidden="true" size={13} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 						<input
 							aria-label={t("Find in page")}
 							onChange={(event) => {
@@ -1273,7 +1278,7 @@ export function BrowserPanel({
 							value={findText}
 						/>
 						<button aria-label={t("Close find")} onClick={closeFind} type="button">
-							<X aria-hidden="true" size={13} />
+							<X aria-hidden="true" size={iconSize.md} />
 						</button>
 					</div>
 					<div className="browser-find-controls">
@@ -1283,7 +1288,7 @@ export function BrowserPanel({
 							onClick={() => find(false, false)}
 							type="button"
 						>
-							<ArrowUp aria-hidden="true" size={13} />
+							<ArrowUp aria-hidden="true" size={iconSize.md} />
 						</button>
 						<button
 							aria-label={t("Next match")}
@@ -1291,7 +1296,7 @@ export function BrowserPanel({
 							onClick={() => find(true, false)}
 							type="button"
 						>
-							<ArrowDown aria-hidden="true" size={13} />
+							<ArrowDown aria-hidden="true" size={iconSize.md} />
 						</button>
 						<output className="browser-find-count">
 							{t("{{active}} / {{total}} results", {
@@ -1313,7 +1318,7 @@ export function BrowserPanel({
 				) : (
 					<div className="browser-empty">
 						<div className="browser-empty-content">
-							<Globe aria-hidden="true" size={25} weight="light" />
+							<Globe aria-hidden="true" size={iconSize.xl} weight="light" />
 							<strong>{t("Start browsing")}</strong>
 							<span>{t("Enter a URL to open a page")}</span>
 						</div>

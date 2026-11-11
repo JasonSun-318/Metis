@@ -2,6 +2,7 @@ import type { PermissionPresetView, SessionSnapshot } from "@metis/app-protocol"
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretDown, Check, LockOpen, ShieldCheck, ShieldPlain } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface PermissionSelectorProps {
 	readonly activeReview?: SessionSnapshot["activeReview"];
@@ -153,9 +154,9 @@ export function PermissionSelector({
 				ref={triggerRef}
 				type="button"
 			>
-				<ModeIcon aria-hidden="true" size={14} />
+				<ModeIcon aria-hidden="true" size={iconSize.md} />
 				<span>{label}</span>
-				<CaretDown aria-hidden="true" size={12} />
+				<CaretDown aria-hidden="true" size={iconSize.sm} />
 			</button>
 			{reviewing && !interactionPending && (
 				<output className="sr-only" aria-live="polite">
@@ -196,7 +197,7 @@ export function PermissionSelector({
 									<strong>{t(option.label)}</strong>
 									<small>{t(option.description)}</small>
 								</span>
-								{selected && <Check aria-hidden="true" size={16} weight="bold" />}
+								{selected && <Check aria-hidden="true" size={iconSize.lg} weight="bold" />}
 							</button>
 						);
 					})}

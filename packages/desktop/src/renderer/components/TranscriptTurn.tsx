@@ -2,6 +2,7 @@ import type { ItemContentBlockView } from "@metis/app-protocol";
 import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GitFork, ImageSquare } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { AgentReportMessage } from "./AgentReportMessage.tsx";
 import { ChatExecutionChain } from "./ChatExecutionChain.tsx";
 import {
@@ -29,7 +30,7 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 		case "image":
 			return (
 				<p className="transcript-attachment">
-					<ImageSquare aria-hidden="true" size={18} /> {t("Image")} · {block.image.mediaType}
+					<ImageSquare aria-hidden="true" size={iconSize.xl} /> {t("Image")} · {block.image.mediaType}
 				</p>
 			);
 		case "notice":
@@ -241,7 +242,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							title={t("Fork this conversation from this reply")}
 							type="button"
 						>
-							<GitFork aria-hidden="true" size={13} />
+							<GitFork aria-hidden="true" size={iconSize.md} />
 						</button>
 					)}
 					{onCopy && finalCopyText.trim() !== "" && <TurnCopyButton onCopy={onCopy} text={finalCopyText} />}

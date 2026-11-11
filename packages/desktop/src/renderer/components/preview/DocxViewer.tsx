@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SpinnerGap } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 
 export interface DocxViewerProps {
@@ -73,7 +74,7 @@ export function DocxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 			<div className={`preview-viewport docx-viewport${inverted ? " is-inverted" : ""}`}>
 				{loading && (
 					<div className="preview-loading-state">
-						<SpinnerGap aria-hidden="true" className="is-spinning" size={28} />
+						<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 						<span>{t("Rendering Word document…")}</span>
 					</div>
 				)}

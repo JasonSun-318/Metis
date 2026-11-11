@@ -2,6 +2,7 @@ import type { ClientParams, McpServerSummaryView } from "@metis/app-protocol";
 import { type FormEvent, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -155,7 +156,7 @@ export function McpCredentialFields({
 							}}
 							type="button"
 						>
-							<Trash aria-hidden="true" size={15} />
+							<Trash aria-hidden="true" size={iconSize.lg} />
 						</button>
 					</div>
 				))}
@@ -166,7 +167,7 @@ export function McpCredentialFields({
 				onClick={() => setRows((current) => [...current, { id: crypto.randomUUID(), name: "", value: "" }])}
 				type="button"
 			>
-				<Plus aria-hidden="true" size={15} />
+				<Plus aria-hidden="true" size={iconSize.lg} />
 				{t("Add secret")}
 			</button>
 		</fieldset>
@@ -517,7 +518,7 @@ export function McpServerForm({
 									onClick={() => setQuickHeaders((current) => current.filter((item) => item.id !== row.id))}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={15} />
+									<Trash aria-hidden="true" size={iconSize.lg} />
 								</button>
 							</div>
 						))}
@@ -532,7 +533,7 @@ export function McpServerForm({
 							}
 							type="button"
 						>
-							<Plus aria-hidden="true" size={15} />
+							<Plus aria-hidden="true" size={iconSize.lg} />
 							{t("Add header")}
 						</button>
 					</fieldset>
@@ -618,7 +619,7 @@ export function McpServerDialog({
 				ref={close}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="mcp-server-title">{t("Edit MCP server")}</h2>
 			<p id="mcp-server-description">{t("Configure a local command or remote HTTP MCP server.")}</p>
@@ -675,7 +676,7 @@ export function McpCredentialDialog({
 				ref={close}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="mcp-credential-title">{t("Set authentication")}</h2>
 			<p id="mcp-credential-description">

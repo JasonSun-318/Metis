@@ -1,8 +1,8 @@
 .image-generation-settings-dialog { width: min(560px, calc(100vw - 48px)); }
 .image-generation-settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--form-field-gap); }
 .image-generation-settings-wide { grid-column: 1 / -1; }
-.image-generation-settings-dialog label > span { color: var(--text-26); font-weight: 500; }
-.image-generation-settings-dialog label > small { color: var(--text-09); font-size: 11px; line-height: 1.5; }
+.image-generation-settings-dialog label > span { color: var(--text-26); font-weight: var(--font-weight-medium); }
+.image-generation-settings-dialog label > small { color: var(--text-09); font-size: var(--font-size-2xs); line-height: 1.5; }
 .image-generation-settings-credentials { display: grid; gap: var(--form-field-gap); border-top: 1px solid var(--border-weak); padding-top: var(--space-16); }
 .image-generation-settings-key-hint { display: flex; align-items: flex-start; gap: 8px; margin: 0; }
 .image-generation-settings-key-hint svg { flex: none; margin-top: 2px; }

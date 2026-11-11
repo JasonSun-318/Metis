@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection, DesktopCreateProjectFolderInput } from "../../shared/desktop-api.ts";
 import codeProjectHand from "../assets/code-project-hand.svg";
 import { CaretLeft, CaretRight, FolderSimple, Plus, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
@@ -187,13 +188,13 @@ export function CodeProjectSetup({
 									type="button"
 								>
 									<span className="code-project-option-icon">
-										<Plus aria-hidden="true" size={24} />
+										<Plus aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span>
 										<strong>{t("Start from scratch")}</strong>
 										<small>{t("Create a new folder and add your files.")}</small>
 									</span>
-									<CaretRight aria-hidden="true" size={17} />
+									<CaretRight aria-hidden="true" size={iconSize.xl} />
 								</button>
 								<button
 									aria-label={t("Use an existing folder")}
@@ -201,13 +202,13 @@ export function CodeProjectSetup({
 									type="button"
 								>
 									<span className="code-project-option-icon">
-										<FolderSimple aria-hidden="true" size={22} />
+										<FolderSimple aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span>
 										<strong>{t("Use an existing folder")}</strong>
 										<small>{t("Give Metis a folder you already work from.")}</small>
 									</span>
-									<CaretRight aria-hidden="true" size={17} />
+									<CaretRight aria-hidden="true" size={iconSize.xl} />
 								</button>
 							</div>
 						</div>
@@ -226,7 +227,7 @@ export function CodeProjectSetup({
 							onClick={goBack}
 							type="button"
 						>
-							<CaretLeft aria-hidden="true" size={21} />
+							<CaretLeft aria-hidden="true" size={iconSize.xl} />
 						</button>
 						<h2 id="code-project-create-title">{t("Start a new project")}</h2>
 						<p className="sr-only" id="code-project-create-description">
@@ -261,7 +262,7 @@ export function CodeProjectSetup({
 							onDrop={dropFiles}
 							type="button"
 						>
-							<Plus aria-hidden="true" size={18} />
+							<Plus aria-hidden="true" size={iconSize.xl} />
 							<span>
 								{files.length > 0
 									? t("{{count}} files selected", { count: files.length })
@@ -281,7 +282,7 @@ export function CodeProjectSetup({
 											}
 											type="button"
 										>
-											<X aria-hidden="true" size={14} />
+											<X aria-hidden="true" size={iconSize.md} />
 										</button>
 									</li>
 								))}
@@ -300,7 +301,7 @@ export function CodeProjectSetup({
 							title={location}
 							type="button"
 						>
-							<FolderSimple aria-hidden="true" size={18} />
+							<FolderSimple aria-hidden="true" size={iconSize.xl} />
 							<span>{location || t("Loading location…")}</span>
 						</button>
 						{error && (
@@ -328,7 +329,7 @@ export function CodeProjectSetup({
 							onClick={goBack}
 							type="button"
 						>
-							<CaretLeft aria-hidden="true" size={21} />
+							<CaretLeft aria-hidden="true" size={iconSize.xl} />
 						</button>
 						<h2 id="code-project-existing-title">{t("Use an existing folder")}</h2>
 						<p id="code-project-existing-description">

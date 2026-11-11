@@ -2,6 +2,7 @@ import type { InteractionResponseInput, InteractionView } from "@metis/app-proto
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CaretDown, CaretLeft, CaretRight, ChatCircleDots, Check, PencilSimple } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 type AskUserInteraction = Extract<InteractionView, { kind: "ask_user" }>;
 interface AnswerDraft {
@@ -224,7 +225,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 	if (draft.collapsed)
 		return (
 			<div className="ask-user-resume">
-				<ChatCircleDots aria-hidden="true" size={20} />
+				<ChatCircleDots aria-hidden="true" size={iconSize.xl} />
 				<div>
 					<strong>{t("Waiting for your answer")}</strong>
 					<span>{question.question}</span>
@@ -262,7 +263,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 								onClick={() => navigate(draft.questionIndex - 1)}
 								type="button"
 							>
-								<CaretLeft aria-hidden="true" size={16} />
+								<CaretLeft aria-hidden="true" size={iconSize.lg} />
 							</button>
 							<small>
 								<span className="sr-only">
@@ -281,7 +282,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 								onClick={() => navigate(draft.questionIndex + 1)}
 								type="button"
 							>
-								<CaretRight aria-hidden="true" size={16} />
+								<CaretRight aria-hidden="true" size={iconSize.lg} />
 							</button>
 						</div>
 					</header>
@@ -311,7 +312,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 										aria-hidden="true"
 										className={question.multiple ? "ask-user-checkbox" : "ask-user-option-number"}
 									>
-										{selected ? <Check size={12} weight="bold" /> : !question.multiple && index + 1}
+										{selected ? <Check size={iconSize.sm} weight="bold" /> : !question.multiple && index + 1}
 									</span>
 									<span className="ask-user-option-copy">
 										<strong>{choice.label}</strong>
@@ -323,7 +324,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 					</div>
 					<div className={`ask-user-custom${answer.customAnswer.trim() ? " is-selected" : ""}`}>
 						<span className="ask-user-option-number" aria-hidden="true">
-							<PencilSimple size={14} />
+							<PencilSimple size={iconSize.md} />
 						</span>
 						<label className="ask-user-option-copy">
 							<textarea
@@ -358,7 +359,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 							onClick={() => update({ ...draft, collapsed: true })}
 							type="button"
 						>
-							<CaretDown aria-hidden="true" size={16} />
+							<CaretDown aria-hidden="true" size={iconSize.lg} />
 						</button>
 					</div>
 					<div>
@@ -378,7 +379,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 							type="button"
 						>
 							{t(busy ? "Sending…" : finalQuestion ? "Confirm and continue" : "Continue")}
-							<ArrowRight aria-hidden="true" size={15} />
+							<ArrowRight aria-hidden="true" size={iconSize.lg} />
 						</button>
 					</div>
 				</footer>

@@ -4,12 +4,12 @@
 	grid-template-columns: minmax(0, 1fr);
 	gap: var(--space-8);
 }
-.permission-approval-label { color: var(--text-14); font-size: 11px; line-height: 1.4; }
+.permission-approval-label { color: var(--text-14); font-size: var(--font-size-2xs); line-height: 1.4; }
 .permission-approval-slot .permission-approval-panel > header h2 {
 	margin: 0;
 	color: var(--text-26);
-	font-size: 14px;
-	font-weight: 500;
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
 	line-height: 1.45;
 }
 .permission-approval-command {
@@ -21,7 +21,7 @@
 	background: transparent;
 	padding: 0;
 	color: var(--text-26);
-	font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	font: var(--font-size-xs)/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 	overflow-wrap: anywhere;
 	white-space: pre-wrap;
 	scrollbar-width: thin;
@@ -33,13 +33,13 @@
 	gap: 2px;
 	margin: var(--space-8) 0 0;
 	color: var(--text-muted);
-	font-size: 11px;
+	font-size: var(--font-size-2xs);
 	line-height: 1.45;
 }
-.permission-approval-scope-title { margin: 0; font-weight: 500; }
+.permission-approval-scope-title { margin: 0; font-weight: var(--font-weight-medium); }
 .permission-approval-scope ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .permission-approval-scope code {
-	font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	font: var(--font-size-2xs)/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 	overflow-wrap: anywhere;
 	white-space: pre-wrap;
 }
@@ -90,5 +90,5 @@
 	color: inherit;
 }
 .permission-approval-split-selector .menu-select-value { display: none; }
-.permission-approval-panel footer kbd { margin-left: 3px; font-size: 10px; opacity: .7; }
-.permission-approval-panel .error-copy { margin: var(--space-8) 0 0; font-size: 12px; }
+.permission-approval-panel footer kbd { margin-left: 3px; font-size: var(--font-size-2xs); opacity: .7; }
+.permission-approval-panel .error-copy { margin: var(--space-8) 0 0; font-size: var(--font-size-xs); }

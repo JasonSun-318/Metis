@@ -9,6 +9,7 @@ import type {
 } from "../../shared/desktop-api.ts";
 import { X } from "../icons.tsx";
 import "../styles/browser-import-dialog.css";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -373,7 +374,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 				ref={closeRef}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="browser-import-title">{t("Import from browser")}</h2>
 			<p id="browser-import-description">{t("Choose data to import into an isolated Metis browser profile.")}</p>

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { contextFillPercent, contextUsagePercent, formatContextTokens } from "../context-usage.ts";
 import { Info, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 
 interface SessionStatusPanelProps {
@@ -96,7 +97,7 @@ export function SessionStatusPanel({ id, closing = false, error, loading, onClos
 			<header>
 				<strong id={titleId}>{t("Context Usage")}</strong>
 				<button aria-label={t("Close status")} onClick={onClose} ref={closeButtonRef} type="button">
-					<X aria-hidden="true" size={16} />
+					<X aria-hidden="true" size={iconSize.lg} />
 				</button>
 			</header>
 			{loading ? (
@@ -181,7 +182,7 @@ export function SessionStatusPanel({ id, closing = false, error, loading, onClos
 										}
 									}}
 								>
-									<Info aria-hidden="true" size={13} />
+									<Info aria-hidden="true" size={iconSize.md} />
 								</button>
 								<p id={cacheInfoId} role="tooltip" hidden={!cacheInfoOpen && !cacheInfoHovered}>
 									{t(

@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MagnifyingGlass, SpinnerGap, Table } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import {
 	cellKey,
 	type ExcelSelection,
@@ -278,7 +279,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 				byteLength={byteLength}
 				extraActions={
 					<div className="excel-search-bar">
-						<MagnifyingGlass aria-hidden="true" size={13} />
+						<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 						<input
 							aria-label={t("Filter cells")}
 							onChange={(event) => setSearchQuery(event.target.value)}
@@ -392,7 +393,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 			>
 				{loading ? (
 					<div className="preview-loading-state">
-						<SpinnerGap aria-hidden="true" className="is-spinning" size={28} />
+						<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 						<span>{t("Loading Excel spreadsheet…")}</span>
 					</div>
 				) : error ? (
@@ -401,7 +402,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 					</div>
 				) : !sheet || sheet.rowCount === 0 ? (
 					<div className="preview-empty-state">
-						<Table aria-hidden="true" size={32} />
+						<Table aria-hidden="true" size={iconSize.xl} />
 						<span>{t("Empty sheet")}</span>
 					</div>
 				) : (

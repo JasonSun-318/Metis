@@ -35,16 +35,16 @@
 .composer-panels .goal-bar-action, .composer-panels .session-status-panel > header button { width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0; border-radius: var(--radius-compact); }
 
 .composer-panels .queued-turn-list { display: flex; flex-direction: column; flex: 0 1 auto; overflow: hidden; max-height: 174px; }
-.queued-turn-heading { display: flex; flex: none; align-items: center; justify-content: space-between; min-height: 28px; padding: 4px 11px; color: var(--muted); font-size: 11px; }
+.queued-turn-heading { display: flex; flex: none; align-items: center; justify-content: space-between; min-height: 28px; padding: 4px 11px; color: var(--muted); font-size: var(--font-size-2xs); }
 .queued-turn-count { font: inherit; color: var(--text-14); }
 .queued-turn-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; border-top: 1px solid var(--border); }
-.queued-turn-disabled-reason { display: block; padding: 0 11px 7px; color: var(--text-14); font-size: 11px; line-height: 1.4; }
+.queued-turn-disabled-reason { display: block; padding: 0 11px 7px; color: var(--text-14); font-size: var(--font-size-2xs); line-height: 1.4; }
 .composer-panels .queued-turn-row { padding-block: 9px; }
-.composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 var(--space-8); border-radius: var(--radius-compact); font-size: 11px; }
+.composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 var(--space-8); border-radius: var(--radius-compact); font-size: var(--font-size-2xs); }
 
 .composer-panels .slash-command-menu { max-height: min(248px, var(--composer-panels-limit)); animation: none; scrollbar-width: thin; overscroll-behavior: contain; }
 .composer-panels .slash-command-menu button { min-height: var(--menu-item-height); padding: 0 var(--space-8); }
-.composer-panels .slash-command-menu strong { font-size: 12px; }
+.composer-panels .slash-command-menu strong { font-size: var(--font-size-xs); }
 .composer-panels .session-status-panel { max-height: var(--composer-panels-limit); padding: 8px 12px var(--space-12); overscroll-behavior: contain; scrollbar-width: thin; }
 .composer-panels .session-status-panel > header { position: sticky; top: -8px; z-index: 1; background: var(--panel); }
 .composer-panels .context-usage-breakdown { gap: 5px; margin-top: var(--space-8); }

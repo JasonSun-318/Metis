@@ -23,6 +23,7 @@ import { Lightbulb, X, XCircle } from "../icons.tsx";
 import { latestAssistantUsageKey, queuedTurnActionError } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { emptyProjection } from "../store/reducer.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
@@ -684,8 +685,8 @@ export const SessionChatView = memo(function SessionChatView({
 					type="button"
 				>
 					<span aria-hidden="true" className="collaboration-mode-icon">
-						<Lightbulb className="collaboration-mode-active-icon" size={14} />
-						<XCircle className="collaboration-mode-exit-icon" size={14} weight="fill" />
+						<Lightbulb className="collaboration-mode-active-icon" size={iconSize.md} />
+						<XCircle className="collaboration-mode-exit-icon" size={iconSize.md} weight="fill" />
 					</span>
 					<span>{t("Plan")}</span>
 				</button>
@@ -697,7 +698,7 @@ export const SessionChatView = memo(function SessionChatView({
 				{t("Revise plan")}: {planRevisionTarget.title} · r{planRevisionTarget.revision}
 			</span>
 			<button aria-label={t("Remove revision context")} onClick={clearPlanRevision} type="button">
-				<X aria-hidden="true" size={14} />
+				<X aria-hidden="true" size={iconSize.md} />
 			</button>
 		</div>
 	) : null;

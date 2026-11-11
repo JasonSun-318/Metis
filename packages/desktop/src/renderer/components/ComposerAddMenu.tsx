@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 import { useMenuDismiss } from "../hooks/use-menu-dismiss.ts";
 import { Books, Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "../icons.tsx";
+import { iconSize as iconSteps } from "../ui/icon-size.ts";
 import { KnowledgeLinkMenu, type KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 
 interface ComposerAddMenuProps {
@@ -21,7 +22,7 @@ interface ComposerAddMenuProps {
 export function ComposerAddMenu({
 	commandRequest,
 	disabled,
-	iconSize = 18,
+	iconSize = iconSteps.xl,
 	knowledge,
 	mcpServers,
 	skills,
@@ -338,7 +339,7 @@ export function ComposerAddMenu({
 							role="menuitem"
 							type="button"
 						>
-							<Paperclip aria-hidden="true" size={15} />
+							<Paperclip aria-hidden="true" size={iconSteps.lg} />
 							<span>{t("Add files or photos")}</span>
 							<span aria-hidden="true" className="composer-menu-shortcut">
 								⌘U
@@ -372,9 +373,9 @@ export function ComposerAddMenu({
 									role="menuitem"
 									type="button"
 								>
-									<Books aria-hidden="true" size={15} />
+									<Books aria-hidden="true" size={iconSteps.lg} />
 									<span>{t("Knowledge")}</span>
-									<CaretRight aria-hidden="true" className="composer-menu-caret" size={13} />
+									<CaretRight aria-hidden="true" className="composer-menu-caret" size={iconSteps.md} />
 								</button>
 								{knowledgeOpen && (
 									<div
@@ -406,9 +407,9 @@ export function ComposerAddMenu({
 							role="menuitem"
 							type="button"
 						>
-							<Scroll aria-hidden="true" size={15} />
+							<Scroll aria-hidden="true" size={iconSteps.lg} />
 							<span>{t("Skills")}</span>
-							<CaretRight aria-hidden="true" className="composer-menu-caret" size={13} />
+							<CaretRight aria-hidden="true" className="composer-menu-caret" size={iconSteps.md} />
 						</button>
 						{skillsOpen && (
 							<div
@@ -432,7 +433,7 @@ export function ComposerAddMenu({
 										title={skill.name}
 										type="button"
 									>
-										<Scroll aria-hidden="true" size={15} />
+										<Scroll aria-hidden="true" size={iconSteps.lg} />
 										<span className="composer-menu-item-label">{skill.name}</span>
 									</button>
 								))}
@@ -445,7 +446,7 @@ export function ComposerAddMenu({
 									role="menuitem"
 									type="button"
 								>
-									<Briefcase aria-hidden="true" size={15} />
+									<Briefcase aria-hidden="true" size={iconSteps.lg} />
 									<span className="composer-menu-item-label">{t("Manage skills")}</span>
 								</button>
 							</div>
@@ -461,9 +462,9 @@ export function ComposerAddMenu({
 							role="menuitem"
 							type="button"
 						>
-							<Plug aria-hidden="true" size={15} />
+							<Plug aria-hidden="true" size={iconSteps.lg} />
 							<span>{t("MCP")}</span>
-							<CaretRight aria-hidden="true" className="composer-menu-caret" size={13} />
+							<CaretRight aria-hidden="true" className="composer-menu-caret" size={iconSteps.md} />
 						</button>
 						{mcpOpen && (
 							<div
@@ -487,7 +488,7 @@ export function ComposerAddMenu({
 										title={server.name}
 										type="button"
 									>
-										<Plug aria-hidden="true" size={15} />
+										<Plug aria-hidden="true" size={iconSteps.lg} />
 										<span className="composer-menu-item-label">{server.name}</span>
 									</button>
 								))}
@@ -500,7 +501,7 @@ export function ComposerAddMenu({
 									role="menuitem"
 									type="button"
 								>
-									<Briefcase aria-hidden="true" size={15} />
+									<Briefcase aria-hidden="true" size={iconSteps.lg} />
 									<span className="composer-menu-item-label">{t("Manage MCP")}</span>
 								</button>
 							</div>

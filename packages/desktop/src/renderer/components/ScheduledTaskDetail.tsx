@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ArrowLeft, NotePencil, Play, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
@@ -172,7 +173,7 @@ export function ScheduledTaskDetail({
 		<section className="scheduled-task-detail">
 			<nav aria-label={t("Breadcrumb")} className="scheduled-task-breadcrumb">
 				<button onClick={onBack} type="button">
-					<ArrowLeft aria-hidden="true" size={14} /> {t("Scheduled tasks")}
+					<ArrowLeft aria-hidden="true" size={iconSize.md} /> {t("Scheduled tasks")}
 				</button>
 			</nav>
 			<header>
@@ -202,7 +203,7 @@ export function ScheduledTaskDetail({
 						onClick={() => void runNow()}
 						type="button"
 					>
-						<Play aria-hidden="true" size={14} /> {t("Run now")}
+						<Play aria-hidden="true" size={iconSize.md} /> {t("Run now")}
 					</button>
 					<button
 						aria-label={t("Edit task")}
@@ -211,7 +212,7 @@ export function ScheduledTaskDetail({
 						onClick={onEdit}
 						type="button"
 					>
-						<NotePencil aria-hidden="true" size={15} />
+						<NotePencil aria-hidden="true" size={iconSize.lg} />
 					</button>
 					<button
 						aria-label={t("Delete task")}
@@ -220,7 +221,7 @@ export function ScheduledTaskDetail({
 						onClick={() => setConfirmDelete(true)}
 						type="button"
 					>
-						<Trash aria-hidden="true" size={15} />
+						<Trash aria-hidden="true" size={iconSize.lg} />
 					</button>
 				</div>
 			</header>

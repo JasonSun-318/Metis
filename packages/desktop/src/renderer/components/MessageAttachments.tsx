@@ -1,5 +1,6 @@
 import type { ItemView } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
+import { iconSize } from "../ui/icon-size.ts";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 function fileSize(bytes: number): string {
@@ -16,7 +17,7 @@ export function MessageAttachments({ attachments }: { readonly attachments: Item
 			{attachments.map((file, index) => (
 				<li className="message-file-card" key={`${index}-${file.name}`}>
 					<span className="message-file-icon" aria-hidden="true">
-						<WorkspaceFileIcon path={file.name} size={25} />
+						<WorkspaceFileIcon path={file.name} size={iconSize.xl} />
 					</span>
 					<span className="message-file-info">
 						<strong title={file.name}>{file.name}</strong>

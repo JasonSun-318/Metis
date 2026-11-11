@@ -5,6 +5,7 @@ import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ChartBar, Rows } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 
 type UsageDisplay = "chart" | "table";
 
@@ -173,7 +174,7 @@ export function UsagePanel({
 							onClick={() => setDisplay("chart")}
 							type="button"
 						>
-							<ChartBar aria-hidden="true" size={18} />
+							<ChartBar aria-hidden="true" size={iconSize.xl} />
 						</button>
 						<button
 							aria-label={t("Table view")}
@@ -181,7 +182,7 @@ export function UsagePanel({
 							onClick={() => setDisplay("table")}
 							type="button"
 						>
-							<Rows aria-hidden="true" size={18} />
+							<Rows aria-hidden="true" size={iconSize.xl} />
 						</button>
 					</fieldset>
 				</header>

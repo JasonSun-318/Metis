@@ -3,6 +3,7 @@ import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, u
 import { useTranslation } from "react-i18next";
 import { CaretDown, CaretRight, Check } from "../icons.tsx";
 import { providerDisplayName } from "../provider-names.ts";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface ModelSelectorProps {
 	readonly available: readonly ModelOptionView[];
@@ -196,7 +197,7 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				type="button"
 			>
 				<span>{selected?.name ?? value?.modelId ?? t("Model")}</span>
-				<CaretDown aria-hidden="true" size={12} />
+				<CaretDown aria-hidden="true" size={iconSize.sm} />
 			</button>
 			{open && (
 				<div
@@ -232,9 +233,9 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 							>
 								<span>{name}</span>
 								{isSelected ? (
-									<Check aria-hidden="true" size={16} weight="bold" />
+									<Check aria-hidden="true" size={iconSize.lg} weight="bold" />
 								) : (
-									<CaretRight aria-hidden="true" size={14} />
+									<CaretRight aria-hidden="true" size={iconSize.md} />
 								)}
 							</button>
 						);
@@ -266,7 +267,7 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 							>
 								<span>{model.name}</span>
 								{isSelected ? (
-									<Check aria-hidden="true" size={16} weight="bold" />
+									<Check aria-hidden="true" size={iconSize.lg} weight="bold" />
 								) : index < 9 ? (
 									<kbd>{index + 1}</kbd>
 								) : null}

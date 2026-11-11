@@ -33,6 +33,7 @@ import { type NewTaskDraft, SessionWorkspaceWorkflow, sessionProjectKey } from "
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import type { ComposerSubmission } from "./Composer.tsx";
 import { ConversationScopeProvider, type PermissionRuleReference } from "./ConversationScope.tsx";
@@ -1792,7 +1793,9 @@ export function App({ api, store }: AppProps) {
 				isWindows ? ({ "--windows-sidebar-offset": `${winTitlebarSidebarOffset}px` } as CSSProperties) : undefined
 			}
 		>
-			{!isWindows && <SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={17} />}
+			{!isWindows && (
+				<SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={iconSize.xl} />
+			)}
 			<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} style={{ right: toolsTitlebarReserved }} />
 			{toolsSidebarAvailable && (
 				<div
@@ -1838,7 +1841,7 @@ export function App({ api, store }: AppProps) {
 								onClick={navigateBack}
 								type="button"
 							>
-								<ArrowLeft aria-hidden="true" size={16} />
+								<ArrowLeft aria-hidden="true" size={iconSize.lg} />
 							</button>
 							<button
 								aria-label={t("Go forward")}
@@ -1846,9 +1849,9 @@ export function App({ api, store }: AppProps) {
 								onClick={navigateForward}
 								type="button"
 							>
-								<ArrowRight aria-hidden="true" size={16} />
+								<ArrowRight aria-hidden="true" size={iconSize.lg} />
 							</button>
-							<SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={16} />
+							<SessionsSidebarToggle onToggle={toggleSessionsSidebar} open={!isCollapsed} size={iconSize.lg} />
 						</nav>
 					)}
 					{sessionsSidebarOpen && (

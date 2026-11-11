@@ -71,6 +71,24 @@
 	--control-icon-size: 28px;
 	--menu-item-height: var(--control-height-compact);
 	--menu-item-font-size: var(--control-font-size);
+
+	/* type scale: captions, compact UI, controls, body, titles. */
+	--font-size-2xs: 11px;
+	--font-size-xs: 12px;
+	--font-size-sm: var(--control-font-size);
+	--font-size-md: var(--content-font-size);
+	--font-size-lg: var(--dialog-title-size);
+	--font-size-xl: var(--page-title-size);
+	--font-size-display: 32px;
+	--font-weight-regular: 400;
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+
+	/* icon steps used by CSS and the shared TSX size constant. */
+	--icon-size-sm: 12px;
+	--icon-size-md: 14px;
+	--icon-size-lg: 16px;
+	--icon-size-xl: 18px;
 	--control-disabled-opacity: .48;
 	--switch-width: 36px;
 	--switch-height: 22px;

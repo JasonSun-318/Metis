@@ -2,6 +2,7 @@ import type { CodeChangesView, ItemContentBlockView } from "@metis/app-protocol"
 import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CaretRight, CircleNotch, GitFork, ImageSquare } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { AgentReportMessage } from "./AgentReportMessage.tsx";
 import { CodeChangesNavigationContext } from "./CodeChangesNavigationContext.ts";
 import { CodeTurnChanges } from "./CodeTurnChanges.tsx";
@@ -61,7 +62,7 @@ function VisibleBlock({
 		case "image":
 			return (
 				<p className="transcript-attachment">
-					<ImageSquare aria-hidden="true" size={16} /> {t("Image")} · {block.image.mediaType}
+					<ImageSquare aria-hidden="true" size={iconSize.lg} /> {t("Image")} · {block.image.mediaType}
 				</p>
 			);
 		case "notice":
@@ -120,7 +121,7 @@ function CodeToolDetails({
 				? (lines.length > 0 || input || rawOutput !== undefined) && (
 						<details className="code-tool-raw-details">
 							<summary>
-								<CaretRight aria-hidden="true" size={12} />
+								<CaretRight aria-hidden="true" size={iconSize.sm} />
 								{t("Tool details")}
 							</summary>
 							{rawDetails}
@@ -156,8 +157,8 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 					{codeStepLabel(call, result, presentation.label, t)}
 				</span>
 				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
-				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
-				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
+				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={iconSize.md} />}
+				<CaretRight aria-hidden="true" className="code-command-caret" size={iconSize.sm} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div>
@@ -192,7 +193,7 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 			>
 				<span>{presentation.label}</span>
 				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
-				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
+				<CaretRight aria-hidden="true" className="code-command-caret" size={iconSize.sm} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<CodeToolDetails
@@ -282,7 +283,7 @@ function CodeExecution({
 			>
 				<CodeExecutionTitle text={title} />
 				{turnCounts && <CodeChangeCounts counts={turnCounts} turn />}
-				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
+				<CaretRight aria-hidden="true" className="code-execution-caret" size={iconSize.sm} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div>
@@ -461,7 +462,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 							title={t("Fork this conversation from this reply")}
 							type="button"
 						>
-							<GitFork aria-hidden="true" size={13} />
+							<GitFork aria-hidden="true" size={iconSize.md} />
 						</button>
 					)}
 					{onCopy && finalCopyText.trim() !== "" && <TurnCopyButton onCopy={onCopy} text={finalCopyText} />}

@@ -2,6 +2,7 @@ import type { ClientResult } from "@metis/app-protocol";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, BracketsCurly, CaretRight, FolderSimple, LinkSimple, SlidersHorizontal, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { type McpServerDraft, McpServerForm } from "./McpServerDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -215,7 +216,7 @@ export function McpCreationDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<div className="skill-create-heading">
 				{step !== "methods" && (
@@ -226,7 +227,7 @@ export function McpCreationDialog({
 						onClick={back}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={17} />
+						<ArrowLeft aria-hidden="true" size={iconSize.xl} />
 					</button>
 				)}
 				<div>
@@ -273,7 +274,7 @@ export function McpCreationDialog({
 								onClick={() => void chooseProject()}
 								type="button"
 							>
-								<FolderSimple aria-hidden="true" size={15} />
+								<FolderSimple aria-hidden="true" size={iconSize.lg} />
 								{t("Choose folder…")}
 							</button>
 						</div>
@@ -289,13 +290,13 @@ export function McpCreationDialog({
 							type="button"
 						>
 							<span>
-								<LinkSimple aria-hidden="true" size={20} />
+								<LinkSimple aria-hidden="true" size={iconSize.xl} />
 							</span>
 							<span>
 								<strong>{t("Add by URL")}</strong>
 								<small>{t("Configure a Streamable HTTP server and optional credentials.")}</small>
 							</span>
-							<CaretRight aria-hidden="true" size={16} />
+							<CaretRight aria-hidden="true" size={iconSize.lg} />
 						</button>
 						<button
 							aria-label={t("Custom MCP")}
@@ -304,13 +305,13 @@ export function McpCreationDialog({
 							type="button"
 						>
 							<span>
-								<SlidersHorizontal aria-hidden="true" size={20} />
+								<SlidersHorizontal aria-hidden="true" size={iconSize.xl} />
 							</span>
 							<span>
 								<strong>{t("Custom MCP")}</strong>
 								<small>{t("Configure a local command or advanced Streamable HTTP server.")}</small>
 							</span>
-							<CaretRight aria-hidden="true" size={16} />
+							<CaretRight aria-hidden="true" size={iconSize.lg} />
 						</button>
 						<button
 							aria-label={t("Import JSON")}
@@ -319,13 +320,13 @@ export function McpCreationDialog({
 							type="button"
 						>
 							<span>
-								<BracketsCurly aria-hidden="true" size={20} />
+								<BracketsCurly aria-hidden="true" size={iconSize.xl} />
 							</span>
 							<span>
 								<strong>{t("Import JSON")}</strong>
 								<small>{t("Inspect JSON or JSONC before importing selected servers.")}</small>
 							</span>
-							<CaretRight aria-hidden="true" size={16} />
+							<CaretRight aria-hidden="true" size={iconSize.lg} />
 						</button>
 					</div>
 				)}

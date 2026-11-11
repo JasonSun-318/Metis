@@ -22,6 +22,7 @@ import {
 	XCircle,
 } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 import { MemoryDreamSettings } from "./MemoryDreamSettings.tsx";
 import { MemorySessionSettings } from "./MemorySessionSettings.tsx";
@@ -772,12 +773,12 @@ export function MemorySettingsPanel({
 						onClick={() => openPanel("notes")}
 						type="button"
 					>
-						<Database aria-hidden="true" size={19} />
+						<Database aria-hidden="true" size={iconSize.xl} />
 						<span className="memory-manage-copy">
 							<strong>{t("Saved memories")}</strong>
 							<span>{t("Review what Metis remembers. You can edit or remove any note.")}</span>
 						</span>
-						<CaretRight aria-hidden="true" size={14} />
+						<CaretRight aria-hidden="true" size={iconSize.md} />
 					</button>
 					<MemorySessionSettings api={api} currentSessionId={sessionId} serverReady={serverReady} />
 					<button
@@ -786,12 +787,12 @@ export function MemorySettingsPanel({
 						onClick={() => openPanel("history")}
 						type="button"
 					>
-						<ArrowCounterClockwise aria-hidden="true" size={19} />
+						<ArrowCounterClockwise aria-hidden="true" size={iconSize.xl} />
 						<span className="memory-manage-copy">
 							<strong>{t("Recent changes")}</strong>
 							<span>{t("Review and undo")}</span>
 						</span>
-						<CaretRight aria-hidden="true" size={14} />
+						<CaretRight aria-hidden="true" size={iconSize.md} />
 					</button>
 					<button
 						aria-label={t("Storage location")}
@@ -799,12 +800,12 @@ export function MemorySettingsPanel({
 						onClick={() => openPanel("storage")}
 						type="button"
 					>
-						<FolderOpen aria-hidden="true" size={19} />
+						<FolderOpen aria-hidden="true" size={iconSize.xl} />
 						<span className="memory-manage-copy">
 							<strong>{t("Storage location")}</strong>
 							<span>{t("Global and current project memory folders")}</span>
 						</span>
-						<CaretRight aria-hidden="true" size={14} />
+						<CaretRight aria-hidden="true" size={iconSize.md} />
 					</button>
 				</div>
 			</section>
@@ -837,7 +838,7 @@ export function MemorySettingsPanel({
 					</div>
 					{modelChoicesError ? (
 						<div className="memory-info-banner" role="alert">
-							<XCircle aria-hidden="true" size={15} />
+							<XCircle aria-hidden="true" size={iconSize.lg} />
 							<span>{t("Couldn’t load memory model choices.")}</span>
 						</div>
 					) : null}
@@ -854,11 +855,11 @@ export function MemorySettingsPanel({
 							<strong>{t("Advanced settings")}</strong>
 							<span>{t("Model, frequency and cleanup")}</span>
 						</span>
-						<CaretRight aria-hidden="true" size={14} />
+						<CaretRight aria-hidden="true" size={iconSize.md} />
 					</button>
 					{dreamLastRun ? (
 						<div className="memory-info-banner">
-							<Moon aria-hidden="true" size={15} />
+							<Moon aria-hidden="true" size={iconSize.lg} />
 							<span>
 								{t("Last dream: {{added}} added, {{updated}} updated, {{deleted}} deleted", {
 									added: dreamLastRun.added,
@@ -871,7 +872,7 @@ export function MemorySettingsPanel({
 					) : null}
 					{settings?.dream.modelAvailable === false ? (
 						<div className="memory-info-banner">
-							<Info aria-hidden="true" size={15} />
+							<Info aria-hidden="true" size={iconSize.lg} />
 							<span>{t("No credentialed model is available for dreaming.")}</span>
 						</div>
 					) : null}
@@ -884,7 +885,7 @@ export function MemorySettingsPanel({
 							onClick={() => void runDreamNow()}
 							type="button"
 						>
-							<Moon aria-hidden="true" size={13} />
+							<Moon aria-hidden="true" size={iconSize.md} />
 							{dreamBusy === "run" ? t("Running…") : t("Run now")}
 						</button>
 						{dreamDraftDirty ? (
@@ -898,7 +899,7 @@ export function MemorySettingsPanel({
 								onClick={() => void undoDreamRun(failedRunId)}
 								type="button"
 							>
-								<ArrowCounterClockwise aria-hidden="true" size={13} />
+								<ArrowCounterClockwise aria-hidden="true" size={iconSize.md} />
 								{dreamBusy === "undo" ? t("Undoing…") : t("Undo changes from failed run")}
 							</button>
 						) : null}
@@ -910,7 +911,7 @@ export function MemorySettingsPanel({
 								onClick={() => void undoDreamRun(dreamLastRun.runId)}
 								type="button"
 							>
-								<ArrowCounterClockwise aria-hidden="true" size={13} />
+								<ArrowCounterClockwise aria-hidden="true" size={iconSize.md} />
 								{dreamBusy === "undo" ? t("Undoing…") : t("Undo last run")}
 							</button>
 						) : null}
@@ -951,7 +952,7 @@ export function MemorySettingsPanel({
 							) : null}
 						</fieldset>
 						<label className="memory-notes-search">
-							<MagnifyingGlass aria-hidden="true" size={13} />
+							<MagnifyingGlass aria-hidden="true" size={iconSize.md} />
 							<span className="sr-only">{t("Search memory notes")}</span>
 							<input
 								aria-label={t("Search memory notes")}
@@ -968,23 +969,23 @@ export function MemorySettingsPanel({
 							onClick={newNote}
 							type="button"
 						>
-							<FilePlus aria-hidden="true" size={13} />
+							<FilePlus aria-hidden="true" size={iconSize.md} />
 							{t("New note")}
 						</button>
 					</div>
 					{notesError ? (
 						<div className="memory-info-banner" role="alert">
-							<XCircle aria-hidden="true" size={15} />
+							<XCircle aria-hidden="true" size={iconSize.lg} />
 							<span>{notesError}</span>
 						</div>
 					) : notes === null ? (
 						<output className="status-block memory-info-banner">
-							<Info aria-hidden="true" size={15} />
+							<Info aria-hidden="true" size={iconSize.lg} />
 							<span>{t("Loading…")}</span>
 						</output>
 					) : notes.length === 0 ? (
 						<div className="memory-empty-state">
-							<Database aria-hidden="true" size={22} />
+							<Database aria-hidden="true" size={iconSize.xl} />
 							<strong>{notesQuery.trim() ? t("No matching memories") : t("No memories yet")}</strong>
 							<p>
 								{notesQuery.trim()
@@ -1088,7 +1089,7 @@ export function MemorySettingsPanel({
 									onClick={() => void deleteNote()}
 									type="button"
 								>
-									<Trash aria-hidden="true" size={13} />
+									<Trash aria-hidden="true" size={iconSize.md} />
 									{noteBusy === "delete" ? t("Deleting…") : t("Delete")}
 								</button>
 							) : null}
@@ -1174,12 +1175,12 @@ export function MemorySettingsPanel({
 					<div className="memory-history-content">
 						{history === null ? (
 							<output className="status-block memory-info-banner">
-								<Info aria-hidden="true" size={15} />
+								<Info aria-hidden="true" size={iconSize.lg} />
 								<span>{t("Loading…")}</span>
 							</output>
 						) : history.length === 0 ? (
 							<div className="memory-info-banner">
-								<Database aria-hidden="true" size={15} />
+								<Database aria-hidden="true" size={iconSize.lg} />
 								<span>{t("No memory changes yet.")}</span>
 							</div>
 						) : (
@@ -1209,7 +1210,7 @@ export function MemorySettingsPanel({
 														onClick={() => void undo(entry)}
 														type="button"
 													>
-														<ArrowCounterClockwise aria-hidden="true" size={13} />
+														<ArrowCounterClockwise aria-hidden="true" size={iconSize.md} />
 														{undoBusy === entry.id ? t("Undoing…") : t("Undo")}
 													</button>
 												) : null}
@@ -1268,13 +1269,13 @@ export function MemorySettingsPanel({
 				)}
 				{error ? (
 					<p className="settings-action-message error web-search-message" role="alert">
-						<XCircle aria-hidden="true" size={15} />
+						<XCircle aria-hidden="true" size={iconSize.lg} />
 						{error}
 					</p>
 				) : null}
 				{dreamFieldError ? (
 					<p className="settings-action-message error web-search-message" role="alert">
-						<XCircle aria-hidden="true" size={15} />
+						<XCircle aria-hidden="true" size={iconSize.lg} />
 						{t(dreamFieldError)}
 					</p>
 				) : null}

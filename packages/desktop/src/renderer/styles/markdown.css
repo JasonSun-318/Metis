@@ -57,7 +57,7 @@
 	align-items: center;
 	gap: 7px;
 	color: var(--text-strong, var(--text));
-	font-weight: 560;
+	font-weight: var(--font-weight-semibold);
 }
 
 .markdown-callout-icon {

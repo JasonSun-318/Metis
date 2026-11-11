@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Browser, Info } from "../icons.tsx";
 import { cachedSettingsView, rememberSettingsView, useDelayedLoading } from "../settings-async.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
 import {
 	type RememberedFocus,
@@ -370,11 +371,11 @@ export function PermissionSettingsPanel({
 			<section className="settings-section permission-execution-environment">
 				<SandboxEnvironmentCard api={api} serverReady={serverReady} />
 				<div className="permission-browser-link">
-					<Info aria-hidden="true" size={15} />
+					<Info aria-hidden="true" size={iconSize.lg} />
 					<span>{t("Browser actions are managed by the browser confirmation flow.")}</span>
 					{onOpenBrowserSettings ? (
 						<button className="permission-browser-link-button" onClick={onOpenBrowserSettings} type="button">
-							<Browser aria-hidden="true" size={14} />
+							<Browser aria-hidden="true" size={iconSize.md} />
 							{t("Manage browser settings")}
 						</button>
 					) : null}

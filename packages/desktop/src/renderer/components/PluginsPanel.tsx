@@ -51,6 +51,7 @@ import {
 } from "../icons.tsx";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { DelayedPlaceholder } from "./DelayedPlaceholder.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { type HookDraft, HookEditorDialog } from "./HookEditorDialog.tsx";
@@ -291,7 +292,7 @@ function RemoveHookDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="hook-remove-title">{t("Remove Hook?")}</h2>
 			<p id="hook-remove-description">
@@ -385,7 +386,7 @@ function RemoveMcpDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="mcp-remove-title">{t("Remove MCP server?")}</h2>
 			<p id="mcp-remove-description">
@@ -442,7 +443,7 @@ function RemoveSkillDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<h2 id="skill-remove-title">{t("Move Skill to Trash?")}</h2>
 			<p id="skill-remove-description">
@@ -532,7 +533,7 @@ function NewPluginMenu({
 				type="button"
 			>
 				<span>{label}</span>
-				<CaretDown aria-hidden="true" size={14} />
+				<CaretDown aria-hidden="true" size={iconSize.md} />
 			</button>
 			{open &&
 				createPortal(
@@ -595,7 +596,7 @@ function SearchBox({
 	const { t } = useTranslation();
 	return (
 		<label className="plugins-search">
-			<MagnifyingGlass aria-hidden="true" size={18} />
+			<MagnifyingGlass aria-hidden="true" size={iconSize.xl} />
 			<input
 				aria-label={label}
 				ref={inputRef}
@@ -613,7 +614,7 @@ function SearchBox({
 						inputRef.current?.focus();
 					}}
 				>
-					<X aria-hidden="true" size={15} />
+					<X aria-hidden="true" size={iconSize.lg} />
 				</button>
 			)}
 		</label>
@@ -670,7 +671,7 @@ function PluginBackButton({ label, onBack }: { readonly label: string; readonly 
 	return (
 		<div className="plugins-back-row">
 			<button aria-label={label} className="plugins-back" onClick={onBack} type="button">
-				<ArrowLeft aria-hidden="true" size={17} />
+				<ArrowLeft aria-hidden="true" size={iconSize.xl} />
 				{label}
 			</button>
 		</div>
@@ -804,7 +805,7 @@ function DetailList({
 									<strong>{value.name}</strong>
 									{value.description && <small>{value.description}</small>}
 								</span>
-								<CaretRight aria-hidden="true" size={14} />
+								<CaretRight aria-hidden="true" size={iconSize.md} />
 							</button>
 							{selected && <CatalogItemDetail item={active} />}
 						</li>
@@ -1598,7 +1599,7 @@ export function PluginsPanel({
 								<ArrowsClockwise
 									aria-hidden="true"
 									className={skillsState.status === "loading" ? "plugins-spin" : undefined}
-									size={16}
+									size={iconSize.lg}
 								/>
 								{t("Reload")}
 							</button>
@@ -1615,7 +1616,7 @@ export function PluginsPanel({
 								<ArrowsClockwise
 									aria-hidden="true"
 									className={hooksState.status === "loading" ? "plugins-spin" : undefined}
-									size={16}
+									size={iconSize.lg}
 								/>
 								{t("Reload")}
 							</button>
@@ -1627,7 +1628,7 @@ export function PluginsPanel({
 								onClick={() => openDialog({ kind: "hook-editor", mode: "create" })}
 								type="button"
 							>
-								<Plus aria-hidden="true" size={16} />
+								<Plus aria-hidden="true" size={iconSize.lg} />
 								<span>{t("New Hook")}</span>
 							</button>
 						) : (
@@ -1833,7 +1834,7 @@ export function PluginsPanel({
 										type="button"
 									>
 										<span className="plugins-row-icon">
-											<PuzzlePiece aria-hidden="true" size={22} />
+											<PuzzlePiece aria-hidden="true" size={iconSize.xl} />
 										</span>
 										<span className="plugins-row-copy">
 											<strong>{skill.name}</strong>
@@ -1849,7 +1850,7 @@ export function PluginsPanel({
 												<span className="plugins-from-owner-badge">{skill.pluginOwner.displayName}</span>
 											)}
 										</span>
-										<CaretRight aria-hidden="true" size={17} />
+										<CaretRight aria-hidden="true" size={iconSize.xl} />
 									</button>
 								))
 							)
@@ -1905,7 +1906,7 @@ export function PluginsPanel({
 										type="button"
 									>
 										<span className="plugins-row-icon">
-											<Plug aria-hidden="true" size={22} />
+											<Plug aria-hidden="true" size={iconSize.xl} />
 										</span>
 										<span className="plugins-row-copy">
 											<strong>{server.name}</strong>
@@ -1924,7 +1925,7 @@ export function PluginsPanel({
 												<span className="plugins-from-owner-badge">{server.pluginOwner.displayName}</span>
 											)}
 										</span>
-										<CaretRight aria-hidden="true" size={17} />
+										<CaretRight aria-hidden="true" size={iconSize.xl} />
 									</button>
 								))
 							)
@@ -1970,7 +1971,7 @@ export function PluginsPanel({
 									type="button"
 								>
 									<span className="plugins-row-icon">
-										<Lightning aria-hidden="true" size={22} />
+										<Lightning aria-hidden="true" size={iconSize.xl} />
 									</span>
 									<span className="plugins-row-copy">
 										<strong>{hook.name}</strong>
@@ -1984,7 +1985,7 @@ export function PluginsPanel({
 											<span className="plugins-from-owner-badge">{hook.pluginOwner.displayName}</span>
 										)}
 									</span>
-									<CaretRight aria-hidden="true" size={17} />
+									<CaretRight aria-hidden="true" size={iconSize.xl} />
 								</button>
 							))
 						)}
@@ -2038,7 +2039,7 @@ export function PluginsPanel({
 										}
 										type="button"
 									>
-										<PencilSimple aria-hidden="true" size={17} />
+										<PencilSimple aria-hidden="true" size={iconSize.xl} />
 										{t("Edit")}
 									</button>
 									<button
@@ -2053,7 +2054,7 @@ export function PluginsPanel({
 										}
 										type="button"
 									>
-										<FolderOpen aria-hidden="true" size={17} />
+										<FolderOpen aria-hidden="true" size={iconSize.xl} />
 										{t("Open containing folder")}
 									</button>
 									<button
@@ -2066,7 +2067,7 @@ export function PluginsPanel({
 										}
 										type="button"
 									>
-										<Trash aria-hidden="true" size={17} />
+										<Trash aria-hidden="true" size={iconSize.xl} />
 										{t("Delete")}
 									</button>
 								</div>
@@ -2213,9 +2214,9 @@ export function PluginsPanel({
 											type="button"
 										>
 											{selectedHook.enabled ? (
-												<XCircle aria-hidden="true" size={17} />
+												<XCircle aria-hidden="true" size={iconSize.xl} />
 											) : (
-												<CheckCircle aria-hidden="true" size={17} />
+												<CheckCircle aria-hidden="true" size={iconSize.xl} />
 											)}
 											{hookTogglePending
 												? t("Updating…")
@@ -2233,7 +2234,7 @@ export function PluginsPanel({
 											}
 											type="button"
 										>
-											<PencilSimple aria-hidden="true" size={17} />
+											<PencilSimple aria-hidden="true" size={iconSize.xl} />
 											{t("Edit")}
 										</button>
 										<button
@@ -2244,7 +2245,7 @@ export function PluginsPanel({
 											}
 											type="button"
 										>
-											<Trash aria-hidden="true" size={17} />
+											<Trash aria-hidden="true" size={iconSize.xl} />
 											{t("Delete")}
 										</button>
 									</>
@@ -2541,7 +2542,7 @@ function McpDetail({
 							{actionsEnabled && server.effective && (
 								<>
 									<button disabled={busy} onClick={() => onRestart(server)} type="button">
-										<ArrowsClockwise aria-hidden="true" size={17} />
+										<ArrowsClockwise aria-hidden="true" size={iconSize.xl} />
 										{t(pendingAction === "restart" ? "Restarting…" : "Restart")}
 									</button>
 									<button
@@ -2549,7 +2550,7 @@ function McpDetail({
 										onClick={(event) => onCredential(server, event.currentTarget)}
 										type="button"
 									>
-										<Key aria-hidden="true" size={17} />
+										<Key aria-hidden="true" size={iconSize.xl} />
 										{t("Authentication")}
 									</button>
 									{server.credentialConfigured && (
@@ -2568,13 +2569,13 @@ function McpDetail({
 								onClick={(event) => onEdit(server, event.currentTarget)}
 								type="button"
 							>
-								<PencilSimple aria-hidden="true" size={17} />
+								<PencilSimple aria-hidden="true" size={iconSize.xl} />
 								{t("Edit")}
 							</button>
 							{actionsEnabled && server.effective && (
 								<>
 									<button disabled={busy} onClick={() => onRestart(server)} type="button">
-										<ArrowsClockwise aria-hidden="true" size={17} />
+										<ArrowsClockwise aria-hidden="true" size={iconSize.xl} />
 										{t(pendingAction === "restart" ? "Restarting…" : "Restart")}
 									</button>
 									<button
@@ -2582,7 +2583,7 @@ function McpDetail({
 										onClick={(event) => onCredential(server, event.currentTarget)}
 										type="button"
 									>
-										<Key aria-hidden="true" size={17} />
+										<Key aria-hidden="true" size={iconSize.xl} />
 										{t("Authentication")}
 									</button>
 									{server.credentialConfigured && (
@@ -2598,7 +2599,7 @@ function McpDetail({
 								onClick={(event) => onRemove(server, event.currentTarget)}
 								type="button"
 							>
-								<Trash aria-hidden="true" size={17} />
+								<Trash aria-hidden="true" size={iconSize.xl} />
 								{t("Delete")}
 							</button>
 						</>

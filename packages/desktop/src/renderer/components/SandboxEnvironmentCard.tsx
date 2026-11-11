@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { DownloadSimple, ShieldCheck, Warning } from "../icons.tsx";
 import "../styles/sandbox-environment.css";
+import { iconSize } from "../ui/icon-size.ts";
 
 type SandboxReport = ClientResult<"permission/sandbox/health">;
 type SandboxCheck = NonNullable<SandboxReport["checks"]>[number];
@@ -213,7 +214,7 @@ export function SandboxEnvironmentCard({
 		<article aria-busy={selfTesting || loading} className="settings-card sandbox-environment-card">
 			<header className="sandbox-environment-header">
 				<div className="sandbox-environment-heading">
-					<ShieldCheck aria-hidden="true" size={18} />
+					<ShieldCheck aria-hidden="true" size={iconSize.xl} />
 					<h4>{t("Sandbox environment")}</h4>
 				</div>
 				<span aria-live="polite" className={`sandbox-environment-status ${busy ? "idle" : error ? "warn" : tone}`}>
@@ -240,7 +241,7 @@ export function SandboxEnvironmentCard({
 							recoveryActions.includes("check-app-update");
 						return (
 							<li className="sandbox-environment-issue" key={check.id}>
-								<Warning aria-hidden="true" size={16} />
+								<Warning aria-hidden="true" size={iconSize.lg} />
 								<div>
 									<strong>{reasonLabel(t, check.reason) ?? t(CHECK_LABEL_KEYS[check.id])}</strong>
 									{check.id === "dependencies" && !repair ? (
@@ -314,7 +315,7 @@ export function SandboxEnvironmentCard({
 						onClick={() => void startUpdate()}
 						type="button"
 					>
-						<DownloadSimple aria-hidden="true" size={15} />
+						<DownloadSimple aria-hidden="true" size={iconSize.lg} />
 						{updating
 							? t("Opening update…")
 							: updateState.status === "ready"

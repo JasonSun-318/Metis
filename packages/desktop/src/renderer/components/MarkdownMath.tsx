@@ -2,6 +2,7 @@ import katex from "katex";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CopySimple } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 // KaTeX never sees untrusted structure beyond the TeX body itself, and every
 // formula gets its own macro state so one note cannot influence another.
@@ -74,7 +75,7 @@ export function MarkdownMath({
 					);
 				}}
 			>
-				<CopySimple aria-hidden="true" size={12} />
+				<CopySimple aria-hidden="true" size={iconSize.sm} />
 			</button>
 		</span>
 	);

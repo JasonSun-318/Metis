@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { Books, Check, SidebarSimple } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { useKnowledgeLinks } from "./use-knowledge-links.ts";
 
 export interface KnowledgeLinkMenuProps {
@@ -71,13 +72,13 @@ export function KnowledgeLinkMenu({
 						title={library.path}
 						type="button"
 					>
-						<Books aria-hidden="true" size={16} />
+						<Books aria-hidden="true" size={iconSize.lg} />
 						<span className="knowledge-menu-library-label">
 							<span>{library.name}</span>
 							<small>{library.path}</small>
 						</span>
 						<span className="knowledge-menu-check">
-							{selected && <Check aria-hidden="true" size={14} weight="bold" />}
+							{selected && <Check aria-hidden="true" size={iconSize.md} weight="bold" />}
 						</span>
 					</button>
 				);
@@ -108,7 +109,7 @@ export function KnowledgeLinkMenu({
 				role="menuitem"
 				ref={sidebarButton}
 			>
-				<SidebarSimple aria-hidden="true" size={16} />
+				<SidebarSimple aria-hidden="true" size={iconSize.lg} />
 				<span>{t(sidebarLabel ?? "Open knowledge sidebar")}</span>
 			</button>
 		</>

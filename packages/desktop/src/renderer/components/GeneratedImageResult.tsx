@@ -17,6 +17,7 @@ import { useConversationScope } from "./ConversationScope.tsx";
 import { ImageGenerationContext } from "./ImageGenerationContext.tsx";
 import type { ToolCallBlock, ToolResultBlock } from "./transcript-turn-model.ts";
 import "../styles/generated-images.css";
+import { iconSize } from "../ui/icon-size.ts";
 
 /** Input previews can be incomplete while the model streams tool arguments. */
 function generationInput(call?: ToolCallBlock): { count?: number; aspect_ratio?: string; prompt?: string } {
@@ -185,13 +186,13 @@ function ImageThumbnail({
 					<img src={src} alt={image.name} decoding="async" onError={fail} />
 				) : (
 					<span className="generated-image-preview-state">
-						<ImageSquare size={24} aria-hidden="true" />
+						<ImageSquare size={iconSize.xl} aria-hidden="true" />
 						<span>{t(error ?? "Loading image")}</span>
 					</span>
 				)}
 				{src && (
 					<span className="generated-image-expand">
-						<ArrowsOut size={16} aria-hidden="true" />
+						<ArrowsOut size={iconSize.lg} aria-hidden="true" />
 					</span>
 				)}
 			</button>
@@ -276,7 +277,7 @@ function GeneratedImageDialog({
 							aria-label={t("Zoom out")}
 							title={t("Zoom out")}
 						>
-							<Minus size={16} />
+							<Minus size={iconSize.lg} />
 						</button>
 						<button type="button" onClick={() => setZoom(100)} aria-label={t("Fit image")} title={t("Fit image")}>
 							{zoom}%
@@ -288,11 +289,11 @@ function GeneratedImageDialog({
 							aria-label={t("Zoom in")}
 							title={t("Zoom in")}
 						>
-							<Plus size={16} />
+							<Plus size={iconSize.lg} />
 						</button>
 						{src && (
 							<a href={src} download={image.name} aria-label={t("Save image")} title={t("Save image")}>
-								<DownloadSimple size={17} />
+								<DownloadSimple size={iconSize.xl} />
 							</a>
 						)}
 						{actions?.onReveal && (
@@ -306,7 +307,7 @@ function GeneratedImageDialog({
 								aria-label={t("Reveal in folder")}
 								title={t("Reveal in folder")}
 							>
-								<FolderOpen size={17} />
+								<FolderOpen size={iconSize.xl} />
 							</button>
 						)}
 						<button
@@ -315,7 +316,7 @@ function GeneratedImageDialog({
 							aria-label={t("Close image viewer")}
 							title={t("Close image viewer")}
 						>
-							<X size={18} />
+							<X size={iconSize.xl} />
 						</button>
 					</div>
 				</header>
@@ -338,13 +339,13 @@ function GeneratedImageDialog({
 						{images.length > 1 && (
 							<>
 								<button type="button" onClick={() => navigate(index - 1)} aria-label={t("Previous image")}>
-									<ArrowLeft size={17} />
+									<ArrowLeft size={iconSize.xl} />
 								</button>
 								<span>
 									{index + 1} / {images.length}
 								</span>
 								<button type="button" onClick={() => navigate(index + 1)} aria-label={t("Next image")}>
-									<ArrowRight size={17} />
+									<ArrowRight size={iconSize.xl} />
 								</button>
 							</>
 						)}
@@ -445,7 +446,7 @@ export function GeneratedImageResult({
 						Array.from({ length: Math.max(0, count - images.length) }, (_, index) => (
 							<div key={`pending-${index + images.length}`} className="generated-image-placeholder">
 								<span className="generated-image-placeholder-glow" />
-								<ImageSquare size={24} aria-hidden="true" />
+								<ImageSquare size={iconSize.xl} aria-hidden="true" />
 								<span>{t("Creating your image")}</span>
 							</div>
 						))}

@@ -21,6 +21,7 @@ import {
 	saveSessionGroupingPreferences,
 	sidebarSessions,
 } from "../store/session-grouping.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { AccountMenu } from "./AccountMenu.tsx";
 import { AgentSidebarBranch, type AgentSidebarNavigation } from "./AgentSidebarBranch.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
@@ -282,7 +283,11 @@ function SessionSection({
 				type="button"
 			>
 				<span>{label}</span>
-				{open ? <CaretDown aria-hidden="true" size={12} /> : <CaretRight aria-hidden="true" size={12} />}
+				{open ? (
+					<CaretDown aria-hidden="true" size={iconSize.sm} />
+				) : (
+					<CaretRight aria-hidden="true" size={iconSize.sm} />
+				)}
 			</button>
 			<div className="session-section-drawer" inert={!open}>
 				<div className="session-section-items">{children}</div>
@@ -539,7 +544,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					onClick={() => onModeChange("chat")}
 					type="button"
 				>
-					<SidebarModeIcon kind="chat" size={15} />
+					<SidebarModeIcon kind="chat" size={iconSize.lg} />
 					{t("Chat")}
 				</button>
 				<button
@@ -549,7 +554,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					onClick={() => onModeChange("code")}
 					type="button"
 				>
-					<SidebarModeIcon kind="code" size={15} />
+					<SidebarModeIcon kind="code" size={iconSize.lg} />
 					{t("Code")}
 				</button>
 			</fieldset>

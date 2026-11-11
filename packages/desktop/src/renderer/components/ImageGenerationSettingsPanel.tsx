@@ -7,6 +7,7 @@ import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ModelSettingsCard } from "./ModelSettingsCard.tsx";
 import "./image-generation-settings.css";
+import { iconSize } from "../ui/icon-size.ts";
 
 type ImageConfig = NonNullable<NonNullable<ModelSettingsView["imageGeneration"]>["config"]>;
 type ImageApi = ImageConfig["api"];
@@ -228,7 +229,7 @@ export function ImageGenerationSettingsPanel({
 			/>
 			{notice && !open ? (
 				<output className="settings-action-message">
-					<CheckCircle aria-hidden="true" size={15} />
+					<CheckCircle aria-hidden="true" size={iconSize.lg} />
 					{notice}
 				</output>
 			) : null}
@@ -273,7 +274,7 @@ export function ImageGenerationSettingsPanel({
 									onClick={close}
 									type="button"
 								>
-									<X aria-hidden="true" size={18} />
+									<X aria-hidden="true" size={iconSize.xl} />
 								</button>
 							</header>
 							<div className="model-provider-editor-body">
@@ -364,7 +365,7 @@ export function ImageGenerationSettingsPanel({
 									</label>
 									{draft.credentialProvider ? (
 										<p className="image-generation-settings-key-hint">
-											<Key aria-hidden="true" size={14} />
+											<Key aria-hidden="true" size={iconSize.md} />
 											{t("Uses this provider's saved API key with the base URL above.")}
 										</p>
 									) : (
@@ -395,7 +396,7 @@ export function ImageGenerationSettingsPanel({
 							<footer className="model-provider-editor-footer">
 								{error ? (
 									<p className="settings-action-message error" role="alert">
-										<XCircle aria-hidden="true" size={15} />
+										<XCircle aria-hidden="true" size={iconSize.lg} />
 										{error}
 									</p>
 								) : null}

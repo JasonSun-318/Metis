@@ -119,7 +119,7 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home-hero-main").position).toBe("relative");
 		expect(rule(".new-task-home-heading h1").fontFamily).toContain("Songti SC");
 		expect(rule(".new-task-home-heading h1").fontFamily).toContain("serif");
-		expect(rule(".new-task-home-heading h1").fontWeight).toBe("400");
+		expect(rule(".new-task-home-heading h1").fontWeight).toBe("var(--font-weight-regular)");
 		expect(rule(".new-task-home-heading h1").whiteSpace).not.toBe("nowrap");
 		expect(rule(".new-task-home-heading").textAlign).toBe("center");
 		expect(rule(".new-task-starter-grid").flexWrap).toBe("wrap");

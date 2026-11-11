@@ -22,6 +22,7 @@ import {
 	UserCircle,
 } from "../icons.tsx";
 import type { AppTheme } from "../theme.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { ArchivedConversationsPanel } from "./ArchivedConversationsPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
@@ -277,7 +278,7 @@ export function SettingsDialog({
 							onClick={triggerClose}
 							type="button"
 						>
-							<ArrowLeft aria-hidden="true" size={16} />
+							<ArrowLeft aria-hidden="true" size={iconSize.lg} />
 							<span>{t("Back to app")}</span>
 						</button>
 					</div>
@@ -296,7 +297,7 @@ export function SettingsDialog({
 									ref={id === "profile" ? firstNavRef : undefined}
 									type="button"
 								>
-									<Icon aria-hidden="true" size={18} />
+									<Icon aria-hidden="true" size={iconSize.xl} />
 									<span>{t(label)}</span>
 								</button>
 							);

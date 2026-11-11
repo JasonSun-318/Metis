@@ -11,6 +11,7 @@ import type {
 	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import { ArrowClockwise, CaretDown, CaretRight, ClockCounterClockwise, FolderOpen, GitCommit } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { buildReviewTree, type ReviewTreeNode, reviewPatchKey } from "./review-model.ts";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -104,16 +105,16 @@ function ReviewTree({
 							type="button"
 						>
 							{expanded.has(node.path) ? (
-								<CaretDown aria-hidden="true" size={12} />
+								<CaretDown aria-hidden="true" size={iconSize.sm} />
 							) : (
-								<CaretRight aria-hidden="true" size={12} />
+								<CaretRight aria-hidden="true" size={iconSize.sm} />
 							)}
 							<span className="review-tree-icon">
 								<WorkspaceFileIcon
 									expanded={expanded.has(node.path)}
 									kind="directory"
 									path={node.path}
-									size={13}
+									size={iconSize.md}
 								/>
 							</span>
 							<span className="review-tree-label">{node.name}</span>
@@ -124,7 +125,7 @@ function ReviewTree({
 					<li key={node.path}>
 						<button onClick={() => onSelect(node.path)} type="button">
 							<span className="review-tree-icon">
-								<WorkspaceFileIcon path={node.path} size={13} />
+								<WorkspaceFileIcon path={node.path} size={iconSize.md} />
 							</span>
 							<span className="review-tree-label">{node.name}</span>
 							<ChangeCounts file={node.file} />
@@ -166,7 +167,7 @@ function ReviewDetails({
 					onClick={() => onSelectRevision("working-tree")}
 					type="button"
 				>
-					<FolderOpen aria-hidden="true" size={14} />
+					<FolderOpen aria-hidden="true" size={iconSize.md} />
 					<span>{t("All Changes")}</span>
 				</button>
 				<button
@@ -176,14 +177,14 @@ function ReviewDetails({
 					type="button"
 				>
 					<h3>
-						<ClockCounterClockwise aria-hidden="true" size={13} />
+						<ClockCounterClockwise aria-hidden="true" size={iconSize.md} />
 						<span>{t("Recent commits")}</span>
 						<span className="review-count-badge">{snapshot.commits.length}</span>
 					</h3>
 					{commitsCollapsed ? (
-						<CaretRight aria-hidden="true" size={12} />
+						<CaretRight aria-hidden="true" size={iconSize.sm} />
 					) : (
-						<CaretDown aria-hidden="true" size={12} />
+						<CaretDown aria-hidden="true" size={iconSize.sm} />
 					)}
 				</button>
 				{!commitsCollapsed && (
@@ -221,7 +222,7 @@ function CommitItem({
 				title={commit.subject}
 				type="button"
 			>
-				<GitCommit aria-hidden="true" size={13} />
+				<GitCommit aria-hidden="true" size={iconSize.md} />
 				<span>
 					<strong>{commit.subject}</strong>
 					<small>
@@ -539,7 +540,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 					onClick={toggleDetails}
 					type="button"
 				>
-					<FolderOpen aria-hidden="true" size={15} />
+					<FolderOpen aria-hidden="true" size={iconSize.lg} />
 				</button>
 				<span title={snapshot?.kind === "review" ? snapshot.repositoryRoot : undefined}>{repositoryLabel}</span>
 				<button
@@ -550,7 +551,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 					title={loadError ? t("Unable to load review") : undefined}
 					type="button"
 				>
-					<ArrowClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={14} />
+					<ArrowClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={iconSize.md} />
 				</button>
 			</header>
 			<div
@@ -611,11 +612,11 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequ
 												type="button"
 											>
 												{isExpanded ? (
-													<CaretDown aria-hidden="true" size={14} />
+													<CaretDown aria-hidden="true" size={iconSize.md} />
 												) : (
-													<CaretRight aria-hidden="true" size={14} />
+													<CaretRight aria-hidden="true" size={iconSize.md} />
 												)}
-												<WorkspaceFileIcon path={file.relativePath} size={14} />
+												<WorkspaceFileIcon path={file.relativePath} size={iconSize.md} />
 												<span title={file.relativePath}>{file.relativePath}</span>
 												<ChangeCounts file={file} />
 											</button>

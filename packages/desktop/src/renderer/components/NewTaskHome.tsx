@@ -29,6 +29,7 @@ import {
 import { getHomeStarters, type HomeStarter, type HomeStarterId, pickHomeGreeting } from "../new-task-home-content.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
 import type { ProjectSessionGroup } from "../session-groups.ts";
+import { iconSize } from "../ui/icon-size.ts";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
@@ -285,7 +286,7 @@ export function NewTaskHome({
 													? folderName(folder)
 													: t(folderLocked ? "No project folder" : "Choose a workspace folder")}
 											</span>
-											<CaretDown aria-hidden="true" size={13} />
+											<CaretDown aria-hidden="true" size={iconSize.md} />
 										</button>
 									)}
 								</fieldset>
@@ -315,10 +316,10 @@ export function NewTaskHome({
 								type="button"
 							>
 								<span aria-hidden="true" className="new-task-more-label">
-									<DotsThree size={17} />
+									<DotsThree size={iconSize.xl} />
 									{t("More")}
 								</span>
-								<CaretDown aria-hidden="true" className="new-task-more-arrow" size={16} />
+								<CaretDown aria-hidden="true" className="new-task-more-arrow" size={iconSize.lg} />
 							</button>
 						</div>
 						<div className="new-task-more-drawer" id={additionalTasksId} inert={!moreTasksOpen}>
@@ -346,10 +347,10 @@ export function NewTaskHome({
 										title={project.cwd}
 										type="button"
 									>
-										<FolderSimple aria-hidden="true" size={17} />
+										<FolderSimple aria-hidden="true" size={iconSize.xl} />
 										<strong>{project.name}</strong>
 										<span>{project.cwd}</span>
-										<CaretRight aria-hidden="true" size={14} />
+										<CaretRight aria-hidden="true" size={iconSize.md} />
 									</button>
 								))}
 							</div>

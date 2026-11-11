@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopPreviewFileInput, MetisDesktopApi } from "../../../shared/desktop-api.ts";
 import { File, SpinnerGap } from "../../icons.tsx";
+import { iconSize } from "../../ui/icon-size.ts";
 import { DocxViewer } from "./DocxViewer.tsx";
 import { ExcelViewer } from "./ExcelViewer.tsx";
 import { HtmlViewer } from "./HtmlViewer.tsx";
@@ -241,7 +242,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		return (
 			<PreviewShell fileName={file.name} onClose={onClose} onOpenDefault={handleOpenDefault} onReveal={handleReveal}>
 				<div className="preview-empty-state">
-					<File aria-hidden="true" size={32} />
+					<File aria-hidden="true" size={iconSize.xl} />
 					<strong>{t("This file format cannot be previewed")}</strong>
 					<span>{t("Open it in the default app to inspect it")}</span>
 				</div>
@@ -253,7 +254,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		return (
 			<PreviewShell fileName={file.name} onClose={onClose} onOpenDefault={handleOpenDefault} onReveal={handleReveal}>
 				<div className="preview-loading-state">
-					<SpinnerGap aria-hidden="true" className="is-spinning" size={32} />
+					<SpinnerGap aria-hidden="true" className="is-spinning" size={iconSize.xl} />
 					<span>{t("Opening file…")}</span>
 				</div>
 			</PreviewShell>
@@ -264,7 +265,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		return (
 			<PreviewShell fileName={file.name} onClose={onClose} onOpenDefault={handleOpenDefault} onReveal={handleReveal}>
 				<div className="preview-error-state">
-					<File aria-hidden="true" size={36} />
+					<File aria-hidden="true" size={iconSize.xl} />
 					<strong>{t("File could not be opened")}</strong>
 					<span>{error}</span>
 				</div>
@@ -300,7 +301,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			onReveal={handleReveal}
 		>
 			<div className="preview-empty-state">
-				<File aria-hidden="true" size={32} />
+				<File aria-hidden="true" size={iconSize.xl} />
 				<strong>{t("This file format cannot be previewed")}</strong>
 				<span>{t("Open it in the default app to inspect it")}</span>
 			</div>

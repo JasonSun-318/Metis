@@ -1,6 +1,7 @@
 import type { ThinkingSelectionView } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 export const MODEL_THINKING_LEVELS: readonly ThinkingSelectionView[] = [
@@ -159,7 +160,7 @@ export function ModelReasoningEditor({
 									})
 								}
 							>
-								<Trash aria-hidden="true" size={15} />
+								<Trash aria-hidden="true" size={iconSize.lg} />
 							</button>
 						</div>
 					))}
@@ -178,7 +179,7 @@ export function ModelReasoningEditor({
 								});
 						}}
 					>
-						<Plus aria-hidden="true" size={14} />
+						<Plus aria-hidden="true" size={iconSize.md} />
 						{t("Add reasoning level")}
 					</button>
 					{model.reasoningRows.some((row) => row.level === "off") ? (

@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { CaretRight } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 /** Native keyboard disclosure with the same persistent height drawer as tool execution. */
 export function DrawerDetails({
@@ -23,7 +24,7 @@ export function DrawerDetails({
 			onToggle={(event) => setOpen(event.currentTarget.open)}
 		>
 			<summary>
-				{showCaret && <CaretRight aria-hidden="true" className="drawer-details-caret" size={13} />}
+				{showCaret && <CaretRight aria-hidden="true" className="drawer-details-caret" size={iconSize.md} />}
 				{summary}
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>

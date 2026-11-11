@@ -3,6 +3,7 @@ import { type DragEvent, type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { ArrowLeft, CaretRight, Code, FolderSimple, Robot, UploadSimple, X } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { GitHubBrandIcon } from "./GitHubBrandIcon.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -184,7 +185,7 @@ export function SkillCreationDialog({
 				onClick={onCancel}
 				type="button"
 			>
-				<X aria-hidden="true" size={17} />
+				<X aria-hidden="true" size={iconSize.xl} />
 			</button>
 			<div className="skill-create-heading">
 				{step !== "methods" && (
@@ -195,7 +196,7 @@ export function SkillCreationDialog({
 						onClick={back}
 						type="button"
 					>
-						<ArrowLeft aria-hidden="true" size={17} />
+						<ArrowLeft aria-hidden="true" size={iconSize.xl} />
 					</button>
 				)}
 				<div>
@@ -228,7 +229,7 @@ export function SkillCreationDialog({
 							onClick={() => void chooseProject()}
 							type="button"
 						>
-							<FolderSimple aria-hidden="true" size={15} />
+							<FolderSimple aria-hidden="true" size={iconSize.lg} />
 							{t("Choose folder…")}
 						</button>
 					</div>
@@ -244,13 +245,13 @@ export function SkillCreationDialog({
 						type="button"
 					>
 						<span>
-							<Robot aria-hidden="true" size={20} />
+							<Robot aria-hidden="true" size={iconSize.xl} />
 						</span>
 						<span>
 							<strong>{t("Create with Metis")}</strong>
 							<small>{t("Start a Chat that helps define and build the Skill.")}</small>
 						</span>
-						<CaretRight aria-hidden="true" size={16} />
+						<CaretRight aria-hidden="true" size={iconSize.lg} />
 					</button>
 					<button
 						aria-label={t("Upload Skill")}
@@ -259,13 +260,13 @@ export function SkillCreationDialog({
 						type="button"
 					>
 						<span>
-							<UploadSimple aria-hidden="true" size={20} />
+							<UploadSimple aria-hidden="true" size={iconSize.xl} />
 						</span>
 						<span>
 							<strong>{t("Upload Skill")}</strong>
 							<small>{t("Import a .zip or .skill file from this computer.")}</small>
 						</span>
-						<CaretRight aria-hidden="true" size={16} />
+						<CaretRight aria-hidden="true" size={iconSize.lg} />
 					</button>
 					<button
 						aria-label={t("Import from GitHub")}
@@ -274,13 +275,13 @@ export function SkillCreationDialog({
 						type="button"
 					>
 						<span>
-							<GitHubBrandIcon aria-hidden="true" size={20} />
+							<GitHubBrandIcon aria-hidden="true" size={iconSize.xl} />
 						</span>
 						<span>
 							<strong>{t("Import from GitHub")}</strong>
 							<small>{t("Inspect and import Skills from a public GitHub link.")}</small>
 						</span>
-						<CaretRight aria-hidden="true" size={16} />
+						<CaretRight aria-hidden="true" size={iconSize.lg} />
 					</button>
 					<button
 						aria-label={t("Custom")}
@@ -289,13 +290,13 @@ export function SkillCreationDialog({
 						type="button"
 					>
 						<span>
-							<Code aria-hidden="true" size={20} />
+							<Code aria-hidden="true" size={iconSize.xl} />
 						</span>
 						<span>
 							<strong>{t("Custom")}</strong>
 							<small>{t("Enter a name, description, and instructions.")}</small>
 						</span>
-						<CaretRight aria-hidden="true" size={16} />
+						<CaretRight aria-hidden="true" size={iconSize.lg} />
 					</button>
 				</div>
 			)}
@@ -316,7 +317,7 @@ export function SkillCreationDialog({
 						ref={uploadButton}
 						type="button"
 					>
-						<UploadSimple aria-hidden="true" size={24} />
+						<UploadSimple aria-hidden="true" size={iconSize.xl} />
 						<strong>{t(pending ? "Inspecting Skill…" : "Drop or click to upload")}</strong>
 						<small>{t("The archive must contain at least one SKILL.md file.")}</small>
 					</button>

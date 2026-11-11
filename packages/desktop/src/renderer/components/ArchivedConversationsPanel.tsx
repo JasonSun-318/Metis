@@ -14,6 +14,7 @@ import {
 } from "../icons.tsx";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 import "./archived-conversations.css";
+import { iconSize } from "../ui/icon-size.ts";
 
 type ArchivedPage = Awaited<ReturnType<MetisDesktopApi["listArchivedConversations"]>>;
 type ArchivedConversation = ArchivedPage["conversations"][number];
@@ -127,7 +128,7 @@ export function ArchivedConversationsPanel({
 					disabled={!serverReady || loading || busy}
 					onClick={refresh}
 				>
-					<ArrowClockwise aria-hidden="true" size={14} />
+					<ArrowClockwise aria-hidden="true" size={iconSize.md} />
 					{t("Refresh")}
 				</button>
 			</div>
@@ -145,7 +146,7 @@ export function ArchivedConversationsPanel({
 				</div>
 			) : loading ? (
 				<output className="archived-conversations-empty">
-					<Archive aria-hidden="true" size={24} />
+					<Archive aria-hidden="true" size={iconSize.xl} />
 					<span>{t(serverReady ? "Loading archived conversations…" : "Waiting for connection…")}</span>
 				</output>
 			) : page?.conversations.length ? (
@@ -160,7 +161,7 @@ export function ArchivedConversationsPanel({
 								key={entry.kind === "session" ? entry.session.sessionId : entry.agentId}
 							>
 								<span className="archived-conversation-icon">
-									<Icon aria-hidden="true" size={18} />
+									<Icon aria-hidden="true" size={iconSize.xl} />
 								</span>
 								<div className="archived-conversation-copy">
 									<div className="archived-conversation-heading">
@@ -197,7 +198,7 @@ export function ArchivedConversationsPanel({
 										aria-busy={restoring === entry}
 										onClick={() => void restore(entry)}
 									>
-										<ArrowCounterClockwise aria-hidden="true" size={16} />
+										<ArrowCounterClockwise aria-hidden="true" size={iconSize.lg} />
 										<span>{t(restoring === entry ? "Restoring…" : "Restore")}</span>
 									</button>
 									<button
@@ -213,7 +214,7 @@ export function ArchivedConversationsPanel({
 											setDeleteError(null);
 										}}
 									>
-										<Trash aria-hidden="true" size={16} />
+										<Trash aria-hidden="true" size={iconSize.lg} />
 									</button>
 								</div>
 							</li>
@@ -222,7 +223,7 @@ export function ArchivedConversationsPanel({
 				</ul>
 			) : (
 				<div className="archived-conversations-empty">
-					<Archive aria-hidden="true" size={28} />
+					<Archive aria-hidden="true" size={iconSize.xl} />
 					<h3>{t("No archived conversations")}</h3>
 					<p>{t("Conversations you archive will appear here.")}</p>
 				</div>
@@ -237,7 +238,7 @@ export function ArchivedConversationsPanel({
 							disabled={loading || busy || cursors.length <= 1}
 							onClick={() => setCursors((current) => current.slice(0, -1))}
 						>
-							<CaretLeft aria-hidden="true" size={14} />
+							<CaretLeft aria-hidden="true" size={iconSize.md} />
 							{t("Previous page")}
 						</button>
 						<button
@@ -249,7 +250,7 @@ export function ArchivedConversationsPanel({
 							}}
 						>
 							{t("Next page")}
-							<CaretRight aria-hidden="true" size={14} />
+							<CaretRight aria-hidden="true" size={iconSize.md} />
 						</button>
 					</div>
 				</nav>

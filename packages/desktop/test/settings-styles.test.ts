@@ -43,11 +43,11 @@ describe("Settings visual states", () => {
 		expect(rule(".model-settings-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
-		expect(rule(".usage-chart-axis").fontSize).toBe("11px");
+		expect(rule(".usage-chart-axis").fontSize).toBe("var(--font-size-2xs)");
 		expect(rule(".usage-detail-card li small").color).toBe("var(--text-09)");
 		expect(rule(".memory-history-meta").color).toBe("var(--text-10)");
 		expect(rule(".profile-section-heading small").color).toBe("var(--text-09)");
-		expect(rule(".profile-section-heading small").fontSize).toBe("11px");
+		expect(rule(".profile-section-heading small").fontSize).toBe("var(--font-size-2xs)");
 	});
 
 	it("lists Memory history as flat rows inside one shared surface", () => {

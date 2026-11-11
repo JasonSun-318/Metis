@@ -2,6 +2,7 @@ import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopHistoryEntry } from "../../shared/desktop-api.ts";
 import { Globe } from "../icons.tsx";
+import { iconSize } from "../ui/icon-size.ts";
 
 interface BrowserStartPageProps {
 	readonly tools: ReactNode;
@@ -42,7 +43,7 @@ export function BrowserStartPage({ tools, history, onNavigate }: BrowserStartPag
 									{entry.faviconUrl?.startsWith("data:image/") ? (
 										<img alt="" src={entry.faviconUrl} />
 									) : (
-										<Globe aria-hidden="true" size={26} weight="light" />
+										<Globe aria-hidden="true" size={iconSize.xl} weight="light" />
 									)}
 								</span>
 								<span className="browser-start-page-title">{entry.title || entry.url}</span>

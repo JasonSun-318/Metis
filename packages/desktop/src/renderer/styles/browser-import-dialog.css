@@ -2,15 +2,15 @@
 
 .browser-import-checks { display: flex; align-items: center; gap: var(--space-8); }
 
-.browser-import-checks .button-secondary { height: var(--control-height); min-height: var(--control-height); border-radius: var(--radius-control); padding: 0 var(--space-12); font-size: var(--control-font-size); font-weight: 550; }
+.browser-import-checks .button-secondary { height: var(--control-height); min-height: var(--control-height); border-radius: var(--radius-control); padding: 0 var(--space-12); font-size: var(--control-font-size); font-weight: var(--font-weight-semibold); }
 
-.browser-import-check-status { color: var(--muted); font-size: 11.5px; }
+.browser-import-check-status { color: var(--muted); font-size: var(--font-size-2xs); }
 
 .browser-import-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 
-.browser-import-diagnostic { color: var(--muted); font-size: 11.5px; }
+.browser-import-diagnostic { color: var(--muted); font-size: var(--font-size-2xs); }
 
-.browser-import-diagnostic summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+.browser-import-diagnostic summary { cursor: pointer; color: var(--muted); font-size: var(--font-size-2xs); }
 
 .browser-import-diagnostic summary:hover, .browser-import-diagnostic summary:focus-visible { color: var(--text); }
 

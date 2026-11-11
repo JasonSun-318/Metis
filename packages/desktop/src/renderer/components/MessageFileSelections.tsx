@@ -1,5 +1,6 @@
 import type { ItemView } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
+import { iconSize } from "../ui/icon-size.ts";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -31,7 +32,7 @@ export function MessageFileSelections({ selections }: { readonly selections: Ite
 							className="message-file-selection-details"
 							summary={
 								<>
-									<WorkspaceFileIcon path={file.name} size={22} />
+									<WorkspaceFileIcon path={file.name} size={iconSize.xl} />
 									<span className="message-file-info">
 										<strong title={file.name}>{file.name}</strong>
 										<small>
