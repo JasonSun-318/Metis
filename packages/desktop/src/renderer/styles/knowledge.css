@@ -6,12 +6,12 @@
 .knowledge-toolbar .menu-select-trigger, .knowledge-create-button, .knowledge-remove-button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-05); box-shadow: 0 1px 2px #0002, inset 0 1px var(--surface-03); color: var(--text); font-size: 12px; white-space: nowrap; }
 .knowledge-toolbar .menu-select-trigger { width: 100%; justify-content: flex-start; gap: var(--space-8); font-weight: 500; }
 .knowledge-toolbar .menu-select-trigger:hover:not(:disabled), .knowledge-toolbar .menu-select-trigger[aria-expanded="true"], .knowledge-create-button:hover:not(:disabled), .knowledge-remove-button:hover:not(:disabled) { background: var(--surface-08); }
-.knowledge-toolbar .menu-select-trigger:disabled, .knowledge-create-button:disabled, .knowledge-remove-button:disabled { opacity: .45; cursor: default; }
+.knowledge-toolbar .menu-select-trigger:disabled, .knowledge-create-button:disabled, .knowledge-remove-button:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
 .knowledge-toolbar .menu-select-value { flex: 1; }
 .knowledge-toolbar .menu-select-trigger > svg { color: var(--muted); }
 .knowledge-icon-button { display: grid; flex: none; width: 28px; height: 28px; place-items: center; padding: 0; border-radius: 6px; color: var(--muted); }
 .knowledge-icon-button:hover:not(:disabled) { background: var(--surface-05); color: var(--text); }
-.knowledge-icon-button:disabled { opacity: .45; cursor: default; }
+.knowledge-icon-button:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
 .knowledge-create-button, .knowledge-remove-button { flex: none; }
 .knowledge-toolbar-actions > .knowledge-icon-button { margin-left: auto; }
 .knowledge-view-controls { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: var(--space-8); padding: 10px 12px; }
@@ -113,7 +113,7 @@
 .knowledge-menu-library-label > small { color: var(--muted); font-size: 10.5px; }
 .knowledge-menu-check { display: grid; width: 16px; height: 16px; flex: none; place-items: center; }
 .knowledge-menu-check svg { color: var(--text); }
-.composer-knowledge-menu button:disabled { cursor: default; opacity: .6; }
+.composer-knowledge-menu button:disabled { cursor: default; opacity: var(--control-disabled-opacity); }
 .composer-knowledge-menu button:disabled:hover { background: transparent; }
 .knowledge-menu-empty { margin: 0; color: var(--muted); padding: var(--space-8); font-size: 12px; line-height: 1.6; }
 .knowledge-menu-error { padding: var(--space-8); color: var(--danger-soft-text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }

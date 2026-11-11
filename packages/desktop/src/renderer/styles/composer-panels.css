@@ -43,7 +43,7 @@
 .composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11px; }
 
 .composer-panels .slash-command-menu { max-height: min(248px, var(--composer-panels-limit)); animation: none; scrollbar-width: thin; overscroll-behavior: contain; }
-.composer-panels .slash-command-menu button { min-height: 32px; padding: var(--space-4) var(--space-8); }
+.composer-panels .slash-command-menu button { min-height: var(--menu-item-height); padding: 0 var(--space-8); }
 .composer-panels .slash-command-menu strong { font-size: 12px; }
 .composer-panels .session-status-panel { max-height: var(--composer-panels-limit); padding: 8px 12px 10px; overscroll-behavior: contain; scrollbar-width: thin; }
 .composer-panels .session-status-panel > header { position: sticky; top: -8px; z-index: 1; background: var(--panel); }

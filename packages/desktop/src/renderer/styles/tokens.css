@@ -67,6 +67,8 @@
 	--control-font-size: 13px;
 	--control-height-compact: 32px;
 	--control-icon-size: 28px;
+	--menu-item-height: var(--control-height-compact);
+	--menu-item-font-size: var(--control-font-size);
 	--control-disabled-opacity: .48;
 	--switch-width: 36px;
 	--switch-height: 22px;

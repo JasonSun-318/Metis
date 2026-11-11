@@ -25,7 +25,7 @@
 .generated-image-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); font-size: 12px; }
 .generated-image-controls button, .generated-image-controls a { display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border: none; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
 .generated-image-controls button:hover, .generated-image-controls a:hover { background: var(--surface-02); }
-.generated-image-controls button:disabled { opacity: .4; cursor: default; }
+.generated-image-controls button:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
 .generated-image-viewport { flex: 1; min-height: 0; overflow: auto; background: var(--surface-01, var(--app-bg)); text-align: center; }
 .generated-image-viewport > img { display: block; max-width: none; max-height: none; object-fit: contain; margin: auto; }
 .generated-image-viewport > output { display: block; margin: 60px 20px; color: var(--text-muted); font-size: 13px; }

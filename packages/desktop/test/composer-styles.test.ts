@@ -42,10 +42,9 @@ describe("Composer visual states", () => {
 		expect(rule(".composer").borderRadius).toBe("var(--composer-radius)");
 		expect(css).not.toContain(".queued-turn-list + .composer");
 		expect(rule(".composer:hover").transform).toBe("");
-		expect(rule(".session-sidebar button:disabled").opacity).toBe("1");
-		expect(
-			rule(".composer .composer-plain-button:disabled, .composer .composer-selector-trigger:disabled").opacity,
-		).toBe("1");
+		expect(rule("button:disabled").opacity).toBe("var(--control-disabled-opacity)");
+		expect(css).not.toContain(".session-sidebar button:disabled { opacity: 1; }");
+		expect(css).not.toContain(".composer .composer-plain-button:disabled");
 	});
 
 	it("uses one compact square stop control for the running state", () => {
@@ -85,7 +84,7 @@ describe("Composer visual states", () => {
 		expect(skillMenu.minWidth).toBe("180px");
 
 		const item = rule(".composer-add-menu button, .composer-skill-menu button, .session-action-menu button");
-		expect(item.fontSize).toBe("12px");
+		expect(item.fontSize).toBe("var(--menu-item-font-size)");
 		expect(item.gap).toBe("var(--space-8)");
 		expect(item.padding).toBe("0 var(--space-8)");
 	});
