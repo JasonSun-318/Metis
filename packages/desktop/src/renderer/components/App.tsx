@@ -14,6 +14,7 @@ import type {
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { selectSessionIndexKey } from "../app-shell-selector.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
 import {
@@ -122,6 +123,9 @@ interface AppShellState {
 	// Session projections mutate permission and sandbox health in place. The shell
 	// reads those values off `sessions`, so the key copies them at selection time.
 	readonly sessionShellKey: string;
+	// `sessionsById` is a Map mutated in place, so reference equality misses
+	// summary updates (mode, cwd, title, ...) that the shell renders.
+	readonly sessionIndexKey: string;
 }
 
 function selectLatestTurnErrorCode(snapshot: AppStoreSnapshot): string | undefined {
@@ -160,6 +164,7 @@ function selectAppShell(snapshot: AppStoreSnapshot): AppShellState {
 		sessions: snapshot.sessions,
 		supervisor: snapshot.supervisor,
 		sessionShellKey: selectSessionShellKey(snapshot.sessions),
+		sessionIndexKey: selectSessionIndexKey(snapshot.sessionsById),
 	};
 }
 
