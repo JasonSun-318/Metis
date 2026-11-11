@@ -39,7 +39,7 @@ describe("Settings visual states", () => {
 		expect(rule(".usage-detail-card").borderWidth).toBe("0px");
 		expect(rule(".usage-detail-card").borderRadius).toBe("0px");
 		expect(rule(".usage-detail-card").background).toBe("transparent");
-		expect(rule(".usage-detail-card").padding).toBe("4px 16px");
+		expect(rule(".usage-detail-card").padding).toBe("var(--space-4) var(--space-16)");
 		expect(rule(".model-settings-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
@@ -99,7 +99,7 @@ describe("Settings visual states", () => {
 		expect(
 			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-form")
 				.padding,
-		).toBe("12px 16px");
+		).toBe("var(--space-12) var(--space-16)");
 		expect(
 			rule(
 				':is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-form input[type="text"]',
