@@ -232,7 +232,7 @@ function runUpdate(root, previousBaseline) {
 	console.log(`Wrote ${BASELINE_FILE} (${packages.length} package(s), ${inventory.totals.total} advisory record(s)).`);
 	const missingReasons = packages.filter((record) => record.reason.trim() === "").map((record) => record.package);
 	if (missingReasons.length > 0) {
-		console.error("Add a review reason for: " + missingReasons.join(", "));
+		console.error(`Add a review reason for: ${missingReasons.join(", ")}`);
 		process.exitCode = 1;
 	}
 }
