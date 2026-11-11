@@ -10,7 +10,7 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, sessionDisplayTitle } from "../src/renderer/components/App.tsx";
@@ -39,6 +39,21 @@ import {
 	type DesktopUpdateState,
 	type MetisDesktopApi,
 } from "../src/shared/desktop-api.ts";
+
+const shellRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("../src/renderer/components/SessionWorkspace.tsx", async () => {
+	const actual = await vi.importActual<typeof import("../src/renderer/components/SessionWorkspace.tsx")>(
+		"../src/renderer/components/SessionWorkspace.tsx",
+	);
+	return {
+		...actual,
+		SessionWorkspaceView: (props: ComponentProps<typeof actual.SessionWorkspaceView>) => {
+			shellRenders.count += 1;
+			return <actual.SessionWorkspaceView {...props} />;
+		},
+	};
+});
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 const RELEASE_NOTES = "## Highlights\n\n- Added release notes";
@@ -814,6 +829,102 @@ describe("Chat desktop shell", () => {
 			await flush();
 			expect(container.textContent).toContain("Performance message is streaming");
 			expect(renderSidebar).not.toHaveBeenCalled();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("does not rerender the workspace shell on item deltas", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-shell-delta", "chat", "/work/chat-project", "Streaming task");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api, emitEvent } = createHarness({ sessions: [active] });
+		vi.mocked(api.openSession).mockResolvedValue({
+			...snapshot(active),
+			recentItems: [
+				{
+					itemId: "stream-item",
+					sessionId: active.sessionId,
+					role: "assistant",
+					state: "streaming",
+					content: [{ type: "text", text: "Performance message" }],
+					createdAt: active.createdAt,
+				},
+			],
+		});
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={store} />));
+			await flush();
+			await flush();
+			expect(container.textContent).toContain("Performance message");
+			const rendersBeforeDelta = shellRenders.count;
+			await act(async () =>
+				emitEvent({
+					type: "app-server",
+					envelope: {
+						jsonrpc: "2.0",
+						method: "connection/events",
+						params: {
+							serverEpoch: EPOCH,
+							fromCursor: 1,
+							toCursor: 1,
+							events: [
+								{
+									type: "item/delta",
+									sessionId: active.sessionId,
+									itemId: "stream-item",
+									delta: { type: "text", text: " is streaming" },
+								},
+							],
+						},
+					},
+				}),
+			);
+			await flush();
+			expect(container.textContent).toContain("Performance message is streaming");
+			expect(shellRenders.count).toBe(rendersBeforeDelta);
+
+			await act(async () =>
+				emitEvent({
+					type: "app-server",
+					envelope: {
+						jsonrpc: "2.0",
+						method: "connection/events",
+						params: {
+							serverEpoch: EPOCH,
+							fromCursor: 2,
+							toCursor: 2,
+							events: [
+								{
+									type: "interaction/notify",
+									notificationId: "22222222-2222-4222-8222-222222222222",
+									level: "info",
+									message: "Shell subscription notice",
+									createdAt: "2026-08-31T00:00:00.000Z",
+								},
+							],
+						},
+					},
+				}),
+			);
+			await flush();
+			expect(container.textContent).toContain("Shell subscription notice");
+			expect(shellRenders.count).toBeGreaterThan(rendersBeforeDelta);
+			const rendersAfterNotice = shellRenders.count;
+			await act(async () => {
+				store.setSupervisor({
+					state: "failed",
+					serverEpoch: EPOCH,
+					restartAttempt: 1,
+					failure: "stopped",
+				});
+			});
+			expect(container.textContent).toContain("Metis service stopped");
+			expect(shellRenders.count).toBeGreaterThan(rendersAfterNotice);
 		} finally {
 			await act(async () => root.unmount());
 		}

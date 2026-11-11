@@ -97,6 +97,78 @@ const TOOLS_SIDEBAR_WIDTH_KEY = "metis.tools-sidebar-width.v3";
 const TOOLS_SIDEBAR_DEFAULT_WIDTH = 393;
 const selectSidebarRevision = (snapshot: AppStoreSnapshot) => snapshot.sidebarRevision;
 
+interface AppShellState {
+	readonly sessionsById: AppStoreSnapshot["sessionsById"];
+	readonly sessionOrder: AppStoreSnapshot["sessionOrder"];
+	readonly activeSessionId: AppStoreSnapshot["activeSessionId"];
+	readonly activeTurnId: AppStoreSnapshot["activeTurnId"];
+	readonly interactionsById: AppStoreSnapshot["interactionsById"];
+	readonly interactionOrder: AppStoreSnapshot["interactionOrder"];
+	readonly notifications: AppStoreSnapshot["notifications"];
+	readonly latestTurnErrorCode: string | undefined;
+	readonly model: AppStoreSnapshot["model"];
+	readonly availableModels: AppStoreSnapshot["availableModels"];
+	readonly thinkingSelection: AppStoreSnapshot["thinkingSelection"];
+	readonly actualThinkingLevel: AppStoreSnapshot["actualThinkingLevel"];
+	readonly availableThinkingSelections: AppStoreSnapshot["availableThinkingSelections"];
+	readonly permissionPreset: AppStoreSnapshot["permissionPreset"];
+	readonly constrainedByParent: AppStoreSnapshot["constrainedByParent"];
+	readonly sandboxHealth: AppStoreSnapshot["sandboxHealth"];
+	readonly activeReview: AppStoreSnapshot["activeReview"];
+	readonly process: AppStoreSnapshot["process"];
+	readonly sessions: AppStoreSnapshot["sessions"];
+	readonly supervisor: AppStoreSnapshot["supervisor"];
+	// Session projections mutate permission and sandbox health in place. The shell
+	// reads those values off `sessions`, so the key copies them at selection time.
+	readonly sessionShellKey: string;
+}
+
+function selectLatestTurnErrorCode(snapshot: AppStoreSnapshot): string | undefined {
+	const turnId = snapshot.turnOrder.at(-1);
+	return turnId === undefined ? undefined : snapshot.turnsById.get(turnId)?.error?.name;
+}
+
+function selectSessionShellKey(sessions: AppStoreSnapshot["sessions"]): string {
+	let key = "";
+	for (const [sessionId, session] of sessions) {
+		key += `${sessionId}\0${session.permissionPreset}\0${session.sandboxHealth}\0`;
+	}
+	return key;
+}
+
+function selectAppShell(snapshot: AppStoreSnapshot): AppShellState {
+	return {
+		sessionsById: snapshot.sessionsById,
+		sessionOrder: snapshot.sessionOrder,
+		activeSessionId: snapshot.activeSessionId,
+		activeTurnId: snapshot.activeTurnId,
+		interactionsById: snapshot.interactionsById,
+		interactionOrder: snapshot.interactionOrder,
+		notifications: snapshot.notifications,
+		latestTurnErrorCode: selectLatestTurnErrorCode(snapshot),
+		model: snapshot.model,
+		availableModels: snapshot.availableModels,
+		thinkingSelection: snapshot.thinkingSelection,
+		actualThinkingLevel: snapshot.actualThinkingLevel,
+		availableThinkingSelections: snapshot.availableThinkingSelections,
+		permissionPreset: snapshot.permissionPreset,
+		constrainedByParent: snapshot.constrainedByParent,
+		sandboxHealth: snapshot.sandboxHealth,
+		activeReview: snapshot.activeReview,
+		process: snapshot.process,
+		sessions: snapshot.sessions,
+		supervisor: snapshot.supervisor,
+		sessionShellKey: selectSessionShellKey(snapshot.sessions),
+	};
+}
+
+function sameAppShell(left: AppShellState, right: AppShellState): boolean {
+	for (const key of Object.keys(left) as (keyof AppShellState)[]) {
+		if (!Object.is(left[key], right[key])) return false;
+	}
+	return true;
+}
+
 function loadSessionSidebarPreferredWidth(): number {
 	try {
 		const value = Number.parseInt(localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY) ?? "", 10);
@@ -150,7 +222,7 @@ function SessionsSidebarToggle({
 
 export function App({ api, store }: AppProps) {
 	const { i18n, t } = useTranslation();
-	const state = useAppStore(store);
+	const state = useAppStore(store, selectAppShell, sameAppShell);
 	const sidebarRevision = useAppStore(store, selectSidebarRevision);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(sidebarRevision): The store revision invalidates sidebar projections backed by mutable maps.
 	const sidebarState = useMemo<SessionSidebarState>(
@@ -1208,10 +1280,6 @@ export function App({ api, store }: AppProps) {
 			notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId,
 	);
 	const latestNotification = visibleNotifications.at(-1);
-	const latestTurnErrorCode =
-		state.turnOrder.length > 0
-			? state.turnsById.get(state.turnOrder[state.turnOrder.length - 1]!)?.error?.name
-			: undefined;
 	const errorNotice = error ? systemErrorNotice(error) : undefined;
 	const writableSessionId =
 		visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
@@ -1889,7 +1957,7 @@ export function App({ api, store }: AppProps) {
 								<SystemNotice title="App Server is recovering. Your saved session is safe." tone="info" />
 							)}
 							{visibleActiveSession && (
-								<RecoveryBanner errorCode={latestTurnErrorCode} session={visibleActiveSession} />
+								<RecoveryBanner errorCode={state.latestTurnErrorCode} session={visibleActiveSession} />
 							)}
 							{errorNotice && (
 								<SystemNotice
