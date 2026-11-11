@@ -22,7 +22,7 @@
 }
 
 .markdown-math-fallback {
-	border-radius: 4px;
+	border-radius: var(--radius-compact);
 	background: var(--surface-07);
 	color: var(--danger-soft-text);
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -85,7 +85,7 @@ details.markdown-callout[open] .markdown-callout-caret {
 
 .markdown-callout-body {
 	color: var(--text-18);
-	margin-top: 6px;
+	margin-top: var(--space-8);
 }
 
 .markdown-callout-body > :last-child {

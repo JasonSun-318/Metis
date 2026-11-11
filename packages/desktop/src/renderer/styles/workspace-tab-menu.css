@@ -20,7 +20,7 @@
 	height: var(--menu-item-height);
 	align-items: center;
 	gap: var(--space-8);
-	border-radius: 6px;
+	border-radius: var(--radius-compact);
 	background: transparent;
 	color: var(--text-24);
 	padding: 0 var(--space-8);

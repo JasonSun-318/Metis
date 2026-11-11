@@ -100,7 +100,7 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-grouping-menu").background).toBe("var(--menu-bg)");
 		expect(rule(".session-grouping-menu").boxShadow).toBe("var(--overlay-shadow)");
 		expect(rule(".session-grouping-menu").display).toBe("grid");
-		expect(rule(".session-grouping-menu > div > button").minHeight).toBe("28px");
+		expect(rule(".session-grouping-menu > div > button").minHeight).toBe("var(--menu-item-height)");
 		expect(rule(".session-grouping-menu-last").borderTop).toContain("var(--surface-12)");
 		const taskHeading = rule(".loose-tasks h2");
 		const scheduledHeading = rule(".scheduled-task-quick-list h2");
@@ -179,7 +179,7 @@ describe("Project sidebar motion", () => {
 		expect(menu.right).toBe("0px");
 		expect(menu.width).toBe("auto");
 		expect(menu.bottom).toBe("calc(100% + 8px)");
-		expect(rule(".account-menu-item").height).toBe("32px");
+		expect(rule(".account-menu-item").height).toBe("var(--menu-item-height)");
 	});
 
 	it("shows profile avatars and matches the session action menu surface", () => {
@@ -213,7 +213,7 @@ describe("Project sidebar motion", () => {
 		expect(rule(".project-action-buttons").gap).toBe("2px");
 		expect(rule(".project-action-buttons > button").width).toBe("24px");
 		expect(rule(".project-action-buttons > button").height).toBe("24px");
-		expect(rule(".project-action-buttons > button").borderRadius).toBe("6px");
+		expect(rule(".project-action-buttons > button").borderRadius).toBe("var(--radius-compact)");
 		const projectAction = rule(
 			'.project-action-buttons > button:hover:not(:disabled), .project-action-buttons > button[aria-expanded="true"]',
 		);
@@ -242,7 +242,7 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-actions").right).toBe("2px");
 		expect(rule(".session-actions > button").width).toBe("24px");
 		expect(rule(".session-actions > button").height).toBe("24px");
-		expect(rule(".session-actions > button").borderRadius).toBe("6px");
+		expect(rule(".session-actions > button").borderRadius).toBe("var(--radius-compact)");
 		expect(rule(".session-row:hover > .session-actions, .session-actions:focus-within").pointerEvents).toBe("auto");
 		expect(
 			rule(".session-row:hover > .session-actions > button, .session-actions:focus-within > button").opacity,

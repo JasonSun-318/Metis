@@ -57,10 +57,12 @@
 	--collection-page-padding: var(--space-32);
 	--page-title-size: 24px;
 
-	/* shape: controls, cards, and dialogs use distinct radii. */
+	/* shape: compact chrome, controls, cards, dialogs, and pills. */
+	--radius-compact: 6px;
 	--radius-control: 8px;
 	--radius-card: 12px;
 	--radius-dialog: 16px;
+	--radius-full: 999px;
 
 	/* control tiers: forms, compact toolbars, and icon-only actions. */
 	--control-height: 36px;

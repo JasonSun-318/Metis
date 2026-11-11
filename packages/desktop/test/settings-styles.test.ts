@@ -29,7 +29,7 @@ describe("Settings visual states", () => {
 		expect(rule(':root[data-platform="win32"] .settings-main-header').height).toBe("40px");
 		expect(rule(".settings-navigation-top").height).toBe("52px");
 		expect(rule(".settings-back-button").height).toBe("36px");
-		expect(rule(".settings-nav-divider").marginTop).toBe("3px");
+		expect(rule(".settings-nav-divider").margin).toBe("3px 4px var(--space-12)");
 	});
 
 	it("uses restrained overlays and a flatter content hierarchy", () => {
@@ -132,12 +132,12 @@ describe("Settings visual states", () => {
 		expect(
 			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip")
 				.borderRadius,
-		).toBe("999px");
+		).toBe("var(--radius-full)");
 		expect(
 			rule(
 				":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip > button",
 			).borderRadius,
-		).toBe("999px");
+		).toBe("var(--radius-full)");
 		expect(
 			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-empty")
 				.justifyItems,

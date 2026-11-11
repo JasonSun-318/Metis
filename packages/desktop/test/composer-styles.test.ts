@@ -49,7 +49,7 @@ describe("Composer visual states", () => {
 
 	it("uses one compact square stop control for the running state", () => {
 		const stop = rule(".composer-stop.button-secondary");
-		expect(stop.borderRadius).toBe("9px");
+		expect(stop.borderRadius).toBe("var(--radius-control)");
 		expect(stop.background).toBe("var(--surface-13)");
 	});
 
@@ -139,7 +139,7 @@ describe("Composer visual states", () => {
 		expect(panel.display).toBe("grid");
 		expect(panel.gridTemplateRows).toBe("36px 1fr");
 		expect(panel.transition).toContain("grid-template-rows");
-		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderRadius).toBe("var(--radius-card) var(--radius-card) 0 0");
 		expect(panel.borderBottomWidth).toBe("0px");
 		expect(panel.background).toBe("var(--panel)");
 		expect(panel.marginBottom).toBe("0px");
@@ -177,7 +177,7 @@ describe("Composer visual states", () => {
 		expect(slot.margin).toBe("0 var(--space-16)");
 		const panel = rule(".permission-approval-panel");
 		expect(panel.borderBottom).toBe("0px");
-		expect(panel.borderRadius).toBe("12px 12px 0 0");
+		expect(panel.borderRadius).toBe("var(--radius-card) var(--radius-card) 0 0");
 		expect(panel.background).toBe("var(--panel)");
 		expect(css).not.toContain(".permission-approval-panel { width: min(620px, 100%);");
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
@@ -214,10 +214,10 @@ describe("Composer visual states", () => {
 		const codeComposer = rule(".composer-code");
 		expect(codeComposer.display).toBe("flex");
 		expect(codeComposer.background).toBe("transparent");
-		expect(rule(".composer-code .composer-box").borderRadius).toBe("9px");
+		expect(rule(".composer-code .composer-box").borderRadius).toBe("var(--radius-control)");
 		expect(rule(".composer-code .composer-box").background).toBe("var(--surface-03)");
 		expect(rule(".composer-code .composer-editable-input").fontSize).toBe("var(--code-body-size)");
-		expect(rule(".composer-code-submit, .composer-code-stop").borderRadius).toBe("5px");
+		expect(rule(".composer-code-submit, .composer-code-stop").borderRadius).toBe("var(--radius-compact)");
 		expect(rule(".composer-code .composer-actions").display).toBe("flex");
 	});
 

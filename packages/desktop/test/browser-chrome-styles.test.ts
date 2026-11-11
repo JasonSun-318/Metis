@@ -39,7 +39,7 @@ describe("Browser chrome geometry and interaction styles", () => {
 			const button = rule(selector);
 			expect(button.width).toBe("28px");
 			expect(button.height).toBe("28px");
-			expect(button.borderRadius).toBe("6px");
+			expect(button.borderRadius).toBe("var(--radius-compact)");
 		}
 		const navigation = rule(".browser-navigation");
 		expect(navigation.gap).toBe("2px");

@@ -29,12 +29,12 @@
 }
 .conversation-interaction-card :is(.ask-user-slot, .permission-approval-slot) { margin: 0; width: 100%; }
 .conversation-interaction-card .ask-user-body { max-height: none; }
-.conversation-interaction-card .ask-user-options { gap: 6px; }
+.conversation-interaction-card .ask-user-options { gap: var(--space-8); }
 .conversation-interaction-card .ask-user-actions button,
 .conversation-interaction-card .ask-user-resume button,
-.conversation-interaction-card .plan-card-actions button { min-height: 28px; padding: 4px 10px; border-radius: 7px; font-size: 12px; }
+.conversation-interaction-card .plan-card-actions button { min-height: 28px; padding: 4px var(--space-12); border-radius: var(--radius-control); font-size: 12px; }
 .conversation-interaction-card .ask-user-header-actions button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
-.conversation-interaction-card .permission-approval-command { margin-block: var(--space-12); padding: 10px 12px; border-radius: 7px; background: var(--surface-04); }
+.conversation-interaction-card .permission-approval-command { margin-block: var(--space-12); padding: var(--space-12) 12px; border-radius: var(--radius-control); background: var(--surface-04); }
 .conversation-interaction-card .ask-user-resume { background: transparent; padding: 0; border: 0; }
 .transcript .conversation-tasks { padding: 0; }
 .conversation-card-heading { display: flex; align-items: center; gap: var(--space-8); width: 100%; padding: 14px 16px; border-radius: inherit; text-align: left; color: inherit; --button-hover-bg: transparent; }
@@ -42,13 +42,13 @@
 .conversation-card-heading > svg { color: var(--text); }
 .conversation-card-heading strong { flex: 1; font-weight: 500; }
 .conversation-card-heading > span { color: var(--text-muted); font-size: 12px; }
-.conversation-task-items { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0 16px 14px; }
+.conversation-task-items { display: grid; gap: var(--space-12); list-style: none; margin: 0; padding: 0 16px 14px; }
 .conversation-task-items li { display: flex; gap: 9px; align-items: flex-start; }
 .conversation-task-items svg { flex: none; margin-top: 2px; color: var(--text-muted); }
 .conversation-task-items .is-completed { color: var(--text-muted); }
 .conversation-card-status { color: var(--text-muted); }
 .conversation-interaction-card summary { cursor: pointer; color: var(--text-19); }
-.transcript :is(.code-command, .tool-step) .conversation-permission-receipt { width: auto; margin: 8px 10px; padding: 8px 10px; border-radius: 7px; background: transparent; font-size: 12px; }
+.transcript :is(.code-command, .tool-step) .conversation-permission-receipt { width: auto; margin: 8px var(--space-12); padding: 8px var(--space-12); border-radius: var(--radius-control); background: transparent; font-size: 12px; }
 .conversation-interaction-card.plan-card { display: grid; gap: var(--space-12); box-shadow: none; }
 .conversation-interaction-card .plan-card-title { margin: 0; color: var(--text); }
 .conversation-interaction-card .plan-card-actions { justify-content: flex-end; }

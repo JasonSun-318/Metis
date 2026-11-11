@@ -94,7 +94,7 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		);
 		expect(actionButtons.width).toBe("28px");
 		expect(actionButtons.height).toBe("28px");
-		expect(actionButtons.borderRadius).toBe("7px");
+		expect(actionButtons.borderRadius).toBe("var(--radius-control)");
 
 		expect(css).toMatch(
 			/\.workspace-tabbar--titlebar\s*\{[^}]*border-bottom:\s*none[^}]*-webkit-app-region:\s*no-drag/u,
