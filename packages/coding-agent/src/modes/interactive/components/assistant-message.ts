@@ -1,7 +1,21 @@
 import type { AssistantMessage } from "@metis/ai";
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
+import { Container, type DefaultTextStyle, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
 import { sanitizeTerminalText } from "../../../utils/ansi.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
+
+type AssistantMarkdownKind = "text" | "thinking";
+
+interface AssistantMarkdownBlock {
+	markdown: Markdown;
+	text: string;
+	kind: AssistantMarkdownKind;
+	padding: number;
+}
+
+const THINKING_MARKDOWN_STYLE: DefaultTextStyle = {
+	color: (text: string) => theme.fg("thinkingText", text),
+	italic: true,
+};
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -18,6 +32,8 @@ export class AssistantMessageComponent extends Container {
 	private outputPad: number;
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
+	// One Markdown per content index. setText clears the render cache, so unchanged text keeps it.
+	private markdownBlocks: Array<AssistantMarkdownBlock | undefined> = [];
 
 	constructor(
 		message?: AssistantMessage,
@@ -84,7 +100,8 @@ export class AssistantMessageComponent extends Container {
 	updateContent(message: AssistantMessage): void {
 		this.lastMessage = message;
 
-		// Clear content container
+		const previousMarkdown = this.markdownBlocks;
+		this.markdownBlocks = [];
 		this.contentContainer.clear();
 
 		const hasVisibleContent = message.content.some(
@@ -102,7 +119,7 @@ export class AssistantMessageComponent extends Container {
 				// Assistant text messages with no background - trim the text
 				// Set paddingY=0 to avoid extra spacing before tool executions
 				this.contentContainer.addChild(
-					new Markdown(sanitizeTerminalText(content.text).trim(), this.outputPad, 0, this.markdownTheme),
+					this.markdownForBlock(previousMarkdown, i, "text", sanitizeTerminalText(content.text).trim()),
 				);
 			} else if (content.type === "thinking" && content.thinking.trim()) {
 				// Add spacing only when another visible assistant content block follows.
@@ -122,10 +139,7 @@ export class AssistantMessageComponent extends Container {
 				} else {
 					// Thinking traces in thinkingText color, italic
 					this.contentContainer.addChild(
-						new Markdown(sanitizeTerminalText(content.thinking).trim(), this.outputPad, 0, this.markdownTheme, {
-							color: (text: string) => theme.fg("thinkingText", text),
-							italic: true,
-						}),
+						this.markdownForBlock(previousMarkdown, i, "thinking", sanitizeTerminalText(content.thinking).trim()),
 					);
 					if (hasVisibleContentAfter) {
 						this.contentContainer.addChild(new Spacer(1));
@@ -169,5 +183,32 @@ export class AssistantMessageComponent extends Container {
 				);
 			}
 		}
+	}
+
+	private markdownForBlock(
+		previous: Array<AssistantMarkdownBlock | undefined>,
+		index: number,
+		kind: AssistantMarkdownKind,
+		text: string,
+	): Markdown {
+		const current = previous[index];
+		if (current && current.kind === kind && current.padding === this.outputPad) {
+			if (current.text !== text) {
+				current.markdown.setText(text);
+				current.text = text;
+			}
+			this.markdownBlocks[index] = current;
+			return current.markdown;
+		}
+
+		const markdown = new Markdown(
+			text,
+			this.outputPad,
+			0,
+			this.markdownTheme,
+			kind === "thinking" ? THINKING_MARKDOWN_STYLE : undefined,
+		);
+		this.markdownBlocks[index] = { markdown, text, kind, padding: this.outputPad };
+		return markdown;
 	}
 }
