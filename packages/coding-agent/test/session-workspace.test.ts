@@ -185,7 +185,12 @@ describe("managed session workspaces", () => {
 		session.close();
 
 		const previousPath = process.env.PATH;
+		const previousXdgDataHome = process.env.XDG_DATA_HOME;
+		// Empty PATH blocks command-based trash. Linux uses the XDG trash directly,
+		// so a non-directory XDG_DATA_HOME is what makes that trash unavailable.
 		process.env.PATH = "";
+		process.env.XDG_DATA_HOME = join(root, "not-a-directory");
+		writeFileSync(process.env.XDG_DATA_HOME, "x");
 		try {
 			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toMatchObject({
 				ok: false,
@@ -195,6 +200,8 @@ describe("managed session workspaces", () => {
 		} finally {
 			if (previousPath === undefined) delete process.env.PATH;
 			else process.env.PATH = previousPath;
+			if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+			else process.env.XDG_DATA_HOME = previousXdgDataHome;
 		}
 		expect(existsSync(sessionFile)).toBe(true);
 		expect(existsSync(workspace.cwd)).toBe(true);
