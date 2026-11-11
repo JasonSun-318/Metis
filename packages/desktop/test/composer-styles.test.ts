@@ -86,8 +86,8 @@ describe("Composer visual states", () => {
 
 		const item = rule(".composer-add-menu button, .composer-skill-menu button, .session-action-menu button");
 		expect(item.fontSize).toBe("12px");
-		expect(item.gap).toBe("8px");
-		expect(item.padding).toBe("0px 8px");
+		expect(item.gap).toBe("var(--space-8)");
+		expect(item.padding).toBe("0 var(--space-8)");
 	});
 
 	it("allows normal scrolling when home content grows", () => {
@@ -130,7 +130,7 @@ describe("Composer visual states", () => {
 
 	it("uses the compact Metis task list above the composer", () => {
 		const slot = rule(".task-list-slot");
-		expect(slot.margin).toBe("0px 16px");
+		expect(slot.margin).toBe("0 var(--space-16)");
 		expect(slot.animation).toBe("task-list-enter 200ms cubic-bezier(.16, 1, .3, 1)");
 		expect(rule(".task-list-slot.is-closing").animation).toBe(
 			"task-list-exit 200ms cubic-bezier(.4, 0, 1, 1) forwards",
@@ -175,7 +175,7 @@ describe("Composer visual states", () => {
 
 	it("shows permission approval as a composer panel", () => {
 		const slot = rule(".permission-approval-slot");
-		expect(slot.margin).toBe("0px 16px");
+		expect(slot.margin).toBe("0 var(--space-16)");
 		const panel = rule(".permission-approval-panel");
 		expect(panel.borderBottom).toBe("0px");
 		expect(panel.borderRadius).toBe("12px 12px 0 0");

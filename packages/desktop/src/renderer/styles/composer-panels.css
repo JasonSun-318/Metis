@@ -9,7 +9,7 @@
 	inset: auto 0 calc(100% + 8px);
 	--composer-panels-limit: 280px;
 }
-.composer-panels-content { display: flex; flex-direction: column; gap: 8px; max-height: var(--composer-panels-limit); }
+.composer-panels-content { display: flex; flex-direction: column; gap: var(--space-8); max-height: var(--composer-panels-limit); }
 .composer-panels-content[hidden], .composer-panels-content:empty { display: none; }
 .composer-panels-content > * { min-height: 0; margin: 0; }
 .composer-panels-content > .goal-bar-slot { flex: none; margin: 0; animation: none; }
@@ -29,7 +29,7 @@
 @keyframes composer-floating-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(5px); } }
 
 .composer-panels .goal-bar-panel { display: block; padding: 0; }
-.goal-bar-heading { display: grid; min-height: 54px; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 10px; }
+.goal-bar-heading { display: grid; min-height: 54px; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-8); padding: 8px 10px; }
 .goal-bar-heading .goal-bar-objective { margin: 0; line-height: 18px; }
 .goal-bar-controls { display: flex; gap: 2px; }
 .composer-panels .goal-bar-action, .composer-panels .session-status-panel > header button { width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0; border-radius: 6px; }
@@ -43,12 +43,12 @@
 .composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11px; }
 
 .composer-panels .slash-command-menu { max-height: min(248px, var(--composer-panels-limit)); animation: none; scrollbar-width: thin; overscroll-behavior: contain; }
-.composer-panels .slash-command-menu button { min-height: 32px; padding: 4px 8px; }
+.composer-panels .slash-command-menu button { min-height: 32px; padding: var(--space-4) var(--space-8); }
 .composer-panels .slash-command-menu strong { font-size: 12px; }
 .composer-panels .session-status-panel { max-height: var(--composer-panels-limit); padding: 8px 12px 10px; overscroll-behavior: contain; scrollbar-width: thin; }
 .composer-panels .session-status-panel > header { position: sticky; top: -8px; z-index: 1; background: var(--panel); }
-.composer-panels .context-usage-breakdown { gap: 5px; margin-top: 8px; }
-.composer-panels .context-usage-cache { margin-top: 8px; padding-top: 8px; }
+.composer-panels .context-usage-breakdown { gap: 5px; margin-top: var(--space-8); }
+.composer-panels .context-usage-cache { margin-top: var(--space-8); padding-top: var(--space-8); }
 
 .composer-panel-toggle {
 	display: grid;

@@ -44,7 +44,7 @@ describe("Sidebar geometry and workspace grid styles", () => {
 	});
 
 	it("uses two Windows titlebar rows and moves the mode switch to the sidebar top", () => {
-		expect(rule(':root[data-platform="win32"] #root').paddingTop).toBe("32px");
+		expect(rule(':root[data-platform="win32"] #root').paddingTop).toBe("var(--space-32)");
 		expect(rule(':root[data-platform="win32"] .workspace').paddingTop).toBe("var(--titlebar-height)");
 		expect(rule(':root[data-platform="win32"] body::before').height).toBe("32px");
 

@@ -1,4 +1,5 @@
 import { Box, Container, Markdown, type MarkdownTheme } from "@metis/tui";
+import { sanitizeTerminalText } from "../../../utils/ansi.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -31,7 +32,7 @@ export class UserMessageComponent extends Container {
 		const contentBox = new Box(this.outputPad, 1, (content: string) => theme.bg("userMessageBg", content));
 		contentBox.addChild(
 			new Markdown(
-				this.text,
+				sanitizeTerminalText(this.text),
 				0,
 				0,
 				this.markdownTheme,

@@ -16,7 +16,7 @@
 }
 
 .session-sidebar .sidebar-folder-icon > svg {
-	transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .7, .3, 1);
+	transition: opacity 180ms ease, transform var(--motion-duration-switch) cubic-bezier(.2, .7, .3, 1);
 }
 
 .sidebar-folder-icon > [data-folder-state="open"] {
