@@ -124,7 +124,7 @@
 .knowledge-library-options .knowledge-library-choice { flex: 1; min-width: 0; height: 48px; min-height: 48px; }
 .knowledge-library-options .menu-select-option-copy { display: flex; min-width: 0; flex-direction: column; gap: var(--space-4); }
 .knowledge-library-options .menu-select-option-copy small { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.knowledge-remove-dialog { width: min(480px, 100%); }
+.knowledge-remove-dialog { width: min(var(--dialog-width-small), 100%); }
 .knowledge-remove-dialog .knowledge-remove-list { display: grid; max-height: min(45vh, 360px); gap: var(--space-4); overflow: auto; overscroll-behavior: contain; margin: var(--space-16) 0 0; padding: 0; list-style: none; }
 .knowledge-remove-list label { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
 .knowledge-remove-list label:hover { background: var(--surface-03); }

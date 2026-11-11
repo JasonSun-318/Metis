@@ -178,6 +178,13 @@
 	--button-primary-bg: #ededed;
 	--button-primary-bg-hover: #ffffff;
 	--button-primary-ink: #121212;
+	/* One secondary fill for form, dialog, and settings actions. */
+	--button-secondary-bg: var(--surface-06);
+	--button-secondary-bg-hover: var(--surface-08);
+	--button-secondary-ink: var(--text);
+	/* Form fields share one surface. Compact rows keep their own. */
+	--field-bg: var(--surface-06);
+	--dialog-title-size: 18px;
 	--overlay-dim: rgb(0 0 0 / 64%);
 	--overlay-dim-2: rgb(0 0 0 / 66%);
 	--overlay-dim-3: rgb(0 0 0 / 68%);

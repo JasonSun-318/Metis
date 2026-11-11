@@ -43,7 +43,7 @@
 .agent-conversation-error { color: var(--error, #dc6767); }
 .agent-conversation-error button { text-decoration: underline; }
 .agent-delivery-pending { display: block; }
-.agent-details-dialog { width: min(460px, calc(100vw - 40px)); max-height: calc(100dvh - 80px); overflow-y: auto; }
+.agent-details-dialog { width: min(var(--dialog-width-small), calc(100vw - 40px)); max-height: calc(100dvh - 80px); overflow-y: auto; }
 .agent-details-dialog dl { display: grid; gap: var(--space-16); margin: 20px 0; font-size: 13px; }
 .agent-details-dialog dl > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: var(--space-12); }
 .agent-details-dialog dt { color: var(--muted); }

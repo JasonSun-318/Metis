@@ -3,7 +3,7 @@
 .release-notes-unread-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border: 1px solid var(--app-bg); border-radius: 50%; background: var(--danger-count); }
 .release-notes-dialog { display: flex; width: min(1080px, 100%); height: min(780px, calc(100dvh - 48px)); min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-dialog); background: var(--app-bg); box-shadow: var(--overlay-shadow); color: var(--text); animation: modal-card-in 180ms cubic-bezier(.16, 1, .3, 1) both; }
 .release-notes-header { display: flex; flex: none; min-height: 78px; align-items: flex-start; justify-content: space-between; gap: var(--space-16); border-bottom: 1px solid var(--surface-08); padding: 20px 24px; }
-.release-notes-header h2 { margin: 0; color: var(--text-strong); font-size: 18px; font-weight: 560; line-height: 1.4; }
+.release-notes-header h2 { margin: 0; color: var(--text-strong); font-size: var(--dialog-title-size); font-weight: 600; line-height: 1.4; }
 .release-notes-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .release-notes-close { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border-radius: 6px; color: var(--text-muted); }
 .release-notes-close:hover { color: var(--text-strong); }

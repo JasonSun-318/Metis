@@ -189,7 +189,7 @@ describe("Composer visual states", () => {
 		expect(
 			rule(".permission-approval-panel .permission-approval-body > footer .button-secondary:hover:not(:disabled)")
 				.background,
-		).toBe("var(--surface-10)");
+		).toBe("var(--button-secondary-bg-hover)");
 
 		expect(css).toContain(".permission-approval-slot");
 	});
