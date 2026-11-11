@@ -3,10 +3,22 @@ import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import { NodeHtmlMarkdown } from "node-html-markdown";
 import { type Static, Type } from "typebox";
-import { Agent, type RequestInit as UndiciRequestInit, fetch as undiciFetch } from "undici";
+import {
+	Agent,
+	type Dispatcher,
+	ProxyAgent,
+	type RequestInit as UndiciRequestInit,
+	fetch as undiciFetch,
+} from "undici";
 import { keyText } from "../../presentation/keybinding-hints.ts";
 import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import {
+	createUndiciClient,
+	createUndiciOriginDispatcher,
+	requestProxyUrl,
+	withUndiciErrorListener,
+} from "../http-dispatcher.ts";
 import { exactNetworkEndpoint, permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import {
 	createUnattendedPinnedLookup,
@@ -36,8 +48,40 @@ export interface WebFetchToolOptions {
 type WebFetchRequest = (url: URL, init: UndiciRequestInit) => Promise<Response>;
 
 interface PinnedConnection {
-	readonly dispatcher: Agent;
+	readonly dispatcher: Dispatcher;
 	close(): Promise<void>;
+}
+
+/**
+ * undici fetch removes Host before dispatch. Put the original host back and
+ * point the proxy at an address we already accepted, so the proxy is not asked
+ * to resolve the name again.
+ */
+function pinProxyDispatch(proxy: ProxyAgent, pinnedOrigin: string, hostHeader: string): ProxyAgent {
+	const dispatch = proxy.dispatch.bind(proxy);
+	proxy.dispatch = ((options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
+		dispatch(
+			{ ...options, origin: pinnedOrigin, headers: headersWithHost(options.headers, hostHeader) },
+			handler,
+		)) as typeof proxy.dispatch;
+	return proxy;
+}
+
+function headersWithHost(headers: Dispatcher.DispatchOptions["headers"], host: string): Record<string, string> {
+	const next: Record<string, string> = {};
+	if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+		for (const [key, value] of Object.entries(headers)) {
+			if (key.toLowerCase() === "host" || value == null) continue;
+			next[key] = Array.isArray(value) ? value.join(", ") : String(value);
+		}
+	}
+	next.host = host;
+	return next;
+}
+
+function pinnedOrigin(url: URL, address: ResolvedAddress): string {
+	const host = address.family === 6 ? `[${address.address}]` : address.address;
+	return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
 }
 
 const webFetchSchema = Type.Object({
@@ -94,14 +138,9 @@ async function resolveUnattendedRecords(hostname: string): Promise<readonly Reso
 	return resolved;
 }
 
-async function openPinnedConnection(url: URL): Promise<PinnedConnection> {
-	const records = await resolveUnattendedRecords(url.hostname);
-	const dispatcher = new Agent({
-		allowH2: false,
-		connect: { lookup: createUnattendedPinnedLookup(url.hostname, records) },
-	});
+function openDispatcher(dispatcher: Dispatcher): PinnedConnection {
 	return {
-		dispatcher,
+		dispatcher: withUndiciErrorListener(dispatcher),
 		async close() {
 			try {
 				await dispatcher.close();
@@ -110,6 +149,33 @@ async function openPinnedConnection(url: URL): Promise<PinnedConnection> {
 			}
 		},
 	};
+}
+
+async function openPinnedConnection(url: URL): Promise<PinnedConnection> {
+	const records = await resolveUnattendedRecords(url.hostname);
+	const proxy = requestProxyUrl(url);
+	const address = records[0];
+	if (proxy && address) {
+		const servername = normalizeUnattendedHost(url.hostname);
+		const proxyAgent = withUndiciErrorListener(
+			new ProxyAgent({
+				uri: proxy,
+				allowH2: false,
+				clientFactory: createUndiciClient,
+				factory: createUndiciOriginDispatcher,
+				// Certificate checks stay on. servername is the name the caller asked for.
+				...(url.protocol === "https:" ? { requestTls: { servername } } : {}),
+			}),
+		);
+		return openDispatcher(pinProxyDispatch(proxyAgent, pinnedOrigin(url, address), url.host));
+	}
+	return openDispatcher(
+		new Agent({
+			allowH2: false,
+			connect: { lookup: createUnattendedPinnedLookup(url.hostname, records) },
+			factory: createUndiciOriginDispatcher,
+		}),
+	);
 }
 
 async function fetchWithRedirects(

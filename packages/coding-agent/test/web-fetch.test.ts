@@ -1,9 +1,16 @@
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createServer, type Server } from "node:http";
+import { createRequire } from "node:module";
+import type { AddressInfo, Socket } from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWebFetchToolDefinition, type WebFetchToolOptions } from "../src/core/tools/web-fetch.ts";
 import { createUnattendedPinnedLookup, UNATTENDED_BLOCKED_FETCH_REASON } from "../src/core/unattended-fetch-guard.ts";
+
+type DirectLookup = (
+	hostname: string,
+	options: object,
+	callback: (error: Error | null, address: unknown) => void,
+) => void;
 
 const lookupMock = vi.hoisted(() => vi.fn());
 
@@ -278,6 +285,192 @@ describe("unattended web_fetch", () => {
 		const fetchMock = vi.fn();
 		await expect(execute("https://missing.example/", fetchMock)).rejects.toThrow("could not resolve the host");
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"] as const;
+
+	function useProxyEnv(values: Partial<Record<(typeof PROXY_ENV_KEYS)[number], string>>): () => void {
+		const saved = Object.fromEntries(PROXY_ENV_KEYS.map((key) => [key, process.env[key]])) as Record<
+			(typeof PROXY_ENV_KEYS)[number],
+			string | undefined
+		>;
+		for (const key of PROXY_ENV_KEYS) delete process.env[key];
+		for (const [key, value] of Object.entries(values)) process.env[key] = value;
+		return () => {
+			for (const key of PROXY_ENV_KEYS) {
+				const value = saved[key as (typeof PROXY_ENV_KEYS)[number]];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		};
+	}
+
+	function listen(server: Server): Promise<number> {
+		return new Promise((resolve) => {
+			server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
+		});
+	}
+
+	function closeServer(server: Server): Promise<void> {
+		return new Promise((resolve, reject) => {
+			server.close((error) => (error ? reject(error) : resolve()));
+		});
+	}
+
+	it("sends the accepted address through the configured proxy and keeps the original host", async () => {
+		const seen: string[] = [];
+		const proxy = createServer((request, response) => {
+			seen.push(`${request.method} ${request.url} host=${request.headers.host}`);
+			response.writeHead(200, { "content-type": "text/plain" });
+			response.end("via-proxy");
+		});
+		const port = await listen(proxy);
+		const restore = useProxyEnv({ HTTP_PROXY: `http://127.0.0.1:${port}` });
+		lookupMock.mockResolvedValue([{ address: "10.8.0.4", family: 4 }]);
+		const tool = createWebFetchToolDefinition({ unattended: true });
+		try {
+			const result = await tool.execute(
+				"tool-call",
+				{ url: "http://docs.internal/wiki" },
+				undefined,
+				undefined,
+				undefined as never,
+			);
+			expect(result.content).toEqual([{ type: "text", text: "via-proxy" }]);
+			expect(seen).toEqual(["GET http://10.8.0.4/wiki host=docs.internal"]);
+		} finally {
+			restore();
+			await closeServer(proxy);
+		}
+	});
+
+	it("keeps TLS servername on the original host while CONNECT uses the accepted address", async () => {
+		const connects: string[] = [];
+		let clientHello = Buffer.alloc(0);
+		const proxy = createServer();
+		proxy.on("connect", (request, socket: Socket, head: Buffer) => {
+			connects.push(request.url ?? "");
+			socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+			const capture = (chunk: Buffer) => {
+				clientHello = Buffer.concat([clientHello, chunk]);
+				socket.destroy();
+			};
+			if (head.length > 0) capture(head);
+			else socket.once("data", capture);
+		});
+		const port = await listen(proxy);
+		const restore = useProxyEnv({ HTTPS_PROXY: `http://127.0.0.1:${port}` });
+		lookupMock.mockResolvedValue([{ address: "10.8.0.4", family: 4 }]);
+		const tool = createWebFetchToolDefinition({ unattended: true });
+		try {
+			await expect(
+				tool.execute(
+					"tool-call",
+					{ url: "https://docs.internal/secure" },
+					undefined,
+					undefined,
+					undefined as never,
+				),
+			).rejects.toThrow();
+			expect(connects).toEqual(["10.8.0.4:443"]);
+			expect(clientHello.includes("docs.internal")).toBe(true);
+			expect(clientHello.includes("10.8.0.4")).toBe(false);
+		} finally {
+			restore();
+			await closeServer(proxy);
+		}
+	});
+
+	it("uses the pinned direct connection when NO_PROXY matches", async () => {
+		let proxyHits = 0;
+		const proxy = createServer((request, response) => {
+			proxyHits += 1;
+			response.end(request.url);
+		});
+		const port = await listen(proxy);
+		const restore = useProxyEnv({
+			HTTP_PROXY: `http://127.0.0.1:${port}`,
+			NO_PROXY: "docs.internal",
+		});
+		const pinned: string[] = [];
+		const net = createRequire(import.meta.url)("node:net") as typeof import("node:net");
+		const originalConnect = net.connect;
+		net.connect = ((options: { host?: string; lookup?: DirectLookup }) => {
+			const target = options;
+			const lookup = target.lookup;
+			if (lookup && target.host !== "127.0.0.1") {
+				const originalLookup = lookup;
+				target.lookup = (hostname, lookupOptions, callback) => {
+					originalLookup(hostname, lookupOptions, (error, address) => {
+						if (typeof address === "string") pinned.push(address);
+						else if (Array.isArray(address)) {
+							for (const item of address) {
+								if (item && typeof item === "object" && "address" in item) {
+									pinned.push(String(item.address));
+								}
+							}
+						}
+						callback(error, address);
+					});
+				};
+			}
+			return originalConnect(options as never);
+		}) as typeof net.connect;
+		lookupMock.mockResolvedValue([{ address: "10.8.0.4", family: 4 }]);
+		const tool = createWebFetchToolDefinition({ unattended: true });
+		try {
+			await expect(
+				tool.execute(
+					"tool-call",
+					{ url: "http://docs.internal/wiki" },
+					AbortSignal.timeout(300),
+					undefined,
+					undefined as never,
+				),
+			).rejects.toThrow();
+			expect(proxyHits).toBe(0);
+			expect(pinned).toContain("10.8.0.4");
+		} finally {
+			net.connect = originalConnect;
+			restore();
+			await closeServer(proxy);
+		}
+	});
+
+	it("still refuses blocked addresses when a proxy is configured", async () => {
+		let proxyHits = 0;
+		const proxy = createServer((_request, response) => {
+			proxyHits += 1;
+			response.end("should-not-run");
+		});
+		const port = await listen(proxy);
+		const restore = useProxyEnv({ HTTP_PROXY: `http://127.0.0.1:${port}` });
+		lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+		const tool = createWebFetchToolDefinition({ unattended: true });
+		try {
+			await expect(
+				tool.execute(
+					"tool-call",
+					{ url: "http://169.254.169.254/latest" },
+					undefined,
+					undefined,
+					undefined as never,
+				),
+			).rejects.toThrow(UNATTENDED_BLOCKED_FETCH_REASON);
+			await expect(
+				tool.execute(
+					"tool-call",
+					{ url: "http://metadata.google.internal/latest" },
+					undefined,
+					undefined,
+					undefined as never,
+				),
+			).rejects.toThrow(UNATTENDED_BLOCKED_FETCH_REASON);
+			expect(proxyHits).toBe(0);
+		} finally {
+			restore();
+			await closeServer(proxy);
+		}
 	});
 
 	it("pins the connection to the accepted address", async () => {
