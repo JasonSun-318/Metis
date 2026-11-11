@@ -19,7 +19,9 @@ function rule(selector: string): CSSStyleDeclaration {
 
 describe("Plugin Center visual contract", () => {
 	it("matches the scheduled-task content width and density", () => {
-		expect(css).toContain("input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }");
+		expect(css).toContain(
+			"input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }",
+		);
 		expect(rule(".plugins-catalog-page").overflowY).toBe("auto");
 		expect(rule(".plugins-full-list").overflowY).toBe("auto");
 		expect(rule(".plugins-full-list:has(.plugins-catalog-message)").borderColor).toBe("transparent");
