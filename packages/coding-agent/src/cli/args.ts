@@ -5,7 +5,6 @@
 import type { ThinkingLevel } from "@metis/agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
-import { type AgentMode, isAgentMode } from "../core/agent-mode.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
 import { isPermissionPreset, type PermissionPreset } from "../core/permissions/settings.ts";
 
@@ -23,7 +22,6 @@ export interface Args {
 	help?: boolean;
 	version?: boolean;
 	mode?: Mode;
-	agentMode?: AgentMode;
 	cwd?: string;
 	permissionPreset?: PermissionPreset;
 	name?: string;
@@ -140,21 +138,6 @@ export function parseArgs(args: string[]): Args {
 					result.diagnostics.push({
 						type: "error",
 						message: `Invalid mode "${consumed.value}". Valid values: text, json, rpc`,
-					});
-				}
-			}
-		} else if (arg === "--agent-mode") {
-			const mode = args[i + 1];
-			if (mode === undefined || mode.startsWith("-")) {
-				result.diagnostics.push({ type: "error", message: "--agent-mode requires chat or code" });
-			} else {
-				i++;
-				if (isAgentMode(mode)) {
-					result.agentMode = mode;
-				} else {
-					result.diagnostics.push({
-						type: "error",
-						message: `Invalid agent mode "${mode}". Valid values: chat, code`,
 					});
 				}
 			}
@@ -414,7 +397,6 @@ ${chalk.bold("Options:")}
   --system-prompt <text>         System prompt (default: general-purpose agent prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
-  --agent-mode <mode>            New-session classification: chat or code (default: code)
   --cwd <path>                   Bind a new session to an existing directory
   --permission-preset <ask|auto|full> New-session permission preset (default: auto)
   --print, -p                    Non-interactive mode: process prompt and exit
@@ -476,9 +458,6 @@ ${chalk.bold("Examples:")}
 
   # Start a named session
   ${APP_NAME} --name "Refactor auth module"
-
-  # Start a chat session
-  ${APP_NAME} --agent-mode chat "Compare these proposals"
 
   # Use different model
   ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"

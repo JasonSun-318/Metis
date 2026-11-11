@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_SLASH_COMMANDS, getBuiltinSlashCommands } from "../src/core/slash-commands.ts";
 
-describe("mode-scoped built-in slash commands", () => {
-	it("shows directory commands only in Code mode", () => {
-		const code = getBuiltinSlashCommands("code").map((command) => command.name);
-		const chat = getBuiltinSlashCommands("chat").map((command) => command.name);
-		for (const name of ["add-dir", "remove-dir", "dirs"]) {
-			expect(code).toContain(name);
-			expect(chat).not.toContain(name);
-		}
+describe("built-in slash commands", () => {
+	it("lists directory commands for every session", () => {
+		const names = getBuiltinSlashCommands().map((command) => command.name);
+		for (const name of ["add-dir", "remove-dir", "dirs"]) expect(names).toContain(name);
+	});
+
+	it("no longer exposes scheduled tasks or web-search flags", () => {
+		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === "schedule")).toBe(false);
 	});
 
 	it("exposes /memory undo hint and drops /dream", () => {

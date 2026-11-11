@@ -286,7 +286,6 @@ export class SessionAgentCoordinator {
 							parentTools: session.getDelegatableToolNames(agentHeader?.writePolicy ?? "inherit"),
 							depth: (agentHeader?.agentPath.length ?? 0) + 1,
 							writePolicy: agentHeader?.writePolicy ?? "inherit",
-							mode: session.mode,
 						})
 				: undefined,
 		);

@@ -2,17 +2,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentMode } from "../src/core/agent-mode.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { canonicalizePath } from "../src/utils/paths.ts";
 
 type NewCommandContext = {
 	guardSessionMutation: () => boolean;
-	handleClearCommand: (mode?: AgentMode, cwd?: string) => Promise<void>;
+	handleClearCommand: (cwd?: string) => Promise<void>;
 	showError: (message: string) => void;
 	showExtensionSelector: (title: string, options: string[]) => Promise<string | undefined>;
 	showExtensionInput: (title: string, placeholder?: string) => Promise<string | undefined>;
-	sessionManager: { getMode(): AgentMode };
 	runtimeHost: { terminalCwd: string };
 };
 
@@ -22,7 +20,7 @@ type InteractiveModePrototype = {
 
 const prototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
 
-function context(selections: Array<string | undefined>, mode: AgentMode = "code", terminalCwd = process.cwd()) {
+function context(selections: Array<string | undefined>, terminalCwd = process.cwd()) {
 	const handleClearCommand = vi.fn(async () => {});
 	const showError = vi.fn();
 	const showExtensionSelector = vi.fn(async () => selections.shift());
@@ -34,7 +32,6 @@ function context(selections: Array<string | undefined>, mode: AgentMode = "code"
 			showError,
 			showExtensionSelector,
 			showExtensionInput,
-			sessionManager: { getMode: () => mode },
 			runtimeHost: { terminalCwd },
 		} satisfies NewCommandContext,
 		handleClearCommand,
@@ -50,39 +47,29 @@ describe("InteractiveMode /new", () => {
 		while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 	});
 
-	it("chooses mode first and keeps the current mode first", async () => {
-		const test = context(["Chat", "Metis managed workspace"], "chat");
+	it("offers the managed, terminal, and other workspace options", async () => {
+		const terminalCwd = process.cwd();
+		const terminal = `Terminal working directory (${terminalCwd})`;
+		const test = context(["Metis managed workspace"], terminalCwd);
 
 		await prototype.handleNewSessionCommand.call(test.value, "/new");
 
-		expect(test.showExtensionSelector).toHaveBeenNthCalledWith(1, "New session mode", ["Chat", "Code"]);
-		expect(test.handleClearCommand).toHaveBeenCalledWith("chat", undefined);
-	});
-
-	it("creates Chat in the captured terminal cwd when selected", async () => {
-		const terminalCwd = process.cwd();
-		const terminal = `Terminal working directory (${terminalCwd})`;
-		const test = context([terminal], "code", terminalCwd);
-
-		await prototype.handleNewSessionCommand.call(test.value, "/new chat");
-
-		expect(test.showExtensionSelector).toHaveBeenCalledWith("Chat workspace", [
+		expect(test.showExtensionSelector).toHaveBeenCalledWith("New session workspace", [
 			"Metis managed workspace",
 			terminal,
 			"Other directory",
 		]);
-		expect(test.handleClearCommand).toHaveBeenCalledWith("chat", terminalCwd);
+		expect(test.handleClearCommand).toHaveBeenCalledWith(undefined);
 	});
 
-	it("offers only terminal or another directory for Code", async () => {
+	it("creates the session in the terminal cwd when selected", async () => {
 		const terminalCwd = process.cwd();
 		const terminal = `Terminal working directory (${terminalCwd})`;
-		const test = context([terminal], "chat", terminalCwd);
+		const test = context([terminal], terminalCwd);
 
-		await prototype.handleNewSessionCommand.call(test.value, "/new code");
+		await prototype.handleNewSessionCommand.call(test.value, "/new");
 
-		expect(test.showExtensionSelector).toHaveBeenCalledWith("Code workspace", [terminal, "Other directory"]);
-		expect(test.handleClearCommand).toHaveBeenCalledWith("code", terminalCwd);
+		expect(test.handleClearCommand).toHaveBeenCalledWith(terminalCwd);
 	});
 
 	it("validates an entered directory before replacing the session", async () => {
@@ -90,26 +77,20 @@ describe("InteractiveMode /new", () => {
 		tempDirs.push(directory);
 		const test = context(["Other directory", directory]);
 
-		await prototype.handleNewSessionCommand.call(test.value, "/new code");
-
-		expect(test.showExtensionInput).toHaveBeenCalledWith("Directory", process.cwd());
-		expect(test.handleClearCommand).toHaveBeenCalledWith("code", canonicalizePath(directory));
-	});
-
-	it("cancels without replacing the active session", async () => {
-		const test = context([undefined]);
-
 		await prototype.handleNewSessionCommand.call(test.value, "/new");
 
-		expect(test.handleClearCommand).not.toHaveBeenCalled();
+		expect(test.showExtensionInput).toHaveBeenCalledWith("Directory", process.cwd());
+		expect(test.handleClearCommand).toHaveBeenCalledWith(canonicalizePath(directory));
 	});
 
-	it("rejects an unknown mode", async () => {
-		const test = context([]);
+	it("rejects arguments and cancels without replacing the active session", async () => {
+		const withArgument = context(["Metis managed workspace"]);
+		await prototype.handleNewSessionCommand.call(withArgument.value, "/new chat");
+		expect(withArgument.showError).toHaveBeenCalledWith("Usage: /new");
+		expect(withArgument.handleClearCommand).not.toHaveBeenCalled();
 
-		await prototype.handleNewSessionCommand.call(test.value, "/new focus");
-
-		expect(test.showError).toHaveBeenCalledWith("Usage: /new [chat|code]");
-		expect(test.handleClearCommand).not.toHaveBeenCalled();
+		const cancelled = context([undefined]);
+		await prototype.handleNewSessionCommand.call(cancelled.value, "/new");
+		expect(cancelled.handleClearCommand).not.toHaveBeenCalled();
 	});
 });

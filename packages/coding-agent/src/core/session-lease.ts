@@ -4,7 +4,6 @@ import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, unli
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { canonicalizePathForCreation } from "../utils/paths.ts";
-import { type AgentMode, isAgentMode } from "./agent-mode.ts";
 import {
 	cleanupPublishedAliasesSync,
 	createFileAtomicallySync,
@@ -730,14 +729,12 @@ export class SessionLease {
 	}
 }
 
-/** Fence creation and destructive mutation for one mode within one project session directory. */
-export function acquireModeProjectMutationLease(
+/** Fence creation and destructive mutation within one project session directory. */
+export function acquireProjectMutationLease(
 	projectSessionDir: string,
-	mode: AgentMode,
 	options: SessionLeaseOptions = {},
 ): SessionLease {
-	if (!isAgentMode(mode)) throw new TypeError("Project mutation lease mode must be chat or code");
 	const directory = canonicalizePathForCreation(projectSessionDir);
 	ensureRealDirectoryDurablySync(directory, 0o700);
-	return SessionLease.acquire(join(directory, `.mode-${mode}-project.mutation`), options);
+	return SessionLease.acquire(join(directory, ".project.mutation"), options);
 }

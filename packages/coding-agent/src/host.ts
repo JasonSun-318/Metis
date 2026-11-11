@@ -197,7 +197,6 @@ export {
 	createPermissionAuditEvent,
 	createScheduledRunExecutor,
 	createSessionId,
-	DEFAULT_AGENT_MODE,
 	DEFAULT_AUTO_COMMAND_SUGGESTIONS,
 	DefaultResourceLoader,
 	digestCanonical,

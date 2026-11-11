@@ -38,7 +38,7 @@ Every child inherits a permission ceiling from its parent. A later parent downgr
 
 ## Persistence and lifecycle
 
-Agents are ordinary v15 session journals, inheriting the parent's Chat or Code mode, under:
+Agents are ordinary v15 session journals, inheriting the parent's workspace roots, under:
 
 ```text
 <agentDir>/agents/<rootSessionId>/

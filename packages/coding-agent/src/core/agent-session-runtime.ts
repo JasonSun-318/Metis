@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
-import type { AgentMode } from "./agent-mode.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
@@ -1287,7 +1286,6 @@ export class AgentSessionRuntime {
 
 	newSession(options?: {
 		parentSession?: string;
-		mode?: AgentMode;
 		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
@@ -1297,7 +1295,6 @@ export class AgentSessionRuntime {
 
 	private async newSessionOnce(options?: {
 		parentSession?: string;
-		mode?: AgentMode;
 		cwd?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
@@ -1309,11 +1306,9 @@ export class AgentSessionRuntime {
 
 		const previousSessionFile = this.session.sessionFile;
 		const currentManager = this.session.sessionManager;
-		const mode = options?.mode ?? currentManager.getMode();
 		const sessionId = createSessionId();
 		const workspace = resolveNewSessionWorkspace({
 			id: sessionId,
-			mode,
 			requestedCwd: options?.cwd,
 			hostCwd: this.hostCwd,
 			agentDir: this._services.agentDir,
@@ -1326,7 +1321,6 @@ export class AgentSessionRuntime {
 			const newSessionOptions = {
 				id: sessionId,
 				parentSession: options?.parentSession,
-				mode,
 				cwdOrigin: workspace.cwdOrigin,
 			} as const;
 			sessionManager = currentManager.isPersisted()

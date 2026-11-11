@@ -1,13 +1,7 @@
 import { isAbsolute, normalize } from "node:path";
-import { DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import { isPermissionPreset } from "./permissions/settings.ts";
 import { isRuntimeControlEntryType, parseRuntimeControlEntry, type RuntimeControlEntry } from "./runtime-recovery.ts";
-import {
-	isSessionControlEntryType,
-	isSessionDirectoryControlEntryType,
-	parseSessionControlEntry,
-	type SessionControlEntry,
-} from "./session-control.ts";
+import { isSessionControlEntryType, parseSessionControlEntry, type SessionControlEntry } from "./session-control.ts";
 import { assertValidSessionId } from "./session-id.ts";
 import { CorruptSessionError } from "./session-journal.ts";
 import type { FileEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
@@ -41,6 +35,7 @@ export function validateSessionHeader(record: Record<string, unknown>, filePath:
 		"id",
 		"timestamp",
 		"cwd",
+		// Retired chat/code classification; accepted until journals are migrated.
 		"mode",
 		"cwdOrigin",
 		"permissionPreset",
@@ -64,9 +59,6 @@ export function validateSessionHeader(record: Record<string, unknown>, filePath:
 	}
 	if (header.parentSession !== undefined && typeof header.parentSession !== "string") {
 		corruptSession(filePath, 1, "Session header has an invalid parentSession");
-	}
-	if (header.mode !== undefined && !isAgentMode(header.mode)) {
-		corruptSession(filePath, 1, "Session header has an invalid mode");
 	}
 	if (header.cwdOrigin !== undefined && header.cwdOrigin !== "managed" && header.cwdOrigin !== "user-selected") {
 		corruptSession(filePath, 1, "Session header has an invalid cwdOrigin");
@@ -225,9 +217,6 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
-			if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
-				corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
-			}
 			parseSessionControlRecord(records[index], index + 1, filePath);
 			continue;
 		}

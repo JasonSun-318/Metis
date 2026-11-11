@@ -4,7 +4,6 @@ import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 type Context = {
 	guardSessionMutation: () => boolean;
 	sessionManager: {
-		getMode(): "chat" | "code";
 		getWorkspaceRoots(): readonly string[];
 		addWorkspaceDirectory(path: string): { path: string; changed: boolean };
 		removeWorkspaceDirectory(path: string): { path: string; changed: boolean };
@@ -28,11 +27,10 @@ type Prototype = {
 
 const prototype = InteractiveMode.prototype as unknown as Prototype;
 
-function context(mode: "chat" | "code" = "code") {
+function context() {
 	return {
 		guardSessionMutation: vi.fn(() => false),
 		sessionManager: {
-			getMode: () => mode,
 			getWorkspaceRoots: () => ["/project", "/external"],
 			addWorkspaceDirectory: vi.fn(() => ({ path: "/external", changed: true })),
 			removeWorkspaceDirectory: vi.fn(() => ({ path: "/external", changed: true })),
@@ -44,7 +42,7 @@ function context(mode: "chat" | "code" = "code") {
 	} satisfies Context;
 }
 
-describe("InteractiveMode Code workspace directory commands", () => {
+describe("InteractiveMode workspace directory commands", () => {
 	it("parses the complete single path and strips matching outer quotes", () => {
 		expect(prototype.getWorkspaceDirectoryCommandArgument.call({}, "/add-dir /tmp/shared dir", "/add-dir")).toBe(
 			"/tmp/shared dir",
@@ -70,17 +68,6 @@ describe("InteractiveMode Code workspace directory commands", () => {
 		prototype.handleRemoveDirectoryCommand.call(value, "/external");
 		expect(value.session.refreshSystemPrompt).toHaveBeenCalledTimes(2);
 		expect(value.showStatus).toHaveBeenCalledWith("Removed working directory: /external");
-	});
-
-	it("rejects the commands in Chat before mutating state", () => {
-		const value = context("chat");
-		prototype.handleAddDirectoryCommand.call(value, "/external");
-		prototype.handleRemoveDirectoryCommand.call(value, "/external");
-		prototype.handleDirectoriesCommand.call(value, "");
-		expect(value.sessionManager.addWorkspaceDirectory).not.toHaveBeenCalled();
-		expect(value.sessionManager.removeWorkspaceDirectory).not.toHaveBeenCalled();
-		expect(value.showWarning).toHaveBeenCalledTimes(3);
-		expect(value.showWarning).toHaveBeenCalledWith("Additional directories are only available in Code mode");
 	});
 
 	it("shows usage, missing removal, and the complete root list", () => {

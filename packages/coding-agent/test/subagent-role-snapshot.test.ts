@@ -249,7 +249,6 @@ describe("effective role catalog", () => {
 			parentTools: ["read", "browser_act"],
 			depth: 2,
 			writePolicy: "deny",
-			mode: "chat",
 		});
 		const auditor = prompt.split("\n").find((line) => line.startsWith("auditor:"))!;
 		expect(auditor).toContain('effective tools=["read"]');
@@ -260,7 +259,6 @@ describe("effective role catalog", () => {
 		expect(worker).toContain('effective tools=["read","browser_act"]');
 		expect(worker).toContain("filesystem writes=denied");
 		expect(worker).toContain("delegation=denied (depth limit)");
-		expect(prompt).toContain("mode=chat");
 		expect(prompt).toContain("inspect the task's existing visible activity before claiming no result was produced");
 	});
 

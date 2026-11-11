@@ -3,7 +3,6 @@ import { Agent, type ThinkingLevel } from "@metis/agent-core";
 import { clampThinkingLevel } from "@metis/ai/compat";
 import { getAgentDir } from "../config.ts";
 import { canonicalizeActionPath, resolvePath } from "../utils/paths.ts";
-import { DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
@@ -119,13 +118,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 	if (
 		suppliedSessionManager &&
-		options.agentMode !== undefined &&
-		options.agentMode !== suppliedSessionManager.getMode()
-	) {
-		throw new Error("agentMode cannot override the supplied sessionManager mode");
-	}
-	if (
-		suppliedSessionManager &&
 		options.cwd !== undefined &&
 		canonicalizeActionPath(options.cwd, process.cwd()) !==
 			canonicalizeActionPath(suppliedSessionManager.getCwd(), suppliedSessionManager.getCwd())
@@ -149,13 +141,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		);
 	}
 
-	const mode = options.agentMode ?? DEFAULT_AGENT_MODE;
 	const sessionId = suppliedSessionManager ? undefined : createSessionId();
 	const workspace = suppliedSessionManager
 		? undefined
 		: resolveNewSessionWorkspace({
 				id: sessionId!,
-				mode,
 				requestedCwd: options.cwd,
 				hostCwd: process.cwd(),
 				agentDir,
@@ -178,7 +168,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			suppliedSessionManager ??
 			SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), {
 				id: sessionId,
-				mode,
 				cwdOrigin: workspace!.cwdOrigin,
 				permissionPreset: requestedPermissionPreset,
 			});

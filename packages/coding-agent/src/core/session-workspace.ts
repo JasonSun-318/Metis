@@ -13,7 +13,6 @@ import {
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { getWorkspacesDir as getConfiguredWorkspacesDir } from "../config.ts";
 import { canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
-import type { AgentMode } from "./agent-mode.ts";
 import { replaceFileAtomicallySync, syncDirectorySync } from "./durable-file.ts";
 import { assertValidSessionId } from "./session-id.ts";
 
@@ -117,9 +116,12 @@ function resolveExistingDirectory(path: string, baseDir: string): string {
 	return realpathSync(resolvedPath);
 }
 
+/**
+ * A session works in the directory it was given, or in a Metis-owned workspace
+ * when the caller does not choose one.
+ */
 export function resolveNewSessionWorkspace(options: {
 	id: string;
-	mode: AgentMode;
 	requestedCwd?: string;
 	hostCwd: string;
 	agentDir: string;
@@ -130,9 +132,6 @@ export function resolveNewSessionWorkspace(options: {
 			cwd: resolveExistingDirectory(options.requestedCwd, options.hostCwd),
 			cwdOrigin: "user-selected",
 		};
-	}
-	if (options.mode === "code") {
-		return { cwd: resolveExistingDirectory(options.hostCwd, options.hostCwd), cwdOrigin: "user-selected" };
 	}
 
 	const { root } = ensureManagedWorkspaceRoot(options.agentDir);

@@ -57,7 +57,6 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { createAgentMailboxMessage, planAgentMailboxDelivery } from "./agent-mailbox.ts";
-import type { AgentMode } from "./agent-mode.ts";
 import {
 	canRetryAssistantMessage,
 	isRetryableAssistantMessage,
@@ -3851,11 +3850,6 @@ export class AgentSession {
 		return this.sessionManager.getSessionFile();
 	}
 
-	/** Current immutable session classification mode. */
-	get mode(): AgentMode {
-		return this.sessionManager.getMode();
-	}
-
 	/** Current session ID */
 	get sessionId(): string {
 		return this.sessionManager.getSessionId();
@@ -6860,7 +6854,6 @@ export class AgentSession {
 	getSessionStats(): SessionStats {
 		return buildSessionStats({
 			entries: this.sessionManager.getEntries(),
-			mode: this.mode,
 			cwd: this.sessionManager.getCwd(),
 			cwdOrigin: this.sessionManager.getCwdOrigin(),
 			permissionPreset: this.sessionManager.getPermissionPreset(),
@@ -6919,7 +6912,6 @@ export class AgentSession {
 			id: this.sessionManager.getSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: this.sessionManager.getCwd(),
-			mode: this.sessionManager.getMode(),
 			permissionPreset: this.sessionManager.getPermissionPreset(),
 		};
 

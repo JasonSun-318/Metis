@@ -91,7 +91,6 @@ function fakeManager() {
 }
 
 function fakeSession(input: {
-	mode: "chat" | "code";
 	cwdOrigin: "managed" | "user-selected";
 	cwd: string;
 	header?: {
@@ -106,7 +105,6 @@ function fakeSession(input: {
 		model: { provider: "openai", id: "gpt-test" },
 		sessionManager: {
 			getHeader: () => input.header,
-			getMode: () => input.mode,
 			getCwdOrigin: () => input.cwdOrigin,
 			getCwd: () => input.cwd,
 			getSessionId: () => "source-session",
@@ -143,7 +141,7 @@ describe("schedule host tool", () => {
 		["run_now", ["external-side-effect"]],
 		["delete", ["external-side-effect", "destructive"]],
 	] as const)("describes %s permission effects exactly", (action, expectedEffects) => {
-		const host = fakeSession({ mode: "chat", cwdOrigin: "user-selected", cwd: "/project" });
+		const host = fakeSession({ cwdOrigin: "user-selected", cwd: "/project" });
 		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
 		const claim = host.tool!.permission.describe({ action } as never, {
 			actionId: `schedule-${action}`,
@@ -207,7 +205,7 @@ describe("schedule host tool", () => {
 	});
 
 	it("accepts a model-provided JSON string for schedule", () => {
-		const host = fakeSession({ mode: "chat", cwdOrigin: "user-selected", cwd: "/project" });
+		const host = fakeSession({ cwdOrigin: "user-selected", cwd: "/project" });
 		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
 		const prepared = host.tool!.prepareArguments!({
 			action: "create",
@@ -232,11 +230,11 @@ describe("schedule host tool", () => {
 
 	it.each([
 		[
-			{ mode: "chat", cwdOrigin: "user-selected", cwd: "/notes" },
+			{ cwdOrigin: "user-selected", cwd: "/notes" },
 			{ kind: "general", workspace: "fixed", cwd: "/notes" },
 		],
 		[
-			{ mode: "chat", cwdOrigin: "managed", cwd: "/old-chat" },
+			{ cwdOrigin: "managed", cwd: "/old-chat" },
 			{ kind: "general", workspace: "task" },
 		],
 	] as const)("derives target outside model input", async (source, expected) => {
@@ -264,28 +262,20 @@ describe("schedule host tool", () => {
 		expect(host.removeHostTools).toHaveBeenCalledWith(["schedule"]);
 	});
 
-	it("omits the tool from Code, scheduled, and child sessions", () => {
-		for (const source of [
-			{ mode: "code" as const, header: undefined },
-			{ mode: "chat" as const, header: { scheduled: { taskId: "task-1", runId: "run-1" } } },
-			{
-				mode: "chat" as const,
-				header: { agent: { agentId: "agent-1" } },
-			},
-		]) {
-			const host = fakeSession({
-				mode: source.mode,
-				cwdOrigin: "user-selected",
-				cwd: "/project",
-				header: source.header,
-			});
+	it("installs the tool on regular sessions but not scheduled or child sessions", () => {
+		const regular = fakeSession({ cwdOrigin: "user-selected", cwd: "/project" });
+		installScheduleHost({ session: regular.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
+		expect(regular.tool?.name).toBe("schedule");
+
+		for (const header of [{ scheduled: { taskId: "task-1", runId: "run-1" } }, { agent: { agentId: "agent-1" } }]) {
+			const host = fakeSession({ cwdOrigin: "user-selected", cwd: "/project", header });
 			installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
 			expect(host.tool).toBeUndefined();
 		}
 	});
 
 	it("replaces duplicate installs and removes only the named host tool", () => {
-		const host = fakeSession({ mode: "chat", cwdOrigin: "managed", cwd: "/managed" });
+		const host = fakeSession({ cwdOrigin: "managed", cwd: "/managed" });
 		const first = installScheduleHost({
 			session: host.session,
 			manager: fakeManager(),
@@ -303,7 +293,7 @@ describe("schedule host tool", () => {
 	});
 
 	it("returns machine-readable creation and latest-run status", async () => {
-		const host = fakeSession({ mode: "chat", cwdOrigin: "managed", cwd: "/managed" });
+		const host = fakeSession({ cwdOrigin: "managed", cwd: "/managed" });
 		const manager = fakeManager();
 		installScheduleHost({ session: host.session, manager, timezone: "Asia/Shanghai" });
 		const created = await host.tool!.execute(
@@ -372,7 +362,7 @@ describe("schedule host tool", () => {
 				target: { kind: "general", workspace: "fixed", cwd: "/project" },
 			},
 		});
-		const host = fakeSession({ mode: "chat", cwdOrigin: "managed", cwd: "/managed" });
+		const host = fakeSession({ cwdOrigin: "managed", cwd: "/managed" });
 		installScheduleHost({ session: host.session, manager, timezone: "Asia/Shanghai" });
 		const detail = await host.tool!.execute(
 			"get",
@@ -391,7 +381,7 @@ describe("schedule host tool", () => {
 		expect(SCHEDULE_MAIN_PROMPT).toBe(
 			"当用户要求未来执行或周期性执行任务时，可以使用 `schedule` 工具。创建前确保任务内容和执行时间明确；信息不足时先询问用户。",
 		);
-		const host = fakeSession({ mode: "chat", cwdOrigin: "managed", cwd: "/managed" });
+		const host = fakeSession({ cwdOrigin: "managed", cwd: "/managed" });
 		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
 		expect(host.tool?.description).toBe(
 			"创建和管理定时任务。创建时，请提供可独立执行的完整任务说明和明确的执行时间；信息不足时先询问用户。",

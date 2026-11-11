@@ -11,65 +11,53 @@ metis -c                  # Continue most recent session
 metis -r                  # Browse and select from past sessions
 metis --no-session        # Ephemeral mode; do not save
 metis --name "my task"    # Set session display name at startup
-metis --agent-mode chat   # New Chat session with a managed workspace
+metis                     # New session in the invocation directory
 metis --cwd ./project     # Bind a new session to an existing directory
 metis --session <path|id> # Use a specific session file or partial session ID
 metis --fork <path|id>    # Fork a session file or partial session ID into a new session
 ```
 
-Use `/session` in interactive mode to see the current session file, session ID, mode, workspace path/ownership, permission state, message count, tokens, and cost.
+Use `/session` in interactive mode to see the current session file, session ID, workspace path/ownership, permission state, message count, tokens, and cost.
 
 For the JSONL file format and SessionManager API, see [Session Format](session-format.md).
 
-Persisted primary Code sessions receive the six Agent controls at every thinking level; Chat, scheduled, in-memory, and raw sessions do not.
+Persisted primary sessions receive the six Agent controls; scheduled, in-memory, and raw sessions do not.
 
-## Chat and Code modes
+## Session workspaces
 
-Every session has one immutable classification mode:
+Every session has one primary workspace. The workspace path and ownership are chosen once, while creating the session, and are immutable afterwards:
 
-| Action | Resulting mode |
+| New session | Workspace |
 |---|---|
-| Start Metis with no mode option | `code` |
-| `metis --agent-mode chat` | New `chat` session |
-| `/new` | Choose Chat or Code, with the current mode listed first |
-| `/new chat` or `/new code` | Skip the mode choice and create in that mode |
-| Resume, continue, or import | Use the stored session mode |
-| Fork or clone | Inherit the source session mode |
-| Navigate with `/tree` | Keep the current session mode |
+| `metis` in a terminal | The invocation directory is stored as the primary workspace |
+| `metis --cwd <path>` | The chosen existing directory is stored |
+| `/new` → Metis managed workspace | Metis creates `~/.metis/agent/workspaces/<session-id>/` |
+| `/new` → terminal working directory | The captured terminal directory is stored |
+| `/new` → other directory | The chosen existing directory is stored |
 
-The two modes currently use the same general-purpose system prompt, tools, model configuration, and resources. Chat mode may write code when required, and Code mode may perform research, writing, planning, or analysis. They differ in workspace creation and default permissions:
+`/new` reuses the normal TUI option and input components and offers the three workspace choices above. Cancelling or entering an invalid path leaves the current session unchanged. Resuming or switching restores the stored workspace; creation-only CLI flags cannot mutate an existing session. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions](permissions.md).
 
-| New session | No directory supplied | Directory supplied | Default permissions |
-|---|---|---|---|
-| Chat | Metis creates `~/.metis/agent/workspaces/<session-id>/` | The chosen existing directory is stored | Auto |
-| Code | The terminal working directory captured at startup is stored | The chosen existing directory is stored | Auto |
+### Additional directories
 
-`/new` reuses the normal TUI option and input components. After the mode choice, Chat offers a managed workspace, the captured terminal directory, or another directory; Code offers the captured terminal directory or another directory. The selection is made only while creating the session. Cancelling or entering an invalid path leaves the current session unchanged.
-
-The mode, primary workspace path, and workspace ownership are immutable after creation. Resuming or switching restores the stored values; creation-only CLI flags cannot mutate an existing session. Code sessions may separately change their additional file-access roots as described below. Permission settings are per-session but can be changed later with `/permissions`. See [Permissions](permissions.md).
-
-### Code additional directories
-
-`/add-dir <path>` adds one existing directory to the current Code session without changing its primary working directory. Relative paths still resolve from the primary directory, and Bash still starts there. `/dirs` lists the effective roots; `/remove-dir <path>` revokes one added root.
+`/add-dir <path>` adds one existing directory to the current session without changing its primary working directory. Relative paths still resolve from the primary directory, and Bash still starts there. `/dirs` lists the effective roots; `/remove-dir <path>` revokes one added root.
 
 Metis stores only canonical path controls. It does not scan or preload the directory, and it does not load `AGENTS.md`, `.metis`, skills, prompts, extensions, hooks, themes, or project memory from it. Files enter model context only after a tool reads them.
 
 The same session restores its roots on resume and keeps them through `/tree` and compaction. `/new`, `/clone`, `/fork`, and import into a new session start without inherited additional directories. A temporarily missing root remains listed so the session can recover and the user can remove it.
 
-Mode does not change `--system-prompt` or `--append-system-prompt` behavior.
-
-Sessions for both modes remain JSONL files under `~/.metis/agent/sessions/<encoded-cwd>/` (or the configured session directory). For managed Chat sessions, the encoded cwd is the managed workspace path. Forking or cloning a managed session copies its workspace into a new owned directory; external workspaces remain shared. Deleting a closed session removes its workspace only when Metis can prove that exact directory is owned by that session.
+Sessions created earlier may still carry a retired `mode` header field in their journal; Metis ignores it and the migration script removes it.
+Sessions remain JSONL files under `~/.metis/agent/sessions/<encoded-cwd>/` (or the configured session directory). For managed workspaces, the encoded cwd is the managed workspace path. Forking or cloning a managed session copies its workspace into a new owned directory; external workspaces remain shared. Deleting a closed session removes its workspace only when Metis can prove that exact directory is owned by that session.
 
 ## Session Commands
 
 | Command | Description |
 |---------|-------------|
 | `/resume` | Browse and select previous sessions |
-| `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
+| `/new` | Create a session and choose its primary workspace |
 | `/permissions` | Change the current session's Ask, Auto, or Full setting |
-| `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
-| `/remove-dir <path>` | Code only: remove one previously added directory |
-| `/dirs` | Code only: list the primary and additional working directories |
+| `/add-dir <path>` | Add one existing directory as a file-access root for this session |
+| `/remove-dir <path>` | Remove one previously added directory |
+| `/dirs` | List the primary and additional working directories |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
 | `/tree` | Navigate the current session tree |

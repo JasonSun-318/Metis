@@ -49,40 +49,26 @@ describe("createAgentSession session manager defaults", () => {
 		session.dispose();
 	});
 
-	it("creates the default SDK session in the requested agent mode without changing the prompt", async () => {
+	it("creates the default SDK session in the requested cwd without changing the prompt", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const { session } = await createAgentSession({ cwd, agentDir, model, agentMode: "chat" });
+		const { session } = await createAgentSession({ cwd, agentDir, model });
 
-		expect(session.mode).toBe("chat");
 		expect(session.systemPrompt).toContain("You are Metis, a general-purpose AI agent");
 		expect(session.systemPrompt).toContain(
 			"do not assume it is a software project unless the user or its contents indicate that",
 		);
-		expect(session.systemPrompt).not.toContain("You are operating in chat mode.");
-		expect(session.systemPrompt).not.toContain("You are operating in code mode.");
+		expect(session.sessionManager.getCwd()).toBe(realpathSync(cwd));
 		session.dispose();
 	});
 
-	it("creates Chat without cwd in an owned managed workspace with Auto permissions", async () => {
+	it("creates a managed workspace when no cwd is requested", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const { session } = await createAgentSession({ agentDir, model, agentMode: "chat" });
+		const { session } = await createAgentSession({ agentDir, model });
 
-		expect(session.mode).toBe("chat");
 		expect(session.sessionManager.getCwdOrigin()).toBe("managed");
 		expect(session.sessionManager.getCwd()).toBe(
 			realpathSync(join(agentDir, "workspaces", session.sessionManager.getSessionId())),
 		);
-		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
-		session.dispose();
-	});
-
-	it("creates Code without cwd in the host cwd with Auto permissions", async () => {
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const { session } = await createAgentSession({ agentDir, model, agentMode: "code" });
-
-		expect(session.mode).toBe("code");
-		expect(session.sessionManager.getCwd()).toBe(realpathSync(process.cwd()));
-		expect(session.sessionManager.getCwdOrigin()).toBe("user-selected");
 		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
 		session.dispose();
 	});
@@ -93,7 +79,6 @@ describe("createAgentSession session manager defaults", () => {
 			cwd,
 			agentDir,
 			model,
-			agentMode: "chat",
 			permissionPreset: "auto",
 		});
 
@@ -140,22 +125,9 @@ describe("createAgentSession session manager defaults", () => {
 		session.dispose();
 	});
 
-	it("rejects an agentMode that conflicts with an explicit session manager", async () => {
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const sessionManager = SessionManager.inMemory(cwd, { mode: "chat" });
-
-		await expect(createAgentSession({ cwd, agentDir, model, sessionManager, agentMode: "code" })).rejects.toThrow(
-			"agentMode cannot override the supplied sessionManager mode",
-		);
-		sessionManager.close();
-	});
-
 	it("rejects cwd or permission settings that conflict with an explicit session manager", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const sessionManager = SessionManager.inMemory(cwd, {
-			mode: "chat",
-			permissionPreset: "ask",
-		});
+		const sessionManager = SessionManager.inMemory(cwd, { permissionPreset: "ask" });
 		const otherCwd = join(tempDir, "other-project");
 		mkdirSync(otherCwd);
 

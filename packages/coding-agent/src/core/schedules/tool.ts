@@ -120,19 +120,18 @@ function prepareScheduleArguments(input: unknown): Static<typeof ScheduleToolInp
 }
 
 export function resolveScheduleCreateTarget(input: {
-	mode: "chat" | "code";
 	cwdOrigin: "managed" | "user-selected";
 	cwd: string;
-}): ScheduleCreateTarget | undefined {
-	if (input.mode !== "chat") return undefined;
+}): ScheduleCreateTarget {
 	return input.cwdOrigin === "user-selected"
 		? { kind: "general", workspace: "fixed", cwd: input.cwd }
 		: { kind: "general", workspace: "task" };
 }
 
-export function isScheduleSessionEligible(manager: Pick<SessionManager, "getHeader" | "getMode">): boolean {
+/** Regular user sessions may create scheduled tasks; run sessions and subagents may not. */
+export function isScheduleSessionEligible(manager: Pick<SessionManager, "getHeader">): boolean {
 	const header = manager.getHeader();
-	return manager.getMode() === "chat" && !header?.scheduled && !header?.agent;
+	return !header?.scheduled && !header?.agent;
 }
 
 function compactTaskView(task: ScheduleTask) {
@@ -215,11 +214,9 @@ export function installScheduleHost(input: {
 						}
 						const manager = input.session.sessionManager;
 						const target = resolveScheduleCreateTarget({
-							mode: manager.getMode(),
 							cwdOrigin: manager.getCwdOrigin(),
 							cwd: manager.getCwd(),
 						});
-						if (!target) return output("定时任务只能在 Chat 中创建。", true);
 						const model = input.session.model;
 						if (!model) return output("当前会话尚未配置模型，无法创建定时任务。", true);
 						const task = await input.manager.create({

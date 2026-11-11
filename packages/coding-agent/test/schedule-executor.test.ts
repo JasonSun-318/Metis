@@ -206,7 +206,6 @@ describe("scheduled run executor", () => {
 			expect(relative(normalRoot, result.sessionFile).startsWith(`..${sep}`)).toBe(false);
 			const session = SessionManager.openReadOnly(result.sessionFile);
 			expect(session.getHeader()?.scheduled).toEqual({ taskId: "task-executor", runId: result.runId });
-			expect(session.getHeader()?.mode).toBe("chat");
 			expect(session.getHeader()?.cwdOrigin).toBe("managed");
 			expect(session.getSessionName()).toBe("生成日报");
 			const journal = session.getDurableJournalSnapshot();
@@ -244,7 +243,7 @@ describe("scheduled run executor", () => {
 		);
 	});
 
-	it("derives mode, enables Skills, and excludes extensions, schedule, MCP, and subagents", async () => {
+	it("enables Skills and excludes extensions, schedule, MCP, and subagents", async () => {
 		const cwd = tempWorkspace();
 		const agentDir = join(cwd, ".agent");
 		const result = await createScheduledRunExecutor({ agentDir })(
@@ -253,7 +252,6 @@ describe("scheduled run executor", () => {
 		);
 		const options = mocks.sessionOptions[0] as Record<string, unknown>;
 		expect(SessionManager.openReadOnly(result.sessionFile).getHeader()).toMatchObject({
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		expect(options.additionalSystemPrompt).toBe(SCHEDULE_EXECUTION_PROMPT);

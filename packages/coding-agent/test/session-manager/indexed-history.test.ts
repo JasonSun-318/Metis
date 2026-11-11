@@ -199,7 +199,6 @@ describe("disk-backed session history", () => {
 		const stats = (manager: SessionManager) =>
 			buildSessionStats({
 				entries: manager.getEntries(),
-				mode: manager.getMode(),
 				cwd: manager.getCwd(),
 				cwdOrigin: manager.getCwdOrigin(),
 				permissionPreset: manager.getPermissionPreset(),

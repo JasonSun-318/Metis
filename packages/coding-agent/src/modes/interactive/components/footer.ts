@@ -113,7 +113,7 @@ export class FooterComponent implements Component {
 		// Replace home directory with ~
 		const permission = this.session.sessionManager.getPermissionPreset();
 		const permissionLabel = permission[0]!.toUpperCase() + permission.slice(1);
-		let pwd = `[${this.session.sessionManager.getMode()} • ${permissionLabel}] ${formatCwdForFooter(
+		let pwd = `[${permissionLabel}] ${formatCwdForFooter(
 			this.session.sessionManager.getCwd(),
 			process.env.HOME || process.env.USERPROFILE,
 		)}`;

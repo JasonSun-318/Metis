@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentMode } from "../src/core/agent-mode.ts";
 import {
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
@@ -37,7 +36,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		}
 	});
 
-	async function createRuntimeHost(extensionFactory: ExtensionFactory, initialMode: AgentMode = "code") {
+	async function createRuntimeHost(extensionFactory: ExtensionFactory) {
 		const tempDir = join(tmpdir(), `metis-runtime-events-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -97,7 +96,7 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 		const runtimeHost = await createAgentSessionRuntime(createRuntime, {
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(tempDir, join(tempDir, "sessions"), { mode: initialMode }),
+			sessionManager: SessionManager.create(tempDir, join(tempDir, "sessions")),
 		});
 		await runtimeHost.session.bindExtensions({});
 
@@ -111,21 +110,6 @@ describe("AgentSessionRuntime session lifecycle events", () => {
 
 		return { runtimeHost, faux };
 	}
-
-	it("inherits mode for new and forked sessions and changes it only for an explicit new session", async () => {
-		const { runtimeHost } = await createRuntimeHost(() => {}, "chat");
-
-		await runtimeHost.newSession();
-		expect(runtimeHost.session.mode).toBe("chat");
-
-		await runtimeHost.newSession({ mode: "code" });
-		expect(runtimeHost.session.mode).toBe("code");
-
-		await runtimeHost.session.prompt("hello");
-		const userMessage = runtimeHost.session.getUserMessagesForForking()[0];
-		await runtimeHost.fork(userMessage.entryId, { position: "at" });
-		expect(runtimeHost.session.mode).toBe("code");
-	});
 
 	it("emits session_before_switch and session_start for new and resume flows", async () => {
 		const events: RecordedSessionEvent[] = [];

@@ -23,7 +23,7 @@ describe("JSONL image export and import", () => {
 		"exports one portable file and imports it into hash-backed storage (indexed=%s)",
 		async (indexedHistory) => {
 			const data = Buffer.from("portable image").toString("base64");
-			let source = SessionManager.create(tempDir, join(tempDir, "source-sessions"), { mode: "chat" });
+			let source = SessionManager.create(tempDir, join(tempDir, "source-sessions"));
 			source.appendMessage({
 				role: "user",
 				content: [{ type: "image", data, mimeType: "image/png" }],
@@ -41,7 +41,7 @@ describe("JSONL image export and import", () => {
 			const session = { sessionManager: source } as unknown as AgentSession;
 			AgentSession.prototype.exportToJsonl.call(session, exportPath);
 			const exported = readFileSync(exportPath, "utf8");
-			expect(JSON.parse(exported.split("\n")[0])).toMatchObject({ mode: "chat" });
+			expect(JSON.parse(exported.split("\n")[0])).not.toHaveProperty("mode");
 			expect(exported).toContain(data);
 			expect(exported).not.toContain('"type":"image_ref"');
 			expect(existsSync(join(tempDir, "export", "images"))).toBe(false);
@@ -71,7 +71,7 @@ describe("JSONL image export and import", () => {
 			}) as AgentSessionRuntime;
 
 			await AgentSessionRuntime.prototype.importFromJsonl.call(runtime, exportPath);
-			expect(imported!.getMode()).toBe("chat");
+			expect(imported!.getCwd()).toBe(tempDir);
 
 			const importedPath = join(destinationDir, basename(exportPath));
 			const stored = readFileSync(importedPath, "utf8");

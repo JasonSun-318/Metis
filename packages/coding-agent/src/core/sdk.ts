@@ -1,6 +1,5 @@
 import type { ThinkingLevel } from "@metis/agent-core";
 import type { Model } from "@metis/ai/compat";
-import type { AgentMode } from "./agent-mode.ts";
 import type { AgentSession, AgentSessionConfig } from "./agent-session.ts";
 import type { AuthStorage } from "./auth-storage.ts";
 import type { LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
@@ -31,8 +30,6 @@ export interface CreateAgentSessionOptions {
 	cwd?: string;
 	/** Global config directory. Default: ~/.metis/agent */
 	agentDir?: string;
-	/** Classification mode for a newly-created default session manager. Default: code. */
-	agentMode?: AgentMode;
 	/** Initial permission preset for a newly-created session. */
 	permissionPreset?: PermissionPreset;
 	/** Host callback for one-action approvals. */

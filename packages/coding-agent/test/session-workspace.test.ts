@@ -37,35 +37,26 @@ describe("managed session workspaces", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	it("creates managed Chat workspaces and keeps selected paths external", () => {
-		const managed = resolveNewSessionWorkspace({ id: "chat-managed", mode: "chat", hostCwd, agentDir });
+	it("creates a managed workspace when no directory is requested", () => {
+		const managed = resolveNewSessionWorkspace({ id: "managed", hostCwd, agentDir });
 		expect(managed).toEqual({
-			cwd: realpathSync(getManagedWorkspaceDir("chat-managed", agentDir)),
+			cwd: realpathSync(getManagedWorkspaceDir("managed", agentDir)),
 			cwdOrigin: "managed",
 		});
 		expect(lstatSync(managed.cwd).isDirectory()).toBe(true);
-
-		const selected = resolveNewSessionWorkspace({
-			id: "chat-selected",
-			mode: "chat",
-			requestedCwd: hostCwd,
-			hostCwd,
-			agentDir,
-		});
-		expect(selected).toEqual({ cwd: realpathSync(hostCwd), cwdOrigin: "user-selected" });
-		expect(existsSync(getManagedWorkspaceDir("chat-selected", agentDir))).toBe(false);
 	});
 
-	it("uses the host or explicit directory for Code without creating a workspace", () => {
+	it("keeps a requested directory external", () => {
 		const explicit = join(root, "other");
 		mkdirSync(explicit);
-		expect(resolveNewSessionWorkspace({ id: "code-host", mode: "code", hostCwd, agentDir })).toEqual({
+		expect(resolveNewSessionWorkspace({ id: "selected", requestedCwd: hostCwd, hostCwd, agentDir })).toEqual({
 			cwd: realpathSync(hostCwd),
 			cwdOrigin: "user-selected",
 		});
-		expect(
-			resolveNewSessionWorkspace({ id: "code-other", mode: "code", requestedCwd: explicit, hostCwd, agentDir }),
-		).toEqual({ cwd: realpathSync(explicit), cwdOrigin: "user-selected" });
+		expect(resolveNewSessionWorkspace({ id: "other", requestedCwd: explicit, hostCwd, agentDir })).toEqual({
+			cwd: realpathSync(explicit),
+			cwdOrigin: "user-selected",
+		});
 		expect(existsSync(join(agentDir, "workspaces"))).toBe(false);
 	});
 
@@ -73,24 +64,16 @@ describe("managed session workspaces", () => {
 		const file = join(root, "file");
 		writeFileSync(file, "x");
 		expect(() =>
-			resolveNewSessionWorkspace({
-				id: "missing",
-				mode: "code",
-				requestedCwd: join(root, "missing"),
-				hostCwd,
-				agentDir,
-			}),
+			resolveNewSessionWorkspace({ id: "missing", requestedCwd: join(root, "missing"), hostCwd, agentDir }),
 		).toThrow();
-		expect(() =>
-			resolveNewSessionWorkspace({ id: "file", mode: "chat", requestedCwd: file, hostCwd, agentDir }),
-		).toThrow("not a directory");
-		expect(() => resolveNewSessionWorkspace({ id: "../escape", mode: "chat", hostCwd, agentDir })).toThrow(
-			"Session id",
+		expect(() => resolveNewSessionWorkspace({ id: "file", requestedCwd: file, hostCwd, agentDir })).toThrow(
+			"not a directory",
 		);
+		expect(() => resolveNewSessionWorkspace({ id: "../escape", hostCwd, agentDir })).toThrow("Session id");
 	});
 
 	it.skipIf(process.platform === "win32")("copies managed derivatives without dereferencing symlinks", () => {
-		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
+		const workspace = resolveNewSessionWorkspace({ id: "source", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "inside.txt"), "inside");
 		const outside = join(root, "outside.txt");
 		writeFileSync(outside, "outside");
@@ -109,7 +92,7 @@ describe("managed session workspaces", () => {
 	});
 
 	it("removes an incomplete copy when publication fails", () => {
-		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
+		const workspace = resolveNewSessionWorkspace({ id: "source", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "inside.txt"), "inside");
 		expect(() =>
 			publishManagedWorkspaceCopy({
@@ -127,7 +110,7 @@ describe("managed session workspaces", () => {
 	});
 
 	it("recovers a deterministic managed copy after publication is interrupted", () => {
-		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
+		const workspace = resolveNewSessionWorkspace({ id: "source", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "inside.txt"), "inside");
 		const input = {
 			sourceId: "source",
@@ -154,7 +137,7 @@ describe("managed session workspaces", () => {
 	});
 
 	it("copies the workspace and uses the new encoded session directory for branches", () => {
-		const workspace = resolveNewSessionWorkspace({ id: "source", mode: "chat", hostCwd, agentDir });
+		const workspace = resolveNewSessionWorkspace({ id: "source", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "state.txt"), "copied");
 		const source = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, agentDir), {
 			id: "source",

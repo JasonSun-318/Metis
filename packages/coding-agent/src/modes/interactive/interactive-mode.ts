@@ -55,7 +55,6 @@ import {
 	getMetisEnv,
 	VERSION,
 } from "../../config.ts";
-import { type AgentMode, isAgentMode } from "../../core/agent-mode.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import {
@@ -103,10 +102,6 @@ import {
 import { parseCommandArgs } from "../../core/prompt-templates.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { readScheduledSessionView } from "../../core/schedules/executor.ts";
-import type { ScheduleManager } from "../../core/schedules/manager.ts";
-import { validateScheduleInputSpec } from "../../core/schedules/time.ts";
-import { resolveScheduleCreateTarget } from "../../core/schedules/tool.ts";
-import type { ScheduleInputSpec, ScheduleRun, ScheduleTask } from "../../core/schedules/types.ts";
 import {
 	formatSessionAttachment,
 	formatSessionAttachmentDisplayText,
@@ -117,12 +112,7 @@ import {
 	type SessionAttachment,
 } from "../../core/session-attachments.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
-import {
-	getDefaultSessionDir,
-	type SessionEntry,
-	SessionManager,
-	sessionEntryToContextMessages,
-} from "../../core/session-manager.ts";
+import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import type {
 	McpHttpServerSettings,
 	McpServerSettings,
@@ -144,7 +134,7 @@ import { readClipboardImage } from "../../utils/clipboard-image.ts";
 import { editTextInExternalEditor } from "../../utils/external-editor.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
-import { canonicalizePath, isPathInside, resolvePath } from "../../utils/paths.ts";
+import { canonicalizePath, resolvePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -252,87 +242,6 @@ function formatMemoryChangeLine(entry: ChangelogEntry): string {
 	const target = "slug" in entry.target ? entry.target.slug : `pinned:${entry.target.block}`;
 	const undone = entry.undoneBy ? " · undone" : "";
 	return `${entry.id.slice(0, 8)} · ${entry.ts} · ${entry.op} · ${entry.scope} · ${target}${undone}`;
-}
-
-const SCHEDULE_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
-
-function formatScheduleSpec(schedule: ScheduleTask["schedule"]): string {
-	switch (schedule.kind) {
-		case "once":
-			return `${schedule.date} ${schedule.time}`;
-		case "daily":
-			return `Daily at ${schedule.time}`;
-		case "weekly":
-			return `Weekly on ${schedule.weekdays.map((day) => SCHEDULE_WEEKDAYS[day - 1]).join(", ")} at ${schedule.time}`;
-		case "monthly":
-			return `Monthly on day ${schedule.day} at ${schedule.time}`;
-		case "interval": {
-			const unit =
-				schedule.unit === "minute"
-					? schedule.every === 1
-						? "minute"
-						: "minutes"
-					: schedule.every === 1
-						? "hour"
-						: "hours";
-			return `Every ${schedule.every} ${unit} from ${schedule.startAt}`;
-		}
-	}
-}
-
-function formatScheduleTaskStatus(status: ScheduleTask["status"]): string {
-	switch (status) {
-		case "active":
-			return "Active";
-		case "paused":
-			return "Paused";
-		case "completed":
-			return "Completed";
-		case "deleting":
-			return "Deleting";
-	}
-}
-
-function formatScheduleRunStatus(status: ScheduleRun["status"]): string {
-	switch (status) {
-		case "queued":
-			return "Queued";
-		case "running":
-			return "Running";
-		case "succeeded":
-			return "Succeeded";
-		case "failed":
-			return "Failed";
-		case "missed":
-			return "Missed";
-		case "skipped":
-			return "Skipped";
-		case "cancelled":
-			return "Cancelled";
-	}
-}
-
-function formatScheduleRunReason(reason: NonNullable<ScheduleRun["reason"]>): string {
-	switch (reason) {
-		case "overlap":
-			return "Another execution was already running";
-		case "offline":
-			return "The scheduler was offline";
-		case "interrupted":
-			return "Execution was interrupted";
-		case "deleted":
-			return "The task was deleted";
-	}
-}
-
-type ScheduleDisplayMessage = Extract<AgentMessage, { role: "user" | "assistant" }>;
-
-function scheduleMessageText(message: ScheduleDisplayMessage): string {
-	if (typeof message.content === "string") return message.content;
-	return message.content
-		.filter((item): item is Extract<(typeof message.content)[number], { type: "text" }> => item.type === "text")
-		.map((item) => item.text)
-		.join("\n");
 }
 
 class ExpandableText extends Text implements Expandable {
@@ -475,8 +384,6 @@ function createFuzzyAutocompleteItems<T>(
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
-	/** Shared scheduled-task manager owned by the CLI host. */
-	scheduleManager?: ScheduleManager;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
@@ -554,7 +461,6 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
-	private scheduleUnsubscribe?: () => void;
 	private signalCleanupHandlers: Array<() => void> = [];
 
 	// Track if editor is in bash mode (text starts with !)
@@ -761,7 +667,7 @@ export class InteractiveMode {
 
 	private createBaseAutocompleteProvider(): AutocompleteProvider {
 		// Define commands for autocomplete
-		const slashCommands: SlashCommand[] = getBuiltinSlashCommands(this.sessionManager.getMode()).map((command) => ({
+		const slashCommands: SlashCommand[] = getBuiltinSlashCommands().map((command) => ({
 			name: command.name,
 			description: command.description,
 			...(command.argumentHint && { argumentHint: command.argumentHint }),
@@ -909,28 +815,6 @@ export class InteractiveMode {
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
 		this.isInitialized = true;
-		if (this.options.scheduleManager) {
-			try {
-				this.scheduleUnsubscribe = this.options.scheduleManager.subscribe((event) => {
-					if (event.type !== "schedule/run-updated" || !event.run.unread) return;
-					const label =
-						event.run.status === "succeeded"
-							? "completed"
-							: event.run.status === "failed"
-								? `failed: ${event.run.error?.message ?? "Unknown error"}`
-								: event.run.status === "missed"
-									? `missed: ${event.run.reason ? formatScheduleRunReason(event.run.reason) : "The scheduled time was missed"}`
-									: event.run.status === "skipped"
-										? `skipped: ${event.run.reason ? formatScheduleRunReason(event.run.reason) : "Another execution is running"}`
-										: undefined;
-					if (label)
-						this.showStatus(`Scheduled task “${event.task.title}” ${label} (${event.task.unreadCount} unread)`);
-				});
-			} catch (error) {
-				this.showWarning(error instanceof Error ? error.message : String(error));
-			}
-		}
-
 		await this.themeController.applyFromSettings();
 
 		// Add header with keybindings from config (unless silenced)
@@ -2517,10 +2401,6 @@ export class InteractiveMode {
 	}
 
 	private handleAddDirectoryCommand(inputPath: string | undefined): void {
-		if (this.sessionManager.getMode() !== "code") {
-			this.showWarning("Additional directories are only available in Code mode");
-			return;
-		}
 		if (!inputPath) {
 			this.showWarning("Usage: /add-dir <path>");
 			return;
@@ -2540,10 +2420,6 @@ export class InteractiveMode {
 	}
 
 	private handleRemoveDirectoryCommand(inputPath: string | undefined): void {
-		if (this.sessionManager.getMode() !== "code") {
-			this.showWarning("Additional directories are only available in Code mode");
-			return;
-		}
 		if (!inputPath) {
 			this.showWarning("Usage: /remove-dir <path>");
 			return;
@@ -2563,10 +2439,6 @@ export class InteractiveMode {
 	}
 
 	private handleDirectoriesCommand(argument: string): void {
-		if (this.sessionManager.getMode() !== "code") {
-			this.showWarning("Additional directories are only available in Code mode");
-			return;
-		}
 		if (argument) {
 			this.showWarning("Usage: /dirs");
 			return;
@@ -2707,16 +2579,6 @@ export class InteractiveMode {
 					case "dream": {
 						this.editor.setText("");
 						this.showWarning(DREAM_REMOVED_MESSAGE);
-						return;
-					}
-					case "schedule": {
-						this.editor.setText("");
-						await this.handleScheduleCommand();
-						return;
-					}
-					case "schedule-usage": {
-						this.editor.setText("");
-						this.showWarning("Usage: /schedule");
 						return;
 					}
 					case "mcp": {
@@ -5429,319 +5291,6 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async askScheduleValue(title: string, pattern: RegExp, hint: string): Promise<string | undefined> {
-		while (true) {
-			const value = (await this.showExtensionInput(`${title}\n${hint}`))?.trim();
-			if (value === undefined) return undefined;
-			if (pattern.test(value)) return value;
-			this.showWarning(`Invalid format: ${hint}`);
-		}
-	}
-
-	private async askScheduleSpec(): Promise<ScheduleInputSpec | undefined> {
-		const recurrence = await this.showExtensionSelector("Recurrence", [
-			"Once",
-			"Daily",
-			"Weekly",
-			"Monthly",
-			"Interval",
-		]);
-		if (!recurrence) return undefined;
-		const askTime = () =>
-			this.askScheduleValue("Run time", /^(?:[01]\d|2[0-3]):[0-5]\d$/, "Enter HH:mm, for example 09:30");
-		let schedule: ScheduleInputSpec | undefined;
-		if (recurrence === "Once") {
-			const date = await this.askScheduleValue("Run date", /^\d{4}-\d{2}-\d{2}$/, "Enter YYYY-MM-DD");
-			if (!date) return undefined;
-			const time = await askTime();
-			if (!time) return undefined;
-			schedule = { kind: "once", date, time };
-		} else if (recurrence === "Daily") {
-			const time = await askTime();
-			if (!time) return undefined;
-			schedule = { kind: "daily", time };
-		} else if (recurrence === "Weekly") {
-			const selected = new Set<number>();
-			while (true) {
-				const remaining = SCHEDULE_WEEKDAYS.map((label, index) => ({ label, day: index + 1 })).filter(
-					({ day }) => !selected.has(day),
-				);
-				const choice = await this.showExtensionSelector(
-					`Select weekdays${selected.size ? ` (selected: ${[...selected].map((day) => SCHEDULE_WEEKDAYS[day - 1]).join(", ")})` : ""}`,
-					[...remaining.map(({ label }) => label), ...(selected.size ? ["Done"] : [])],
-				);
-				if (!choice) return undefined;
-				if (choice === "Done") break;
-				const day = remaining.find(({ label }) => label === choice)?.day;
-				if (day) selected.add(day);
-			}
-			const time = await askTime();
-			if (!time) return undefined;
-			schedule = { kind: "weekly", weekdays: [...selected].sort((a, b) => a - b), time };
-		} else if (recurrence === "Monthly") {
-			const value = await this.askScheduleValue(
-				"Day of month",
-				/^(?:[1-9]|[12]\d|3[01])$/,
-				"Enter an integer from 1 to 31",
-			);
-			if (!value) return undefined;
-			const time = await askTime();
-			if (!time) return undefined;
-			schedule = { kind: "monthly", day: Number(value), time };
-		} else {
-			const value = await this.askScheduleValue(
-				"Run interval",
-				/^(?:[1-9]\d{0,3}|10000)$/,
-				"Enter an integer from 1 to 10000",
-			);
-			if (!value || Number(value) > 10_000) return undefined;
-			const unit = await this.showExtensionSelector("Interval unit", ["Minutes", "Hours"]);
-			if (!unit) return undefined;
-			const startDate = await this.askScheduleValue("Start date", /^\d{4}-\d{2}-\d{2}$/, "Enter YYYY-MM-DD");
-			if (!startDate) return undefined;
-			const startTime = await askTime();
-			if (!startTime) return undefined;
-			schedule = {
-				kind: "interval",
-				every: Number(value),
-				unit: unit === "Minutes" ? "minute" : "hour",
-				startDate,
-				startTime,
-			};
-		}
-		try {
-			return validateScheduleInputSpec(schedule);
-		} catch (error) {
-			this.showWarning(error instanceof Error ? error.message : String(error));
-			return undefined;
-		}
-	}
-
-	private async createScheduleTask(manager: ScheduleManager): Promise<void> {
-		const name = (await this.showExtensionInput("Task name"))?.trim();
-		if (!name) return;
-		const description = (await this.showExtensionInput("Description (optional)"))?.trim() || undefined;
-		const instruction = (await this.showExtensionEditor("Task instructions"))?.trim();
-		if (!instruction) return;
-		const schedule = await this.askScheduleSpec();
-		if (!schedule) return;
-		const model = this.session.model;
-		if (!model) {
-			this.showWarning("Configure a model before creating a scheduled task");
-			return;
-		}
-		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-		const target = resolveScheduleCreateTarget({
-			mode: this.sessionManager.getMode(),
-			cwdOrigin: this.sessionManager.getCwdOrigin(),
-			cwd: this.sessionManager.getCwd(),
-		});
-		if (!target) {
-			this.showWarning("Scheduled tasks are only available in Chat mode");
-			return;
-		}
-		const confirmation = await this.showExtensionSelector(
-			`Create task\nName: ${name}\nInstructions: ${instruction}\nModel: ${model.provider}/${model.id}\nSchedule: ${formatScheduleSpec(
-				schedule.kind === "interval"
-					? { ...schedule, startAt: `${schedule.startDate} ${schedule.startTime}` }
-					: schedule,
-			)}\nTime zone: ${timezone}\nExecution directory: ${target.workspace === "fixed" ? target.cwd : "task default directory"}`,
-			["Create"],
-		);
-		if (confirmation !== "Create") return;
-		const task = await manager.create({
-			id: randomUUID(),
-			name,
-			description,
-			instruction,
-			model: { provider: model.provider, modelId: model.id },
-			schedule,
-			timezone,
-			target,
-		});
-		this.showStatus(`Created scheduled task “${task.title}”. Next run: ${task.nextRunAt ?? "none"}`);
-	}
-
-	private async showScheduleRun(manager: ScheduleManager, task: ScheduleTask, run: ScheduleRun): Promise<void> {
-		if (run.unread) run = await manager.markRunRead(task.id, run.id);
-		let result =
-			run.resultPreview ??
-			run.error?.message ??
-			(run.reason ? formatScheduleRunReason(run.reason) : undefined) ??
-			"No result";
-		if (run.sessionFile) {
-			try {
-				const sessionFile = fs.realpathSync(run.sessionFile);
-				const sessionRoot = fs.realpathSync(getDefaultSessionDir(task.target.cwd, manager.agentDir));
-				if (!isPathInside(sessionRoot, sessionFile))
-					throw new Error("Scheduled session is outside its task directory");
-				const session = SessionManager.openReadOnly(sessionFile);
-				const marker = session.getHeader()?.scheduled;
-				if (marker?.taskId !== task.id || marker.runId !== run.id) {
-					throw new Error("Scheduled session identity does not match its run");
-				}
-				const assistant = session
-					.getBranch()
-					.flatMap(sessionEntryToContextMessages)
-					.filter((message) => message.role === "assistant")
-					.at(-1);
-				if (assistant) result = scheduleMessageText(assistant);
-			} catch {
-				// The run summary remains useful if its immutable session cannot be opened.
-			}
-		}
-		await this.showExtensionSelector(
-			`Execution result · ${task.title}\nTask instructions: ${run.snapshot.instruction}\nStatus: ${formatScheduleRunStatus(run.status)}\nTime: ${run.completedAt ?? run.createdAt}\n\nResult:\n${result}`,
-			[],
-		);
-	}
-
-	private async showScheduleRuns(manager: ScheduleManager, task: ScheduleTask): Promise<void> {
-		let beforeRunId: string | undefined;
-		while (true) {
-			const page = await manager.listRuns(task.id, { beforeRunId, limit: 20 });
-			const labels = new Map<string, ScheduleRun>();
-			for (const [index, run] of page.runs.entries()) {
-				labels.set(
-					`${index + 1}. ${run.unread ? "● " : ""}${formatScheduleRunStatus(run.status)} · ${run.completedAt ?? run.createdAt}`,
-					run,
-				);
-			}
-			const choice = await this.showExtensionSelector(`Execution history · ${task.title}`, [
-				...labels.keys(),
-				...(page.nextBeforeRunId ? ["Next page"] : []),
-			]);
-			if (!choice) return;
-			if (choice === "Next page") {
-				beforeRunId = page.nextBeforeRunId ?? undefined;
-				continue;
-			}
-			const run = labels.get(choice);
-			if (run) await this.showScheduleRun(manager, task, run);
-		}
-	}
-
-	private async showScheduleTask(manager: ScheduleManager, taskId: string): Promise<void> {
-		while (true) {
-			const task = await manager.get(taskId);
-			const editable = task.status !== "completed" && task.status !== "deleting";
-			const statusAction = task.status === "paused" ? "Resume" : task.status === "active" ? "Pause" : undefined;
-			const action = await this.showExtensionSelector(
-				`${task.title}\nInstructions: ${task.instruction}\nSchedule: ${formatScheduleSpec(task.schedule)}\nStatus: ${formatScheduleTaskStatus(task.status)}\nNext run: ${task.nextRunAt ?? "none"}`,
-				[
-					"View execution history",
-					...(editable ? ["Edit instructions", "Edit schedule"] : []),
-					...(statusAction ? [statusAction] : []),
-					"Run now",
-					"Delete",
-				],
-			);
-			if (!action) return;
-			if (action === "View execution history") {
-				await this.showScheduleRuns(manager, task);
-			} else if (action === "Edit instructions") {
-				const instruction = (await this.showExtensionEditor("Task instructions", task.instruction))?.trim();
-				if (instruction) await manager.update(task.id, { instruction });
-			} else if (action === "Edit schedule") {
-				const schedule = await this.askScheduleSpec();
-				if (schedule) await manager.update(task.id, { schedule });
-			} else if (action === "Pause") {
-				await manager.pause(task.id);
-			} else if (action === "Resume") {
-				await manager.resume(task.id);
-			} else if (action === "Run now") {
-				await manager.runNow(task.id, randomUUID());
-				this.showStatus(`Scheduled task “${task.title}” was queued to run`);
-			} else if (action === "Delete") {
-				const choice = await this.showExtensionSelector(
-					`Delete “${task.title}”?\nThe task-owned directory is always removed. A user-selected project is never changed.`,
-					["Delete task only", "Delete task and generated sessions"],
-				);
-				if (choice) {
-					await manager.delete(task.id, { deleteSessions: choice === "Delete task and generated sessions" });
-					this.showStatus(`Deleted scheduled task “${task.title}”`);
-					return;
-				}
-			}
-		}
-	}
-
-	private async showScheduleTasks(manager: ScheduleManager): Promise<void> {
-		let afterTaskId: string | undefined;
-		while (true) {
-			const page = await manager.list({ afterTaskId, limit: 50 });
-			const labels = new Map<string, string>();
-			for (const [index, task] of page.tasks.entries()) {
-				const label = `${index + 1}. ${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${formatScheduleTaskStatus(task.status)} · ${formatScheduleSpec(task.schedule)} · ${task.nextRunAt ?? "No next run"}`;
-				labels.set(label, task.id);
-			}
-			const choice = await this.showExtensionSelector(
-				labels.size ? "Scheduled tasks" : "Scheduled tasks\nNo scheduled tasks",
-				[...labels.keys(), ...(page.nextAfterTaskId ? ["Next page"] : [])],
-			);
-			if (!choice) return;
-			if (choice === "Next page") {
-				afterTaskId = page.nextAfterTaskId ?? undefined;
-				continue;
-			}
-			const taskId = labels.get(choice);
-			if (taskId) await this.showScheduleTask(manager, taskId);
-		}
-	}
-
-	private async showScheduleHistory(manager: ScheduleManager): Promise<void> {
-		let afterTaskId: string | undefined;
-		while (true) {
-			const page = await manager.list({ afterTaskId, limit: 50, withRunsOnly: true });
-			const labels = new Map<string, ScheduleTask>();
-			for (const [index, task] of page.tasks.entries()) {
-				if (!task.lastRun) continue;
-				const label = `${index + 1}. ${task.unreadCount ? `●${task.unreadCount} ` : ""}${task.title} · ${formatScheduleRunStatus(task.lastRun.status)} · ${task.lastRun.completedAt ?? task.lastRun.createdAt}`;
-				labels.set(label, task);
-			}
-			const choice = await this.showExtensionSelector(
-				labels.size ? "Execution history" : "Execution history\nNo execution history",
-				[...labels.keys(), ...(page.nextAfterTaskId ? ["Next page"] : [])],
-			);
-			if (!choice) return;
-			if (choice === "Next page") {
-				afterTaskId = page.nextAfterTaskId ?? undefined;
-				continue;
-			}
-			const task = labels.get(choice);
-			if (task) await this.showScheduleRuns(manager, task);
-		}
-	}
-
-	private async handleScheduleCommand(): Promise<void> {
-		if (this.guardSessionMutation()) return;
-		if (this.sessionManager.getMode() !== "chat") {
-			this.showWarning("Scheduled tasks are only available in Chat mode");
-			return;
-		}
-		const manager = this.options.scheduleManager;
-		if (!manager) {
-			this.showWarning("Scheduled tasks are not enabled in this process");
-			return;
-		}
-		try {
-			while (true) {
-				const choice = await this.showExtensionSelector("Schedule", [
-					"Create task",
-					"Scheduled tasks",
-					"Execution history",
-				]);
-				if (!choice) return;
-				if (choice === "Create task") {
-					await this.createScheduleTask(manager);
-				} else if (choice === "Scheduled tasks") await this.showScheduleTasks(manager);
-				else if (choice === "Execution history") await this.showScheduleHistory(manager);
-			}
-		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
-		}
-	}
-
 	private async handleMcpCommand(): Promise<void> {
 		await this.showMcpManager();
 	}
@@ -6334,7 +5883,6 @@ export class InteractiveMode {
 		}
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
 		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
-		info += `${theme.fg("dim", "Mode:")} ${stats.mode}\n`;
 		info += `${theme.fg("dim", "Workspace:")} ${stats.cwd} (${stats.cwdOrigin})\n`;
 		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionPreset}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
@@ -6515,29 +6063,17 @@ export class InteractiveMode {
 	}
 
 	private async handleNewSessionCommand(text: string): Promise<void> {
-		const value = text.slice("/new".length).trim();
-		if (value !== "" && !isAgentMode(value)) {
-			this.showError("Usage: /new [chat|code]");
+		if (text.slice("/new".length).trim() !== "") {
+			this.showError("Usage: /new");
 			return;
 		}
 		if (this.guardSessionMutation()) return;
-		let mode: AgentMode | undefined = value || undefined;
-		if (!mode) {
-			const currentMode = this.sessionManager.getMode();
-			const choices = currentMode === "chat" ? ["Chat", "Code"] : ["Code", "Chat"];
-			const selected = await this.showExtensionSelector("New session mode", choices);
-			if (!selected) return;
-			mode = selected.toLowerCase() as AgentMode;
-		}
 
 		const terminalCwd = this.runtimeHost.terminalCwd;
 		const managed = "Metis managed workspace";
 		const terminal = `Terminal working directory (${terminalCwd})`;
 		const other = "Other directory";
-		const workspace = await this.showExtensionSelector(
-			`${mode === "chat" ? "Chat" : "Code"} workspace`,
-			mode === "chat" ? [managed, terminal, other] : [terminal, other],
-		);
+		const workspace = await this.showExtensionSelector("New session workspace", [managed, terminal, other]);
 		if (!workspace) return;
 
 		let cwd: string | undefined;
@@ -6555,21 +6091,19 @@ export class InteractiveMode {
 				return;
 			}
 		}
-		await this.handleClearCommand(mode, cwd);
+		await this.handleClearCommand(cwd);
 	}
 
-	private async handleClearCommand(mode?: AgentMode, cwd?: string): Promise<void> {
+	private async handleClearCommand(cwd?: string): Promise<void> {
 		if (this.guardSessionMutation()) return;
 		this.clearStatusIndicator();
 		try {
-			const result = await this.runtimeHost.newSession(mode ? { mode, cwd } : undefined);
+			const result = await this.runtimeHost.newSession(cwd ? { cwd } : undefined);
 			if (result.cancelled) {
 				return;
 			}
 			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(
-				new Text(`${theme.fg("accent", `✓ New ${this.sessionManager.getMode()} session started`)}`, 1, 1),
-			);
+			this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to create session", error);
@@ -6720,8 +6254,6 @@ export class InteractiveMode {
 		if (this.unsubscribe) {
 			this.unsubscribe();
 		}
-		this.scheduleUnsubscribe?.();
-		this.scheduleUnsubscribe = undefined;
 		if (this.isInitialized) {
 			this.ui.stop();
 			this.isInitialized = false;

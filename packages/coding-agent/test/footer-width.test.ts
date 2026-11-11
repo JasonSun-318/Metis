@@ -1,6 +1,5 @@
 import { visibleWidth } from "@metis/tui";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { AgentMode } from "../src/core/agent-mode.ts";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
@@ -22,7 +21,6 @@ function createSession(options: {
 	reasoning?: boolean;
 	thinkingLevel?: string;
 	usage?: AssistantUsage;
-	mode?: AgentMode;
 }): AgentSession {
 	const usage = options.usage;
 	const entries =
@@ -53,7 +51,6 @@ function createSession(options: {
 			getBranch: () => entries,
 			getSessionName: () => options.sessionName,
 			getCwd: () => "/tmp/project",
-			getMode: () => options.mode ?? "code",
 			getPermissionPreset: () => "ask",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
@@ -147,9 +144,9 @@ describe("FooterComponent width handling", () => {
 		expect(statsLine).toContain("CH25.0%");
 	});
 
-	it("shows the current agent mode", () => {
-		const footer = new FooterComponent(createSession({ sessionName: "", mode: "chat" }), createFooterData(1));
+	it("shows the permission preset without a session mode", () => {
+		const footer = new FooterComponent(createSession({ sessionName: "" }), createFooterData(1));
 
-		expect(stripAnsi(footer.render(120)[0])).toContain("[chat • Ask]");
+		expect(stripAnsi(footer.render(120)[0])).toContain("[Ask]");
 	});
 });

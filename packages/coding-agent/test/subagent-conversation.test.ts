@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Context, fauxAssistantMessage, registerFauxProvider } from "@metis/ai/compat";
@@ -92,7 +92,6 @@ it("preserves Chat roles and trusted origins in real provider requests, includin
 	};
 	const rootManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: "root-chat",
-		mode: "chat",
 		permissionPreset: "full",
 	});
 	const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager: rootManager });
@@ -168,7 +167,7 @@ it("preserves Chat roles and trusted origins in real provider requests, includin
 	);
 	expect(JSON.stringify(childRequests.at(-1)?.messages)).toContain('\\"kind\\":\\"user\\"');
 	expect(JSON.stringify(childRequests.at(-1)?.messages)).toContain('"type":"image"');
-	expect(childSessions[0].mode).toBe("chat");
+	expect(realpathSync(childSessions[0].sessionManager.getCwd())).toBe(realpathSync(cwd));
 	// The permission review source list must contain only authenticated human submissions.
 	const trusted = (childSessions[0] as unknown as { _trustedUserMessages: Array<{ messageId: string; text: string }> })
 		._trustedUserMessages;

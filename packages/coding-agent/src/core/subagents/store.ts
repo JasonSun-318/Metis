@@ -220,9 +220,8 @@ function reduceInputs(entries: readonly FileEntry[], agentId: string): AgentInpu
 	return [...latest.values()];
 }
 
-function headerToConfig(header: NonNullable<SessionHeader["agent"]>, mode: AgentConfig["mode"]): AgentConfig {
+function headerToConfig(header: NonNullable<SessionHeader["agent"]>): AgentConfig {
 	return {
-		mode,
 		...(header.roleSnapshot ? { roleSnapshot: header.roleSnapshot } : {}),
 		agentId: header.agentId,
 		name: header.name,
@@ -274,14 +273,11 @@ function reduceRecord(path: string, rootSessionId: string): AgentDiskRecord {
 	const savedCeiling = [...entries]
 		.reverse()
 		.find((entry) => entry.type === "agent_permission_ceiling" && entry.agentId === header.id);
-	const config = headerToConfig(
-		{
-			...header.agent,
-			name: manager.getSessionName() ?? header.agent.name,
-			...(savedRole?.type === "agent_role_snapshot" ? { roleSnapshot: savedRole.roleSnapshot } : {}),
-		},
-		header.mode ?? "code",
-	);
+	const config = headerToConfig({
+		...header.agent,
+		name: manager.getSessionName() ?? header.agent.name,
+		...(savedRole?.type === "agent_role_snapshot" ? { roleSnapshot: savedRole.roleSnapshot } : {}),
+	});
 	return {
 		agentId: header.id,
 		name: config.name,
@@ -470,7 +466,6 @@ export class AgentStore implements AgentStoreApi {
 		ensureDirectoryDurablySync(this.directory);
 		const manager = SessionManager.create(config.cwd, this.directory, {
 			id: config.agentId,
-			mode: config.mode ?? "code",
 			permissionPreset: config.permissionPreset,
 			agent: agentHeaderFromConfig(config),
 		});

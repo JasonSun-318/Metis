@@ -131,7 +131,6 @@ describe("v13 agent control records", () => {
 		mkdirSync(join(root, "project"));
 		const manager = SessionManager.create(join(root, "project"), join(root, "sessions"), {
 			id: "agent-child-1",
-			mode: "code",
 			agent: {
 				agentId: "agent-child-1",
 				name: "researcher",
@@ -162,7 +161,6 @@ describe("v13 agent control records", () => {
 
 		expect(manager.getHeader()?.version).toBe(CURRENT_SESSION_VERSION);
 		expect(manager.getHeader()?.agent?.name).toBe("researcher");
-		expect(manager.getMode()).toBe("code");
 		expect(manager.getDurableJournalSnapshot().map((entry) => entry.type)).toContain("agent_task");
 		manager.close();
 	});
@@ -241,12 +239,14 @@ describe("v13 agent control records", () => {
 		writeFileSync(badPath, `${JSON.stringify(header)}\n${JSON.stringify(control)}\n`);
 		expect(() => SessionManager.open(badPath)).toThrow("Directory control entries require a v8 session header");
 
-		const chatPath = join(root, "bad-chat-directory.jsonl");
+		const legacyModePath = join(root, "legacy-mode-directory.jsonl");
 		writeFileSync(
-			chatPath,
+			legacyModePath,
 			`${JSON.stringify({ ...header, version: 8, mode: "chat" })}\n${JSON.stringify(control)}\n`,
 		);
-		expect(() => SessionManager.open(chatPath)).toThrow("Directory controls are only valid for Code sessions");
+		const legacyModeManager = SessionManager.open(legacyModePath);
+		expect(legacyModeManager.getHeader()?.version).toBeGreaterThanOrEqual(12);
+		legacyModeManager.close();
 
 		const unknownPath = join(root, "bad-unknown-directory.jsonl");
 		writeFileSync(
@@ -323,9 +323,9 @@ describe("v15 agent conversations", () => {
 			mode: "chat",
 			permissionPreset: "ask",
 		};
-		const bytes = JSON.stringify(header) + "\n";
+		const bytes = `${JSON.stringify(header)}\n`;
 		writeFileSync(path, bytes);
-		expect(SessionManager.openReadOnly(path).getHeader()?.mode).toBe("chat");
+		expect(SessionManager.openReadOnly(path).getHeader()?.id).toBe("root");
 		expect(readFileSync(path, "utf8")).toBe(bytes);
 		const control = {
 			type: "agent_run_control",
@@ -339,7 +339,7 @@ describe("v15 agent conversations", () => {
 			scope: "subtree",
 			origin: { kind: "user" },
 		};
-		writeFileSync(path, bytes + JSON.stringify(control) + "\n");
+		writeFileSync(path, `${bytes + JSON.stringify(control)}\n`);
 		expect(() => SessionManager.openReadOnly(path)).toThrow("v15");
 		writeFileSync(
 			path,

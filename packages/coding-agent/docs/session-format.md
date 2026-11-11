@@ -215,18 +215,18 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionPreset":"auto"}
+{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","cwdOrigin":"user-selected","permissionPreset":"auto"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. Current records require `permissionPreset` as `"ask"`, `"auto"`, or `"full"`. Auto remains Auto when reopened.
+`cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. Retired journals may still carry a legacy `mode` field; Metis ignores it and the migration script removes it. Current records require `permissionPreset` as `"ask"`, `"auto"`, or `"full"`. Auto remains Auto when reopened.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionPreset":"ask","parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","cwdOrigin":"user-selected","permissionPreset":"ask","parentSession":"/path/to/original/session.jsonl"}
 ```
 
-`parentSession` records lineage; forks and clones inherit the source session's mode.
+`parentSession` records lineage; forks and clones inherit the source session's workspace roots.
 
 ### Session Permission Controls
 
@@ -248,7 +248,7 @@ Code sessions append one strict non-tree control whenever an additional file-acc
 {"type":"session_directory_removed","id":"d4e5f6a7","parentId":"leaf1234","timestamp":"2026-07-26T14:02:00.000Z","path":"/canonical/path/to/shared"}
 ```
 
-Each record permits only the base control fields and one normalized canonical absolute `path`. The records are reduced in raw journal order; they do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. A directory need not still exist when the journal is reopened. Directory controls require a v8 header, and any Chat journal containing them is invalid.
+Each record permits only the base control fields and one normalized canonical absolute `path`. The records are reduced in raw journal order; they do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. A directory need not still exist when the journal is reopened. Directory controls require a v8 header and are valid for every session.
 
 Opening or resuming the same journal preserves these controls. `/tree` and compaction stay within that journal and preserve them. Clone, fork, `newSession()`, and import into a new destination exclude these authority-bearing controls.
 
@@ -257,7 +257,7 @@ Opening or resuming the same journal preserves these controls. `/tree` and compa
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":14,"id":"child-id","timestamp":"2026-09-01T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionPreset":"ask","agent":{"agentId":"child-id","name":"researcher","agentType":"explorer","parentSessionId":"parent-id","rootSessionId":"parent-id","agentPath":["child-id"],"cwd":"/path/to/project","tools":["read","grep"],"writePolicy":"deny","permissionPreset":"ask","model":{"provider":"openai","modelId":"gpt-test"},"thinkingLevel":"high","initialTask":"Inspect the boundary","forkTurns":0,"timeoutSeconds":1800,"mayDelegate":false}}
+{"type":"session","version":14,"id":"child-id","timestamp":"2026-09-01T00:00:00.000Z","cwd":"/path/to/project","cwdOrigin":"user-selected","permissionPreset":"ask","agent":{"agentId":"child-id","name":"researcher","agentType":"explorer","parentSessionId":"parent-id","rootSessionId":"parent-id","agentPath":["child-id"],"cwd":"/path/to/project","tools":["read","grep"],"writePolicy":"deny","permissionPreset":"ask","model":{"provider":"openai","modelId":"gpt-test"},"thinkingLevel":"high","initialTask":"Inspect the boundary","forkTurns":0,"timeoutSeconds":1800,"mayDelegate":false}}
 ```
 
 The immutable header records ownership and the runtime-resolved capability snapshot. Each initial or follow-up task has an immutable `taskId`; append-only `agent_task` records move it through queued, running, and terminal states. `agent_message` audits steering, and `agent_archived` records reversible terminal-history visibility.
@@ -445,21 +445,21 @@ for (const line of lines) {
 Key methods for working with sessions programmatically.
 
 ### Static Creation Methods
-- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionPreset? })` - Create a session; omitted permission preset defaults to Auto
+- `SessionManager.create(cwd, sessionDir?, { id?, cwdOrigin?, permissionPreset? })` - Create a session; omitted permission preset defaults to Auto
 - `SessionManager.open(path, sessionDir?)` - Open existing session file
-- `SessionManager.continueRecent(cwd, sessionDir?, { mode? })` - Open the latest session; use the option only when no session exists
+- `SessionManager.continueRecent(cwd, sessionDir?)` - Open the latest session or create one
 - `SessionManager.inMemory(cwd?, options?)` - No file persistence
-- `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir?)` - Fork a session and inherit its mode
+- `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir?)` - Fork a session and inherit its workspace
 
 ### Static Listing Methods
 - `SessionManager.list(cwd, sessionDir?, onProgress?)` - List sessions for a directory
 - `SessionManager.listAll(onProgress?)` - List all sessions across all projects
 
 ### Instance Methods - Session Management
-- `newSession({ mode?, parentSession? })` - Start a peer session; omitted mode inherits the current manager mode
+- `newSession({ parentSession? })` - Start a peer session that inherits the current workspace
 - `setSessionFile(path)` - Switch to a different session file
 - `createBranchedSession(leafId)` - Extract branch to new session file
-- `createBranchedSessionManager(leafId)` - Create a branch manager that inherits the source mode
+- `createBranchedSessionManager(leafId)` - Create a branch manager that inherits the source workspace
 - `getMode()` - Return the effective mode, including the legacy `code` fallback
 - `getCwdOrigin()` - Return `managed` or `user-selected`
 - `getAdditionalDirectories()` - Return the current Code-only additional roots

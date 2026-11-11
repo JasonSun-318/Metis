@@ -41,11 +41,11 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Web search, thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
-| `/new [chat\|code]` | Create a session and choose its immutable primary workspace |
+| `/new` | Create a session and choose its primary workspace |
 | `/permissions` | Choose Ask, Auto, or Full for this session |
-| `/add-dir <path>` | Code only: add one existing directory as a file-access root for this session |
-| `/remove-dir <path>` | Code only: remove one previously added directory |
-| `/dirs` | Code only: list the primary and additional working directories |
+| `/add-dir <path>` | Add one existing directory as a file-access root for this session |
+| `/remove-dir <path>` | Remove one previously added directory |
+| `/dirs` | List the primary and additional working directories |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, mode, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |
@@ -219,7 +219,6 @@ cat README.md | metis -p "Summarize this text"
 
 | Option | Description |
 |--------|-------------|
-| `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
 | `--permission-preset <ask\|auto\|full>` | Set permissions for a newly created session (default: `auto`) |
 | `-c`, `--continue` | Continue the most recent session |

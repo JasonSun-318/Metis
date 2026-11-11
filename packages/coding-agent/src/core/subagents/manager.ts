@@ -102,7 +102,6 @@ export interface SpawnAgentReceipt extends AgentTaskReceipt {
 	readonly tools: readonly string[];
 	readonly writePolicy: "inherit" | "deny";
 	readonly mayDelegate: boolean;
-	readonly mode?: AgentConfig["mode"];
 	readonly model?: AgentConfig["model"];
 	readonly roleSnapshot?: AgentConfig["roleSnapshot"];
 }
@@ -457,7 +456,6 @@ export class SubagentManager implements SubagentManagerApi {
 		const agentId = this.createId();
 		const taskId = this.createId();
 		const config: AgentConfig = {
-			mode: actor.mode,
 			roleSnapshot: captureAgentRoleSnapshot(agentType, definition),
 			agentId,
 			name: input.name,
@@ -520,7 +518,6 @@ export class SubagentManager implements SubagentManagerApi {
 			tools: effectiveAgentToolNames(config),
 			writePolicy: config.writePolicy,
 			mayDelegate: config.mayDelegate,
-			mode: config.mode,
 			model: config.model,
 			roleSnapshot: config.roleSnapshot,
 		};
@@ -2627,7 +2624,6 @@ export function agentSummaryFromRecord(
 		agentType: record.config.agentType,
 		model: record.config.model,
 		...(record.runControl ? { runControl: record.runControl } : {}),
-		mode: record.config.mode ?? "code",
 		...(record.config.roleSnapshot ? { roleSnapshot: record.config.roleSnapshot } : {}),
 		depth: record.config.agentPath.length,
 		status,

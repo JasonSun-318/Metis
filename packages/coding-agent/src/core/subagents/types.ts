@@ -1,5 +1,4 @@
 import type { ThinkingLevel } from "@metis/agent-core";
-import type { AgentMode } from "../agent-mode.ts";
 import type { AgentSession, AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionPreset } from "../permissions/settings.ts";
 import type { DurablePromptInput } from "../runtime-recovery.ts";
@@ -56,7 +55,6 @@ export interface AgentRelation {
 }
 
 export interface AgentConfig extends AgentRelation {
-	readonly mode?: AgentMode;
 	readonly roleSnapshot?: AgentRoleSnapshot;
 	readonly agentId: string;
 	readonly name: string;
@@ -89,7 +87,6 @@ export interface AgentTaskSummary {
 export interface AgentSummary extends AgentRelation {
 	readonly retry?: AgentSession["retryState"];
 	readonly model?: AgentModelRef;
-	readonly mode?: AgentMode;
 	readonly roleSnapshot?: AgentRoleSnapshot;
 	readonly runControl?: AgentRunControl;
 	readonly agentId: string;

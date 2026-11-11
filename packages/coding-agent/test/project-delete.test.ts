@@ -19,11 +19,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getIndexPath, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import {
-	type ModeProjectDeleteHooks,
-	type ModeProjectSessionTarget,
+	type ProjectDeleteHooks,
+	type ProjectSessionTarget,
 	recoverInterruptedProjectTrash,
-	trashModeProjectData,
-} from "../src/core/mode-project-delete.ts";
+	trashProjectData,
+} from "../src/core/project-delete.ts";
 import {
 	createSessionWorkDir,
 	getOwnedSessionWorkDirs,
@@ -77,13 +77,11 @@ function createLayout(): TestLayout {
 function createSession(
 	layout: TestLayout,
 	id: string,
-	mode: "chat" | "code",
 	options: { cwd?: string; archived?: boolean; scheduled?: boolean; cwdOrigin?: "managed" | "user-selected" } = {},
-): { path: string; target: ModeProjectSessionTarget } {
+): { path: string; target: ProjectSessionTarget } {
 	const cwd = options.cwd ?? layout.cwd;
 	const manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, layout.agentDir), {
 		id,
-		mode,
 		...(options.cwdOrigin ? { cwdOrigin: options.cwdOrigin } : {}),
 		...(options.scheduled ? { scheduled: { taskId: `task-${id}`, runId: `run-${id}` } } : {}),
 	});
@@ -104,7 +102,7 @@ function createSession(
 	};
 }
 
-function hooks(overrides: Partial<ModeProjectDeleteHooks> = {}): ModeProjectDeleteHooks {
+function hooks(overrides: Partial<ProjectDeleteHooks> = {}): ProjectDeleteHooks {
 	return {
 		readSessionHeader: (path) => {
 			const header = SessionManager.openReadOnly(path).getHeader();
@@ -121,17 +119,16 @@ function hooks(overrides: Partial<ModeProjectDeleteHooks> = {}): ModeProjectDele
 	};
 }
 
-function input(layout: TestLayout, sessions: readonly ModeProjectSessionTarget[]) {
+function input(layout: TestLayout, sessions: readonly ProjectSessionTarget[]) {
 	return {
 		agentDir: layout.agentDir,
 		sessionsRoot: layout.sessionsRoot,
-		mode: "chat" as const,
 		cwd: layout.cwd,
 		sessions,
 	};
 }
 
-function writeHeader(path: string, id: string, cwd: string, mode: "chat" | "code" = "chat"): void {
+function writeHeader(path: string, id: string, cwd: string): void {
 	write(
 		path,
 		`${JSON.stringify({
@@ -140,14 +137,13 @@ function writeHeader(path: string, id: string, cwd: string, mode: "chat" | "code
 			id,
 			timestamp: "2026-01-01T00:00:00.000Z",
 			cwd,
-			mode,
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		})}\n`,
 	);
 }
 
-describe("mode project Trash", () => {
+describe("project Trash", () => {
 	const roots: string[] = [];
 
 	afterEach(() => {
@@ -162,11 +158,11 @@ describe("mode project Trash", () => {
 			const managedId = "ba2f47af-8b7c-48dd-bf57-98e440202fbf";
 			layout.cwd = join(layout.agentDir, "workspaces", managedId);
 			mkdirSync(layout.cwd, { recursive: true });
-			const managed = createSession(layout, managedId, "chat", { cwdOrigin: "managed", archived });
-			const first = createSession(layout, "selected-first", "chat");
-			const second = createSession(layout, "selected-second", "chat", { archived: true });
+			const managed = createSession(layout, managedId, { cwdOrigin: "managed", archived });
+			const first = createSession(layout, "selected-first");
+			const second = createSession(layout, "selected-second", { archived: true });
 			const managedFile = write(join(layout.cwd, "keep-task-data.txt"));
-			const result = await trashModeProjectData(input(layout, [first.target, second.target]), hooks());
+			const result = await trashProjectData(input(layout, [first.target, second.target]), hooks());
 			expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 2 });
 			expect(existsSync(first.path)).toBe(false);
 			expect(existsSync(second.path)).toBe(false);
@@ -180,14 +176,14 @@ describe("mode project Trash", () => {
 		async (cwdOrigin) => {
 			const layout = createLayout();
 			roots.push(layout.root);
-			const selected = createSession(layout, "selected-origin", "chat");
+			const selected = createSession(layout, "selected-origin");
 			const records = readFileSync(selected.path, "utf8").trimEnd().split("\n");
 			const header = JSON.parse(records[0]!);
 			if (cwdOrigin === undefined) delete header.cwdOrigin;
 			else header.cwdOrigin = cwdOrigin;
 			records[0] = JSON.stringify(header);
 			writeFileSync(selected.path, `${records.join("\n")}\n`);
-			const result = await trashModeProjectData(input(layout, [selected.target]), hooks());
+			const result = await trashProjectData(input(layout, [selected.target]), hooks());
 			if (cwdOrigin === undefined) {
 				expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 1 });
 				expect(existsSync(selected.path)).toBe(false);
@@ -198,16 +194,22 @@ describe("mode project Trash", () => {
 		},
 	);
 
-	it("deletes only one mode's ordinary sessions and proven-owned data", async () => {
+	it("deletes the project's ordinary sessions and proven-owned data across legacy modes", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const active = createSession(layout, "chat-active", "chat");
-		const archived = createSession(layout, "chat-archived", "chat", { archived: true });
-		const code = createSession(layout, "code-active", "code");
+		const active = createSession(layout, "chat-active");
+		const archived = createSession(layout, "chat-archived", { archived: true });
+		const legacyCode = createSession(layout, "legacy-code");
+		const legacyLines = readFileSync(legacyCode.path, "utf8").split("\n");
+		const legacyHeader = JSON.parse(legacyLines[0]!);
+		writeFileSync(
+			legacyCode.path,
+			`${[JSON.stringify({ ...legacyHeader, mode: "code" }), ...legacyLines.slice(1)].join("\n")}`,
+		);
 		const childCwd = join(layout.cwd, "child");
 		mkdirSync(childCwd);
-		const child = createSession(layout, "chat-child", "chat", { cwd: childCwd });
-		const scheduled = createSession(layout, "chat-scheduled", "chat", { scheduled: true });
+		const child = createSession(layout, "chat-child", { cwd: childCwd });
+		const scheduled = createSession(layout, "chat-scheduled", { scheduled: true });
 
 		const owned = new Set<string>();
 		for (const session of [active, archived]) {
@@ -258,7 +260,6 @@ describe("mode project Trash", () => {
 			),
 		);
 		const preservedPaths = [
-			code.path,
 			child.path,
 			scheduled.path,
 			write(sharedMemoryIndexPath, "shared memory"),
@@ -275,8 +276,8 @@ describe("mode project Trash", () => {
 		const preserved = new Map(preservedPaths.map((path) => [path, readFileSync(path)]));
 
 		const trashCalls: string[] = [];
-		const result = await trashModeProjectData(
-			input(layout, [active.target, archived.target]),
+		const result = await trashProjectData(
+			input(layout, [active.target, archived.target, legacyCode.target]),
 			hooks({
 				trash: (operationDir) => {
 					trashCalls.push(operationDir);
@@ -285,9 +286,10 @@ describe("mode project Trash", () => {
 			}),
 		);
 
-		expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 2 });
+		expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 3 });
 		expect(trashCalls).toHaveLength(1);
-		for (const path of [active.path, archived.path, ...owned]) expect(existsSync(path), path).toBe(false);
+		for (const path of [active.path, archived.path, legacyCode.path, ...owned])
+			expect(existsSync(path), path).toBe(false);
 		for (const [path, bytes] of preserved) expect(readFileSync(path), path).toEqual(bytes);
 		expect(getOwnedSessionWorkDirs(layout.agentDir, "chat-active")).toEqual([]);
 	});
@@ -295,28 +297,27 @@ describe("mode project Trash", () => {
 	it("fails closed when the catalog snapshot changed", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "changed", "chat");
-		const result = await trashModeProjectData(input(layout, []), hooks());
+		const session = createSession(layout, "changed");
+		const result = await trashProjectData(input(layout, []), hooks());
 
 		expect(result).toMatchObject({ ok: false, code: "PROJECT_CHANGED" });
 		expect(existsSync(session.path)).toBe(true);
 	});
 
 	it("moves nothing when a trusted target header no longer matches its ownership markers", async () => {
-		for (const marker of ["id", "mode", "cwd", "scheduled"] as const) {
+		for (const marker of ["id", "cwd", "scheduled"] as const) {
 			const layout = createLayout();
 			roots.push(layout.root);
-			const session = createSession(layout, `marker-${marker}`, "chat");
+			const session = createSession(layout, `marker-${marker}`);
 			const lines = readFileSync(session.path, "utf8").trimEnd().split("\n");
 			const header = JSON.parse(lines[0]) as Record<string, unknown>;
 			if (marker === "id") header.id = "different-id";
-			if (marker === "mode") header.mode = "code";
 			if (marker === "cwd") header.cwd = join(layout.root, "different-cwd");
 			if (marker === "scheduled") header.scheduled = { taskId: "task", runId: "run" };
 			lines[0] = JSON.stringify(header);
 			writeFileSync(session.path, `${lines.join("\n")}\n`);
 
-			const result = await trashModeProjectData(input(layout, [session.target]), hooks());
+			const result = await trashProjectData(input(layout, [session.target]), hooks());
 			expect(result.ok, marker).toBe(false);
 			expect(readFileSync(session.path, "utf8"), marker).toBe(`${lines.join("\n")}\n`);
 			expect(existsSync(join(layout.agentDir, "tmp", "project-delete")), marker).toBe(false);
@@ -328,7 +329,6 @@ describe("mode project Trash", () => {
 		roots.push(layout.root);
 		const live = SessionManager.create(layout.cwd, getDefaultSessionDir(layout.cwd, layout.agentDir), {
 			id: "live",
-			mode: "chat",
 		});
 		const path = live.getSessionFile()!;
 		const target = {
@@ -339,7 +339,7 @@ describe("mode project Trash", () => {
 			updatedAt: "2000-01-01T00:00:00.000Z",
 		};
 
-		const result = await trashModeProjectData(input(layout, [target]), hooks());
+		const result = await trashProjectData(input(layout, [target]), hooks());
 		expect(result).toMatchObject({ ok: false, code: "SESSION_IN_USE" });
 		expect(existsSync(path)).toBe(true);
 		live.close();
@@ -349,7 +349,7 @@ describe("mode project Trash", () => {
 		for (const kind of ["missing", "hardlink", "symlink", "fifo", "replaced"] as const) {
 			const layout = createLayout();
 			roots.push(layout.root);
-			const session = createSession(layout, `unsafe-${kind}`, "chat");
+			const session = createSession(layout, `unsafe-${kind}`);
 			const bytes = readFileSync(session.path);
 			let customHooks = hooks();
 			switch (kind) {
@@ -381,7 +381,7 @@ describe("mode project Trash", () => {
 					break;
 			}
 
-			const result = await trashModeProjectData(input(layout, [session.target]), customHooks);
+			const result = await trashProjectData(input(layout, [session.target]), customHooks);
 			expect(result.ok, kind).toBe(false);
 			expect(existsSync(join(layout.agentDir, "tmp", "project-delete")), kind).toBe(false);
 		}
@@ -390,8 +390,8 @@ describe("mode project Trash", () => {
 	it("rejects duplicate catalog identities and unsafe owned-directory links", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "unsafe-owned", "chat");
-		const duplicate = await trashModeProjectData(input(layout, [session.target, session.target]), hooks());
+		const session = createSession(layout, "unsafe-owned");
+		const duplicate = await trashProjectData(input(layout, [session.target, session.target]), hooks());
 		expect(duplicate).toMatchObject({ ok: false, code: "SESSION_CORRUPT" });
 
 		const outside = join(layout.root, "outside-assets");
@@ -399,11 +399,11 @@ describe("mode project Trash", () => {
 		const imageDir = getSessionImageDir(session.path);
 		mkdirSync(dirname(imageDir), { recursive: true });
 		symlinkSync(outside, imageDir);
-		const linked = await trashModeProjectData(input(layout, [session.target]), hooks());
+		const linked = await trashProjectData(input(layout, [session.target]), hooks());
 		expect(linked).toMatchObject({ ok: false, code: "SESSION_CORRUPT" });
 		unlinkSync(imageDir);
 		write(imageDir, "not a directory");
-		const wrongType = await trashModeProjectData(input(layout, [session.target]), hooks());
+		const wrongType = await trashProjectData(input(layout, [session.target]), hooks());
 		expect(wrongType).toMatchObject({ ok: false, code: "SESSION_CORRUPT" });
 		expect(existsSync(session.path)).toBe(true);
 	});
@@ -411,10 +411,10 @@ describe("mode project Trash", () => {
 	it("deletes a project whose source cwd no longer exists", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "missing-source", "chat");
+		const session = createSession(layout, "missing-source");
 		rmSync(layout.cwd, { recursive: true });
 
-		const result = await trashModeProjectData(input(layout, [session.target]), hooks());
+		const result = await trashProjectData(input(layout, [session.target]), hooks());
 		expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 1 });
 		expect(existsSync(session.path)).toBe(false);
 	});
@@ -422,9 +422,9 @@ describe("mode project Trash", () => {
 	it("uses catalog storage refs when canonical cwd spelling differs", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "canonical-alias", "chat");
+		const session = createSession(layout, "canonical-alias");
 
-		const result = await trashModeProjectData(
+		const result = await trashProjectData(
 			{ ...input(layout, [session.target]), cwd: realpathSync(layout.cwd) },
 			hooks(),
 		);
@@ -432,13 +432,13 @@ describe("mode project Trash", () => {
 		expect(existsSync(session.path)).toBe(false);
 	});
 
-	it("keeps other-mode and other-project creation responsive while Trash is pending", async () => {
+	it("keeps another project's creation responsive while Trash is pending", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "concurrent-delete", "chat");
+		const session = createSession(layout, "concurrent-delete");
 		const enteredTrash = deferred<void>();
 		const releaseTrash = deferred<void>();
-		const pending = trashModeProjectData(
+		const pending = trashProjectData(
 			input(layout, [session.target]),
 			hooks({
 				trash: async (operationDir) => {
@@ -452,38 +452,29 @@ describe("mode project Trash", () => {
 
 		expect(() =>
 			SessionManager.create(layout.cwd, getDefaultSessionDir(layout.cwd, layout.agentDir), {
-				id: "blocked-chat",
-				mode: "chat",
+				id: "blocked-project",
 			}),
 		).toThrow();
-		const code = SessionManager.create(layout.cwd, getDefaultSessionDir(layout.cwd, layout.agentDir), {
-			id: "allowed-code",
-			mode: "code",
-		});
 		const otherCwd = join(layout.root, "other-project");
 		mkdirSync(otherCwd);
 		const other = SessionManager.create(otherCwd, getDefaultSessionDir(otherCwd, layout.agentDir), {
-			id: "allowed-chat",
-			mode: "chat",
+			id: "allowed-other-project",
 		});
-		const codePath = code.getSessionFile()!;
 		const otherPath = other.getSessionFile()!;
-		code.close();
 		other.close();
 		releaseTrash.resolve();
 
 		expect(await pending).toEqual({ ok: true, method: "trash", deletedSessionCount: 1 });
-		expect(existsSync(codePath)).toBe(true);
 		expect(existsSync(otherPath)).toBe(true);
 	});
 
 	it("rolls every staged target back when Trash fails", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const first = createSession(layout, "rollback-a", "chat");
-		const second = createSession(layout, "rollback-b", "chat");
+		const first = createSession(layout, "rollback-a");
+		const second = createSession(layout, "rollback-b");
 
-		const result = await trashModeProjectData(
+		const result = await trashProjectData(
 			input(layout, [first.target, second.target]),
 			hooks({
 				trash: () => {
@@ -516,7 +507,7 @@ describe("mode project Trash", () => {
 		let stagingRenames = 0;
 		let trashCalls = 0;
 
-		const result = await trashModeProjectData(
+		const result = await trashProjectData(
 			input(layout, sessions),
 			hooks({
 				rename: (source, destination) => {
@@ -540,8 +531,8 @@ describe("mode project Trash", () => {
 	it("treats disappearance from a late Trash diagnostic as committed", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "late-diagnostic", "chat");
-		const result = await trashModeProjectData(
+		const session = createSession(layout, "late-diagnostic");
+		const result = await trashProjectData(
 			input(layout, [session.target]),
 			hooks({
 				trash: (operationDir) => {
@@ -558,11 +549,11 @@ describe("mode project Trash", () => {
 	it("recovers an interrupted rollback on startup", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const first = createSession(layout, "recover-a", "chat");
-		const second = createSession(layout, "recover-b", "chat");
+		const first = createSession(layout, "recover-a");
+		const second = createSession(layout, "recover-b");
 		let calls = 0;
 
-		const result = await trashModeProjectData(
+		const result = await trashProjectData(
 			input(layout, [first.target, second.target]),
 			hooks({
 				operationId: () => transactionId,
@@ -585,10 +576,10 @@ describe("mode project Trash", () => {
 	it("preserves an interrupted operation when its recovery payload was replaced by a symlink", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const first = createSession(layout, "unsafe-recovery-a", "chat");
-		const second = createSession(layout, "unsafe-recovery-b", "chat");
+		const first = createSession(layout, "unsafe-recovery-a");
+		const second = createSession(layout, "unsafe-recovery-b");
 		let calls = 0;
-		await trashModeProjectData(
+		await trashProjectData(
 			input(layout, [first.target, second.target]),
 			hooks({
 				operationId: () => transactionId,
@@ -622,9 +613,9 @@ describe("mode project Trash", () => {
 	it("does not create recovery leases through a replaced original ancestor", async () => {
 		const layout = createLayout();
 		roots.push(layout.root);
-		const session = createSession(layout, "unsafe-original", "chat");
+		const session = createSession(layout, "unsafe-original");
 		let calls = 0;
-		await trashModeProjectData(
+		await trashProjectData(
 			input(layout, [session.target]),
 			hooks({
 				operationId: () => transactionId,
@@ -668,7 +659,7 @@ describe("mode project Trash", () => {
 		});
 		let calls = 0;
 
-		const result = await trashModeProjectData(
+		const result = await trashProjectData(
 			input(layout, sessions),
 			hooks({
 				trash: (operationDir) => {

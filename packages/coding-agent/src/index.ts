@@ -14,7 +14,6 @@ export {
 	getWorkspacesDir,
 	VERSION,
 } from "./config.ts";
-export { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./core/agent-mode.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,
@@ -418,11 +417,6 @@ export type {
 } from "./core/memory/vault-types.ts";
 export { isPinnedBlock, isSafeSlug } from "./core/memory/vault-types.ts";
 export { convertToLlm } from "./core/messages.ts";
-export type {
-	ModeProjectSessionTarget,
-	TrashModeProjectDataInput,
-	TrashModeProjectDataResult,
-} from "./core/mode-project-delete.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
 	getHighestSupportedThinkingLevel,
@@ -545,6 +539,11 @@ export type {
 	PluginSkillComponent,
 	PluginSnapshot,
 } from "./core/plugins/types.ts";
+export type {
+	ProjectSessionTarget,
+	TrashProjectDataInput,
+	TrashProjectDataResult,
+} from "./core/project-delete.ts";
 export {
 	MAX_QUEUED_TURNS,
 	QueuedTurnConflictError,

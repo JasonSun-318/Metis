@@ -10,7 +10,6 @@ import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { getAgentDir, getMetisEnv, getSessionDirOverride, VERSION } from "./config.ts";
-import { DEFAULT_AGENT_MODE } from "./core/agent-mode.ts";
 import {
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
@@ -31,14 +30,7 @@ import type { ModelRegistry } from "./core/model-registry.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
-import {
-	createScheduledRunExecutor,
-	installScheduleHost,
-	isScheduleSessionEligible,
-	readScheduledSessionView,
-	SCHEDULE_MAIN_PROMPT,
-	ScheduleManager,
-} from "./core/schedules/index.ts";
+import { readScheduledSessionView } from "./core/schedules/index.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import { pruneStaleSessionWorkDirs } from "./core/session-attachments.ts";
 import {
@@ -271,7 +263,6 @@ function validateCreationOnlyFlags(parsed: Args): void {
 	const conflictingFlags = [
 		parsed.cwd !== undefined ? "--cwd" : undefined,
 		parsed.permissionPreset !== undefined ? "--permission-preset" : undefined,
-		parsed.agentMode !== undefined && !parsed.continue ? "--agent-mode" : undefined,
 	].filter((flag): flag is string => flag !== undefined);
 	if (conflictingFlags.length === 0) return;
 
@@ -285,7 +276,6 @@ function validateCreationOnlyFlags(parsed: Args): void {
 
 function rejectCreationOverridesForExistingSession(parsed: Args): void {
 	const conflictingFlags = [
-		parsed.agentMode !== undefined ? "--agent-mode" : undefined,
 		parsed.cwd !== undefined ? "--cwd" : undefined,
 		parsed.permissionPreset !== undefined ? "--permission-preset" : undefined,
 	].filter((flag): flag is string => flag !== undefined);
@@ -339,7 +329,6 @@ async function createSessionManager(
 		const ephemeralCwd = parsed.cwd
 			? resolveNewSessionWorkspace({
 					id: parsed.sessionId ?? createSessionId(),
-					mode: parsed.agentMode ?? DEFAULT_AGENT_MODE,
 					requestedCwd: parsed.cwd,
 					hostCwd: cwd,
 					agentDir,
@@ -347,7 +336,6 @@ async function createSessionManager(
 			: cwd;
 		return SessionManager.inMemory(ephemeralCwd, {
 			id: parsed.sessionId,
-			mode: parsed.agentMode,
 			permissionPreset: parsed.permissionPreset,
 		});
 	}
@@ -420,7 +408,7 @@ async function createSessionManager(
 	}
 
 	if (parsed.continue) {
-		return SessionManager.continueRecent(cwd, sessionDir, { mode: parsed.agentMode });
+		return SessionManager.continueRecent(cwd, sessionDir);
 	}
 
 	if (parsed.sessionId) {
@@ -436,19 +424,17 @@ async function createSessionManager(
 		);
 	}
 
-	const mode = parsed.agentMode ?? DEFAULT_AGENT_MODE;
 	const sessionId = parsed.sessionId ?? createSessionId();
+	// The CLI keeps working in the invocation directory unless --cwd overrides it.
 	const workspace = resolveNewSessionWorkspace({
 		id: sessionId,
-		mode,
-		requestedCwd: parsed.cwd,
+		requestedCwd: parsed.cwd ?? cwd,
 		hostCwd: cwd,
 		agentDir,
 	});
 	try {
 		return SessionManager.create(workspace.cwd, sessionDir, {
 			id: sessionId,
-			mode,
 			cwdOrigin: workspace.cwdOrigin,
 			permissionPreset: parsed.permissionPreset,
 		});
@@ -731,7 +717,6 @@ export async function main(args: string[], options?: MainOptions) {
 		hasInitialInput,
 	);
 	let runtimeOwnsSessionManager = false;
-	let scheduleManager: ScheduleManager | undefined;
 	try {
 		const missingSessionCwdIssue = getMissingSessionCwdIssue(sessionManager, cwd);
 		if (missingSessionCwdIssue) {
@@ -761,18 +746,6 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.appendSessionInfo(name);
 		}
 		time("createSessionManager");
-		if (!parsed.help && parsed.listModels === undefined) {
-			scheduleManager = ScheduleManager.create({
-				agentDir,
-				execute: createScheduledRunExecutor({ agentDir }),
-			});
-			await scheduleManager.start();
-			try {
-				await scheduleManager.list({ limit: 1 });
-			} catch (error) {
-				console.error(chalk.yellow(`Warning: ${error instanceof Error ? error.message : String(error)}`));
-			}
-		}
 
 		const trustStore = new ProjectTrustStore(agentDir);
 		const mcpConfigurationCoordinator = new McpConfigurationCoordinator({ authStorage: AuthStorage.create() });
@@ -915,8 +888,6 @@ export async function main(args: string[], options?: MainOptions) {
 						`Child model is unavailable: ${childConfig.model.provider}/${childConfig.model.modelId}`,
 					);
 				}
-				const scheduleEligible =
-					!childConfig && scheduleManager !== undefined && isScheduleSessionEligible(sessionManager);
 				const created = await createAgentSessionFromServices({
 					services,
 					sessionManager,
@@ -936,21 +907,12 @@ export async function main(args: string[], options?: MainOptions) {
 								additionalSystemPrompt: buildChildSystemPrompt(childConfig, { agentDir }),
 								workspaceWritePolicy: childConfig.writePolicy,
 							}
-						: scheduleEligible
-							? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
-							: {}),
+						: {}),
 					includeAutoMemory: childConfig ? false : undefined,
 					permissionSettingsCeiling,
 				});
 				servicesTransferred = true;
 				try {
-					if (scheduleEligible) {
-						installScheduleHost({
-							session: created.session,
-							manager: scheduleManager!,
-							timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-						});
-					}
 					const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 					if (created.session.model && cliThinkingOverride) {
 						created.session.setThinkingLevel(created.session.thinkingLevel);
@@ -1046,7 +1008,6 @@ export async function main(args: string[], options?: MainOptions) {
 				await runRpcMode(runtime);
 			} else if (appMode === "interactive") {
 				const interactiveMode = new InteractiveMode(runtime, {
-					scheduleManager,
 					migratedProviders,
 					modelFallbackMessage,
 					autoTrustOnReloadCwd,
@@ -1092,12 +1053,9 @@ export async function main(args: string[], options?: MainOptions) {
 				return;
 			}
 		} finally {
-			await scheduleManager?.stop();
-			scheduleManager = undefined;
 			await runtime.dispose();
 		}
 	} finally {
-		await scheduleManager?.stop();
 		if (!runtimeOwnsSessionManager) closeSessionManagerQuietly(sessionManager);
 	}
 }

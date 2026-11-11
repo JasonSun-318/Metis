@@ -36,7 +36,6 @@ describe("parseArgs", () => {
 	describe("required option values", () => {
 		const requiredValueOptions = [
 			{ option: "--mode", field: "mode" },
-			{ option: "--agent-mode", field: "agentMode" },
 			{ option: "--cwd", field: "cwd" },
 			{ option: "--permission-preset", field: "permissionPreset" },
 			{ option: "--provider", field: "provider" },
@@ -130,27 +129,6 @@ describe("parseArgs", () => {
 			const result = parseArgs(["--mode"]);
 			expect(result.mode).toBeUndefined();
 			expect(result.diagnostics).toEqual([{ type: "error", message: "--mode requires text, json, or rpc" }]);
-		});
-	});
-
-	describe("--agent-mode", () => {
-		test.each(["chat", "code"] as const)("parses %s without changing the output mode", (agentMode) => {
-			const result = parseArgs(["--agent-mode", agentMode, "--mode", "json"]);
-			expect(result.agentMode).toBe(agentMode);
-			expect(result.mode).toBe("json");
-			expect(result.diagnostics).toEqual([]);
-		});
-
-		test("reports a missing value", () => {
-			const result = parseArgs(["--agent-mode"]);
-			expect(result.diagnostics).toEqual([{ type: "error", message: "--agent-mode requires chat or code" }]);
-		});
-
-		test("reports an invalid value", () => {
-			const result = parseArgs(["--agent-mode", "focus"]);
-			expect(result.diagnostics).toEqual([
-				{ type: "error", message: 'Invalid agent mode "focus". Valid values: chat, code' },
-			]);
 		});
 	});
 

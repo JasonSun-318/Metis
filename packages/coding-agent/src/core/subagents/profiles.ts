@@ -62,7 +62,6 @@ export interface AgentGuideCapabilities {
 	/** Depth of the child that would be created, not the current actor. */
 	readonly depth: number;
 	readonly writePolicy?: "inherit" | "deny";
-	readonly mode?: "chat" | "code";
 }
 
 export function effectiveAgentToolNames(input: {
@@ -103,7 +102,7 @@ export function buildAgentTypeGuide(
 					? "denied (depth limit)"
 					: "denied (role)";
 			const availability = capabilities.depth > MAX_AGENT_DEPTH ? "unavailable (depth limit)" : "available";
-			return `${agentType}: ${availability}; mode=${capabilities.mode ?? "inherited"}; maximum tools=${tools}; effective tools=${JSON.stringify(effectiveAgentToolNames(resolved))}; unavailable tools=${JSON.stringify(unavailableTools)} (current parent capabilities and delegatable-tool rules); filesystem writes=${currentWrites}; delegation=${currentDelegation}; ${identity}`;
+			return `${agentType}: ${availability}; maximum tools=${tools}; effective tools=${JSON.stringify(effectiveAgentToolNames(resolved))}; unavailable tools=${JSON.stringify(unavailableTools)} (current parent capabilities and delegatable-tool rules); filesystem writes=${currentWrites}; delegation=${currentDelegation}; ${identity}`;
 		})
 		.join("\n")
 		.replace(/[<>&]/gu, (character) => (character === "<" ? "\\u003c" : character === ">" ? "\\u003e" : "\\u0026"));

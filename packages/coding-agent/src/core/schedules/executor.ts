@@ -106,7 +106,6 @@ export function createScheduledRunExecutor(options: {
 			}
 			sessionManager = SessionManager.create(cwd, getDefaultSessionDir(cwd, options.agentDir), {
 				id: sessionId,
-				mode: "chat",
 				cwdOrigin,
 				permissionPreset: "ask",
 				scheduled: { taskId: claim.taskId, runId: claim.runId },

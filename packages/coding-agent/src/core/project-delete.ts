@@ -21,7 +21,6 @@ import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { TextDecoder } from "node:util";
 import { canonicalizePathForCreation, encodePathForStorage, resolvePath } from "../utils/paths.ts";
 import { trashPath } from "../utils/trash.ts";
-import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import {
 	ensureDirectoryDurablySync,
 	ensureRealDirectoryDurablySync,
@@ -33,9 +32,9 @@ import { errorCode } from "./error-code.ts";
 import { getOwnedSessionWorkDirs, getSessionAttachmentDir } from "./session-attachments.ts";
 import { assertValidSessionId } from "./session-id.ts";
 import { getOwnedSessionJournalArtifacts } from "./session-journal.ts";
-import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
+import { acquireProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 
-export interface ModeProjectSessionTarget {
+export interface ProjectSessionTarget {
 	readonly sessionId: string;
 	readonly path: string;
 	readonly relativePath: string;
@@ -43,15 +42,14 @@ export interface ModeProjectSessionTarget {
 	readonly updatedAt?: string;
 }
 
-export interface TrashModeProjectDataInput {
+export interface TrashProjectDataInput {
 	readonly agentDir: string;
 	readonly sessionsRoot: string;
-	readonly mode: AgentMode;
 	readonly cwd: string;
-	readonly sessions: readonly ModeProjectSessionTarget[];
+	readonly sessions: readonly ProjectSessionTarget[];
 }
 
-export type TrashModeProjectDataResult =
+export type TrashProjectDataResult =
 	| { readonly ok: true; readonly method: "trash"; readonly deletedSessionCount: number }
 	| {
 			readonly ok: false;
@@ -63,12 +61,11 @@ export type TrashModeProjectDataResult =
 interface SessionHeaderView {
 	readonly id: string;
 	readonly cwd: string;
-	readonly mode?: AgentMode;
 	readonly cwdOrigin?: "managed" | "user-selected";
 	readonly scheduled?: unknown;
 }
 
-export interface ModeProjectDeleteHooks {
+export interface ProjectDeleteHooks {
 	readonly readSessionHeader: (path: string) => SessionHeaderView;
 	readonly getSessionDisplayMetadataPath: (path: string) => string;
 	readonly getSessionUnreadStatePath: (path: string) => string;
@@ -82,7 +79,6 @@ export interface ModeProjectDeleteHooks {
 
 interface ProjectTrashManifest {
 	readonly version: 1;
-	readonly mode: AgentMode;
 	readonly cwd: string;
 	readonly createdAt: string;
 	readonly targets: readonly {
@@ -96,7 +92,7 @@ interface OwnedTarget {
 	readonly directory: boolean;
 }
 
-type ProjectDeleteCode = Exclude<TrashModeProjectDataResult, { ok: true }>["code"];
+type ProjectDeleteCode = Exclude<TrashProjectDataResult, { ok: true }>["code"];
 
 class ProjectDeleteError extends Error {
 	readonly code: ProjectDeleteCode;
@@ -174,7 +170,6 @@ function readFastHeader(path: string): SessionHeaderView {
 			throw new Error("Session header is invalid");
 		}
 		assertValidSessionId(value.id);
-		if (value.mode !== undefined && !isAgentMode(value.mode)) throw new Error("Session header mode is invalid");
 		const cwdOrigin = value.cwdOrigin === undefined ? "user-selected" : value.cwdOrigin;
 		if (cwdOrigin !== "managed" && cwdOrigin !== "user-selected")
 			throw new Error("Session header cwd origin is invalid");
@@ -186,7 +181,6 @@ function readFastHeader(path: string): SessionHeaderView {
 		return {
 			id: value.id,
 			cwd: value.cwd,
-			mode: value.mode as AgentMode | undefined,
 			cwdOrigin,
 			...(value.scheduled === undefined ? {} : { scheduled: value.scheduled }),
 		};
@@ -195,7 +189,7 @@ function readFastHeader(path: string): SessionHeaderView {
 	}
 }
 
-function verifyRoots(input: TrashModeProjectDataInput): {
+function verifyRoots(input: TrashProjectDataInput): {
 	agentDir: string;
 	sessionsRoot: string;
 	cwd: string;
@@ -203,7 +197,6 @@ function verifyRoots(input: TrashModeProjectDataInput): {
 	projectDirectory: string;
 	archiveProjectDirectory: string;
 } {
-	if (!isAgentMode(input.mode)) throw new ProjectDeleteError("SESSION_CORRUPT", "Invalid project mode");
 	if (!isAbsolute(input.cwd) || !isAbsolute(input.agentDir) || !isAbsolute(input.sessionsRoot)) {
 		throw new ProjectDeleteError("SESSION_CORRUPT", "Project deletion paths must be absolute");
 	}
@@ -242,12 +235,12 @@ function verifyRoots(input: TrashModeProjectDataInput): {
 }
 
 function validateInputTargets(
-	input: TrashModeProjectDataInput,
+	input: TrashProjectDataInput,
 	roots: ReturnType<typeof verifyRoots>,
-): Map<string, ModeProjectSessionTarget> {
+): Map<string, ProjectSessionTarget> {
 	if (input.sessions.length > MAX_TARGETS)
 		throw new ProjectDeleteError("SESSION_CORRUPT", "Too many project sessions");
-	const byPath = new Map<string, ModeProjectSessionTarget>();
+	const byPath = new Map<string, ProjectSessionTarget>();
 	const ids = new Set<string>();
 	for (const target of input.sessions) {
 		try {
@@ -281,7 +274,6 @@ function validateInputTargets(
 function scanProjectStorage(
 	directory: string,
 	archived: boolean,
-	mode: AgentMode,
 	cwd: string,
 	ids: Set<string>,
 ): Map<string, { id: string; archived: boolean; updatedAt: string }> {
@@ -301,7 +293,7 @@ function scanProjectStorage(
 		if (canonicalizePathForCreation(header.cwd) !== cwd) {
 			throw new ProjectDeleteError("SESSION_CORRUPT", `Session cwd disagrees with its storage directory: ${path}`);
 		}
-		if (header.scheduled !== undefined || (header.mode ?? DEFAULT_AGENT_MODE) !== mode) continue;
+		if (header.scheduled !== undefined) continue;
 		if (ids.has(header.id)) {
 			throw new ProjectDeleteError("SESSION_CORRUPT", `Duplicate session id in project storage: ${header.id}`);
 		}
@@ -314,14 +306,14 @@ function scanProjectStorage(
 }
 
 function verifySnapshot(
-	input: TrashModeProjectDataInput,
+	_input: TrashProjectDataInput,
 	roots: ReturnType<typeof verifyRoots>,
-	expected: ReadonlyMap<string, ModeProjectSessionTarget>,
+	expected: ReadonlyMap<string, ProjectSessionTarget>,
 ): void {
 	const ids = new Set<string>();
 	const scanned = new Map([
-		...scanProjectStorage(roots.projectDirectory, false, input.mode, roots.cwd, ids),
-		...scanProjectStorage(roots.archiveProjectDirectory, true, input.mode, roots.cwd, ids),
+		...scanProjectStorage(roots.projectDirectory, false, roots.cwd, ids),
+		...scanProjectStorage(roots.archiveProjectDirectory, true, roots.cwd, ids),
 	]);
 	if (scanned.size !== expected.size) throw new ProjectDeleteError("PROJECT_CHANGED", "Project sessions changed");
 	for (const [path, entry] of scanned) {
@@ -388,10 +380,10 @@ function pruneDescendants(targets: ReadonlyMap<string, OwnedTarget>): OwnedTarge
 }
 
 async function collectTargets(
-	input: TrashModeProjectDataInput,
+	_input: TrashProjectDataInput,
 	roots: ReturnType<typeof verifyRoots>,
-	hooks: ModeProjectDeleteHooks,
-	expected: ReadonlyMap<string, ModeProjectSessionTarget>,
+	hooks: ProjectDeleteHooks,
+	expected: ReadonlyMap<string, ProjectSessionTarget>,
 ): Promise<{ targets: OwnedTarget[]; storageCwd: string }> {
 	const targets = new Map<string, OwnedTarget>();
 	let storageCwd: string | undefined;
@@ -416,7 +408,6 @@ async function collectTargets(
 		}
 		if (
 			header.id !== target.sessionId ||
-			(header.mode ?? DEFAULT_AGENT_MODE) !== input.mode ||
 			canonicalizePathForCreation(header.cwd) !== roots.cwd ||
 			header.scheduled !== undefined
 		) {
@@ -454,15 +445,9 @@ async function collectTargets(
 	return { targets: pruneDescendants(targets), storageCwd: storageCwd ?? roots.storageCwd };
 }
 
-function manifestFor(
-	agentDir: string,
-	mode: AgentMode,
-	cwd: string,
-	targets: readonly OwnedTarget[],
-): ProjectTrashManifest {
+function manifestFor(agentDir: string, cwd: string, targets: readonly OwnedTarget[]): ProjectTrashManifest {
 	return {
 		version: 1,
-		mode,
 		cwd,
 		createdAt: new Date().toISOString(),
 		targets: targets.map((target) => {
@@ -478,9 +463,8 @@ function validateManifest(agentDir: string, value: unknown): ProjectTrashManifes
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid project Trash manifest");
 	const record = value as Record<string, unknown>;
 	if (
-		Object.keys(record).sort().join("\0") !== ["createdAt", "cwd", "mode", "targets", "version"].sort().join("\0") ||
+		Object.keys(record).sort().join("\0") !== ["createdAt", "cwd", "targets", "version"].sort().join("\0") ||
 		record.version !== 1 ||
-		!isAgentMode(record.mode) ||
 		typeof record.cwd !== "string" ||
 		!isAbsolute(record.cwd) ||
 		typeof record.createdAt !== "string" ||
@@ -517,7 +501,6 @@ function validateManifest(agentDir: string, value: unknown): ProjectTrashManifes
 	});
 	return {
 		version: 1,
-		mode: record.mode,
 		cwd: resolvePath(record.cwd),
 		createdAt: record.createdAt,
 		targets,
@@ -620,15 +603,15 @@ async function moveToTrash(operationDir: string): Promise<void> {
 
 async function stageAndTrash(
 	roots: ReturnType<typeof verifyRoots>,
-	input: TrashModeProjectDataInput,
+	input: TrashProjectDataInput,
 	storageCwd: string,
 	targets: readonly OwnedTarget[],
-	hooks: ModeProjectDeleteHooks,
-): Promise<TrashModeProjectDataResult> {
+	hooks: ProjectDeleteHooks,
+): Promise<TrashProjectDataResult> {
 	if (targets.length === 0) return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
 	const operationId = (hooks.operationId ?? randomUUID)();
 	if (!UUID.test(operationId)) throw new Error("Project Trash operation id must be a UUID");
-	const manifest = manifestFor(roots.agentDir, input.mode, storageCwd, targets);
+	const manifest = manifestFor(roots.agentDir, storageCwd, targets);
 	const manifestText = `${JSON.stringify(manifest)}\n`;
 	if (manifest.targets.length > MAX_MANIFEST_TARGETS || Buffer.byteLength(manifestText) > MAX_MANIFEST_BYTES) {
 		throw new Error("Project Trash manifest exceeds its size limit");
@@ -708,16 +691,16 @@ function closeLeases(leases: SessionLease[]): unknown[] {
 	return errors;
 }
 
-export async function trashModeProjectData(
-	input: TrashModeProjectDataInput,
-	hooks: ModeProjectDeleteHooks,
-): Promise<TrashModeProjectDataResult> {
+export async function trashProjectData(
+	input: TrashProjectDataInput,
+	hooks: ProjectDeleteHooks,
+): Promise<TrashProjectDataResult> {
 	const leases: SessionLease[] = [];
-	let result: TrashModeProjectDataResult;
+	let result: TrashProjectDataResult;
 	try {
 		const roots = verifyRoots(input);
 		const expected = validateInputTargets(input, roots);
-		leases.push(acquireModeProjectMutationLease(roots.projectDirectory, input.mode));
+		leases.push(acquireProjectMutationLease(roots.projectDirectory));
 		let acquired = 0;
 		for (const path of [...expected.keys()].sort()) {
 			leases.push(SessionLease.acquireTransient(path));
@@ -770,7 +753,7 @@ export function recoverInterruptedProjectTrash(agentDir: string): void {
 		let recoveryError: unknown;
 		try {
 			const projectDirectory = join(canonicalAgentDir, "sessions", encodePathForStorage(manifest.cwd));
-			leases.push(acquireModeProjectMutationLease(projectDirectory, manifest.mode));
+			leases.push(acquireProjectMutationLease(projectDirectory));
 			const sessionsRoot = join(canonicalAgentDir, "sessions");
 			for (const path of manifest.targets
 				.map((target) => target.original)

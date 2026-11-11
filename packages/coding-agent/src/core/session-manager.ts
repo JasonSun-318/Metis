@@ -22,7 +22,6 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { canonicalizePathForCreation, encodePathForStorage, normalizePath, resolvePath } from "../utils/paths.ts";
 import { trashPathsSync } from "../utils/trash.ts";
-import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import {
 	assertContextRewriteBatch,
 	type ContextRewriteBatch,
@@ -39,12 +38,6 @@ import {
 import { hasSessionImages, IndexedSessionRecords } from "./indexed-session-records.ts";
 import type { PersistedToolOutput } from "./large-tool-output.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
-import {
-	recoverInterruptedProjectTrash as recoverProjectTrash,
-	type TrashModeProjectDataInput,
-	type TrashModeProjectDataResult,
-	trashModeProjectData as trashProjectData,
-} from "./mode-project-delete.ts";
 import type { PermissionManualReason } from "./permissions/reviewer.ts";
 import {
 	DEFAULT_PERMISSION_PRESET,
@@ -60,6 +53,12 @@ import {
 	reducePlanState,
 	type StoredPlan,
 } from "./plan-state.ts";
+import {
+	recoverInterruptedProjectTrash as recoverProjectTrash,
+	type TrashProjectDataInput,
+	type TrashProjectDataResult,
+	trashProjectData,
+} from "./project-delete.ts";
 import {
 	type DurableImageRef,
 	isRuntimeControlEntryType,
@@ -109,12 +108,7 @@ import {
 } from "./session-file-paths.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import { getOwnedSessionJournalArtifacts, openSessionJournal, type SessionJournal } from "./session-journal.ts";
-import {
-	acquireModeProjectMutationLease,
-	inspectSessionLease,
-	SessionLease,
-	SessionLeaseError,
-} from "./session-lease.ts";
+import { acquireProjectMutationLease, inspectSessionLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { MAX_SESSION_RECORD_BYTES, SESSION_READ_BUFFER_BYTES } from "./session-limits.ts";
 import {
 	readSessionDisplayMetadata,
@@ -698,7 +692,6 @@ export interface SessionHeader {
 	id: string;
 	timestamp: string;
 	cwd: string;
-	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
 	permissionPreset?: PermissionPreset;
 	parentSession?: string;
@@ -732,7 +725,6 @@ export type { CwdOrigin } from "./session-workspace.ts";
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
-	mode?: AgentMode;
 	cwdOrigin?: CwdOrigin;
 	permissionPreset?: PermissionPreset;
 	agent?: SessionHeader["agent"];
@@ -947,8 +939,6 @@ export interface SessionInfo {
 	id: string;
 	/** Working directory where the session was started. Empty string for old sessions. */
 	cwd: string;
-	/** Immutable session classification. Missing legacy values resolve to code. */
-	mode: AgentMode;
 	/** User-defined display name from session_info entries. */
 	name?: string;
 	/** Path to the parent session (if this session was forked). */
@@ -976,7 +966,6 @@ export type ReadonlySessionManager = Pick<
 	| "getBranch"
 	| "buildContextEntries"
 	| "getHeader"
-	| "getMode"
 	| "getCwdOrigin"
 	| "getPermissionPreset"
 	| "getPermissionSettings"
@@ -1023,7 +1012,6 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getBranch: (fromId?: string) => manager.getBranch(fromId),
 		buildContextEntries: () => manager.buildContextEntries(),
 		getHeader: () => manager.getHeader(),
-		getMode: () => manager.getMode(),
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionPreset: () => manager.getPermissionPreset(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
@@ -1490,12 +1478,7 @@ function createPersistedSessionState(
 	ensureDirectoryDurablySync(dirname(storagePath));
 	const header = fileEntries[0] as SessionHeader;
 	let projectLease =
-		mode === "create"
-			? acquireModeProjectMutationLease(
-					projectSessionDirForCreate(storagePath, header),
-					header.mode ?? DEFAULT_AGENT_MODE,
-				)
-			: undefined;
+		mode === "create" ? acquireProjectMutationLease(projectSessionDirForCreate(storagePath, header)) : undefined;
 	let lease: SessionLease | undefined;
 	let journal: SessionJournal<FileEntry> | undefined;
 	try {
@@ -1649,10 +1632,7 @@ function openPersistedSessionState(
 		} catch (error) {
 			if (!options.createIfMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			const header = emptyHeader();
-			projectLease = acquireModeProjectMutationLease(
-				projectSessionDirForCreate(storagePath, header),
-				header.mode ?? DEFAULT_AGENT_MODE,
-			);
+			projectLease = acquireProjectMutationLease(projectSessionDirForCreate(storagePath, header));
 			records = [header];
 			journal = openSessionJournal<FileEntry>(storagePath, {
 				...journalOptions(storagePath, lease, filePath),
@@ -1664,10 +1644,7 @@ function openPersistedSessionState(
 			const result = journal.readStrict();
 			if (result.records.length === 0) {
 				const header = emptyHeader();
-				projectLease = acquireModeProjectMutationLease(
-					projectSessionDirForCreate(storagePath, header),
-					header.mode ?? DEFAULT_AGENT_MODE,
-				);
+				projectLease = acquireProjectMutationLease(projectSessionDirForCreate(storagePath, header));
 				records = [header];
 				journal.replaceAtomically(records);
 			} else {
@@ -1798,7 +1775,6 @@ export class SessionManager {
 			id: createSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: this.cwd,
-			mode: DEFAULT_AGENT_MODE,
 			cwdOrigin: "user-selected",
 			permissionPreset: DEFAULT_PERMISSION_PRESET,
 		});
@@ -1818,7 +1794,6 @@ export class SessionManager {
 		}
 		const sessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
-		const mode = options?.mode ?? this.getMode();
 		const requestedPermissionPreset = options?.permissionPreset;
 		const permissionPreset =
 			requestedPermissionPreset === undefined
@@ -1851,7 +1826,6 @@ export class SessionManager {
 			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
-			mode,
 			cwdOrigin: options?.cwdOrigin ?? "user-selected",
 			permissionPreset,
 			parentSession: options?.parentSession,
@@ -1967,10 +1941,6 @@ export class SessionManager {
 		return [this.primaryWorkspaceRoot, ...this.additionalDirectories];
 	}
 
-	private _assertCodeWorkspaceDirectories(): void {
-		if (this.getMode() !== "code") throw new Error("Additional directories are only available in Code mode");
-	}
-
 	private _validateDirectoryInput(input: string): string {
 		if (typeof input !== "string" || !input.trim()) throw new TypeError("Directory path must not be empty");
 		if (/[\u0000-\u001f\u007f-\u009f]/u.test(input))
@@ -1979,7 +1949,6 @@ export class SessionManager {
 	}
 
 	addWorkspaceDirectory(input: string): WorkspaceDirectoryChange {
-		this._assertCodeWorkspaceDirectories();
 		const resolved = this._validateDirectoryInput(input);
 		let path: string;
 		try {
@@ -1997,7 +1966,6 @@ export class SessionManager {
 	}
 
 	removeWorkspaceDirectory(input: string): WorkspaceDirectoryChange {
-		this._assertCodeWorkspaceDirectories();
 		const path = canonicalizePathForCreation(this._validateDirectoryInput(input));
 		if (path === this.primaryWorkspaceRoot) throw new Error("Primary working directory cannot be removed");
 		if (!this.additionalDirectories.includes(path)) return { path, changed: false };
@@ -2774,11 +2742,6 @@ export class SessionManager {
 		return h ? { ...(h as SessionHeader) } : null;
 	}
 
-	/** Get the effective immutable session classification mode. */
-	getMode(): AgentMode {
-		return this.getHeader()?.mode ?? DEFAULT_AGENT_MODE;
-	}
-
 	/** Whether Metis owns the working directory or the user selected it. */
 	getCwdOrigin(): CwdOrigin {
 		return this.cwdOrigin;
@@ -3040,7 +3003,6 @@ export class SessionManager {
 			id: sessionId,
 			timestamp,
 			cwd: this.cwd,
-			mode: this.getMode(),
 			cwdOrigin: this.getCwdOrigin(),
 			permissionPreset: this.permissionPreset,
 			parentSession: this.persist ? this.sessionFile : undefined,
@@ -3179,7 +3141,6 @@ export class SessionManager {
 			id: createSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: resolvePath(initialCwd),
-			mode: DEFAULT_AGENT_MODE,
 			cwdOrigin: "user-selected",
 			permissionPreset: DEFAULT_PERMISSION_PRESET,
 		});
@@ -3290,7 +3251,7 @@ export class SessionManager {
 	 * @param cwd Working directory
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.metis/agent/sessions/<encoded-cwd>/).
 	 */
-	static continueRecent(cwd: string, sessionDir?: string, options?: Pick<NewSessionOptions, "mode">): SessionManager {
+	static continueRecent(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
 		for (const candidate of findRecentSessionCandidates(dir, filterCwd ? cwd : undefined)) {
@@ -3348,7 +3309,6 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: resolvedTargetCwd,
-			mode: sourceHeader.mode ?? DEFAULT_AGENT_MODE,
 			cwdOrigin: sourceHeader.cwdOrigin ?? "user-selected",
 			permissionPreset: sourcePreset,
 			parentSession: resolvedSourcePath,
@@ -3532,8 +3492,8 @@ export class SessionManager {
 		}
 	}
 
-	/** Move one closed mode-project and its proven-owned data to the OS Trash atomically. */
-	static async trashModeProjectData(input: TrashModeProjectDataInput): Promise<TrashModeProjectDataResult> {
+	/** Move one closed project and its proven-owned data to the OS Trash atomically. */
+	static async trashProjectData(input: TrashProjectDataInput): Promise<TrashProjectDataResult> {
 		return trashProjectData(input, {
 			readSessionHeader: (path) =>
 				structuredClone(

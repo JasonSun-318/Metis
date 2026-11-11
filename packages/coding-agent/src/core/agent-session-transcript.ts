@@ -1,12 +1,10 @@
 import type { AssistantMessage } from "@metis/ai/compat";
-import type { AgentMode } from "./agent-mode.ts";
 import type { ContextUsage } from "./extensions/index.ts";
 import { sessionToolCallCount } from "./indexed-session-records.ts";
 import type { PermissionPreset } from "./permissions/settings.ts";
 import type { CwdOrigin, SessionEntry } from "./session-manager.ts";
 
 export interface SessionStats {
-	mode: AgentMode;
 	cwd: string;
 	cwdOrigin: CwdOrigin;
 	permissionPreset: PermissionPreset;
@@ -51,7 +49,6 @@ export function listUserMessagesForForking(entries: readonly SessionEntry[]): Ar
 
 export function buildSessionStats(options: {
 	entries: readonly SessionEntry[];
-	mode: AgentMode;
 	cwd: string;
 	cwdOrigin: CwdOrigin;
 	permissionPreset: PermissionPreset;
@@ -92,7 +89,6 @@ export function buildSessionStats(options: {
 	}
 
 	return {
-		mode: options.mode,
 		cwd: options.cwd,
 		cwdOrigin: options.cwdOrigin,
 		permissionPreset: options.permissionPreset,

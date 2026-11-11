@@ -1,5 +1,4 @@
 import { APP_NAME } from "../config.ts";
-import type { AgentMode } from "./agent-mode.ts";
 import type { SourceInfo } from "./source-info.ts";
 
 export type SlashCommandSource = "extension" | "prompt" | "skill";
@@ -15,7 +14,6 @@ export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
 	argumentHint?: string;
-	modes?: readonly AgentMode[];
 }
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
@@ -35,20 +33,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "trust", description: "Save project trust decision for future sessions" },
 	{ name: "login", description: "Configure provider authentication", argumentHint: "<provider>" },
 	{ name: "logout", description: "Remove provider authentication" },
-	{ name: "new", description: "Start a new session", argumentHint: "[chat|code]" },
-	{
-		name: "add-dir",
-		description: "Add a working directory to this Code session",
-		argumentHint: "<path>",
-		modes: ["code"],
-	},
-	{
-		name: "remove-dir",
-		description: "Remove an added working directory",
-		argumentHint: "<path>",
-		modes: ["code"],
-	},
-	{ name: "dirs", description: "List this Code session's working directories", modes: ["code"] },
+	{ name: "new", description: "Start a new session" },
+	{ name: "add-dir", description: "Add a working directory to this session", argumentHint: "<path>" },
+	{ name: "remove-dir", description: "Remove an added working directory", argumentHint: "<path>" },
+	{ name: "dirs", description: "List this session's working directories" },
 	{ name: "compact", description: "Manually compact the session context" },
 	{ name: "resume", description: "Resume a different session" },
 	{
@@ -56,12 +44,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Show or toggle long-term memory",
 		argumentHint: "[on|off|use on|off|contribute on|off|undo [id]|undo-run <runId>|dream]",
 	},
-	{ name: "schedule", description: "Manage scheduled tasks", modes: ["chat"] },
 	{ name: "mcp", description: "Open MCP server manager" },
 	{ name: "reload", description: "Reload resources, context files, and memory" },
 	{ name: "quit", description: `Quit ${APP_NAME}` },
 ];
 
-export function getBuiltinSlashCommands(mode: AgentMode): readonly BuiltinSlashCommand[] {
-	return BUILTIN_SLASH_COMMANDS.filter((command) => !command.modes || command.modes.includes(mode));
+export function getBuiltinSlashCommands(): readonly BuiltinSlashCommand[] {
+	return BUILTIN_SLASH_COMMANDS;
 }

@@ -4,11 +4,10 @@ import { lstat, open, readdir } from "fs/promises";
 import { join } from "path";
 import { setImmediate as yieldToEventLoop } from "timers/promises";
 import { TextDecoder } from "util";
-import { DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { DEFAULT_PERMISSION_PRESET } from "./permissions/settings.ts";
 import { isRuntimeControlEntryType } from "./runtime-recovery.ts";
 import { formatSessionAttachmentDisplayText } from "./session-attachments.ts";
-import { isSessionControlEntryType, isSessionDirectoryControlEntryType } from "./session-control.ts";
+import { isSessionControlEntryType } from "./session-control.ts";
 import { CorruptSessionError } from "./session-journal.ts";
 import { MAX_SESSION_RECORD_BYTES, SESSION_READ_BUFFER_BYTES } from "./session-limits.ts";
 import type { SessionEntry, SessionHeader, SessionInfo, SessionMessageEntry } from "./session-manager.ts";
@@ -132,9 +131,6 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 		return;
 	}
 	if (isSessionControlEntryType(type)) {
-		if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
-			corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
-		}
 		validateControlGraphEntry(
 			parseSessionControlRecord(raw, index + 1, filePath),
 			index + 1,
@@ -304,7 +300,6 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			path: filePath,
 			id: header.id,
 			cwd: header.cwd,
-			mode: header.mode ?? DEFAULT_AGENT_MODE,
 			name: state.name,
 			parentSessionPath: header.parentSession,
 			...(header.scheduled ? { scheduled: header.scheduled } : {}),
