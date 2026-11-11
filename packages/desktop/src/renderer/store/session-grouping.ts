@@ -1,14 +1,14 @@
-import type { AgentMode, SessionSummary } from "@metis/app-protocol";
+import type { SessionSummary } from "@metis/app-protocol";
 import type { AgentActivity } from "../agent-activity.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
-import { loadWorkMode } from "../work-mode.ts";
+import { loadWorkMode, type WorkMode } from "../work-mode.ts";
 import type { AppStoreSnapshot } from "./app-store.ts";
 
 const SESSION_GROUPING_KEY = "metis.session-grouping.v1";
 const DAY_MS = 86_400_000;
 
 export type SessionGroupBy = "date" | "project" | "status" | "unread" | "none";
-export type SessionGroupingPreferences = Readonly<Record<AgentMode, SessionGroupBy>>;
+export type SessionGroupingPreferences = Readonly<Record<WorkMode, SessionGroupBy>>;
 
 export interface SessionSection {
 	readonly key: string;

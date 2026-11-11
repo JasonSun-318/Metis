@@ -21,7 +21,6 @@ describe("SessionStatusPanel", () => {
 					onClose={onClose}
 					status={{
 						sessionId: "session-1",
-						mode: "code",
 						contextTokens: 64_000,
 						contextWindow: 128_000,
 						contextBasis: "reported_total",
@@ -84,7 +83,6 @@ describe("SessionStatusPanel", () => {
 					onClose={() => undefined}
 					status={{
 						sessionId: "session-1",
-						mode: "code",
 						contextTokens: 144_000,
 						contextWindow: 128_000,
 						contextBasis: "estimated_total",
@@ -114,7 +112,6 @@ describe("SessionStatusPanel", () => {
 					onClose={() => undefined}
 					status={{
 						sessionId: "session-1",
-						mode: "code",
 						contextTokens: 64_000,
 						contextWindow: 128_000,
 						contextBasis: "reported_total",

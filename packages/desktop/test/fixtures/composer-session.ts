@@ -48,7 +48,6 @@ export function composerSnapshot(overrides: Partial<SessionSnapshot> = {}): Sess
 	return {
 		session: {
 			sessionId: COMPOSER_SESSION_ID,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			cwd: "/tmp/composer-fixture",
 			name: "Composer layout verification",

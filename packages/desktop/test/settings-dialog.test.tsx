@@ -60,8 +60,6 @@ const profileSummary = {
 	currentStreakDays: 0,
 	longestStreakDays: 0,
 	sessionCount: 0,
-	mostUsedMode: null,
-	mostUsedModePercent: 0,
 	mostUsedThinkingLevel: null,
 	mostUsedThinkingLevelPercent: 0,
 	usedSkillCount: 0,
@@ -73,8 +71,6 @@ const profileSummary = {
 function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date(Date.UTC(2026, 7, 8 - rangeDays + index + 1)).toISOString().slice(0, 10),
-		chatTokens: index === rangeDays - 1 ? 20 : 0,
-		codeTokens: index === rangeDays - 1 ? 80 : 0,
 		inputTokens: index === rangeDays - 1 ? 60 : 0,
 		outputTokens: index === rangeDays - 1 ? 40 : 0,
 		cacheReadTokens: 0,
@@ -88,11 +84,7 @@ function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 		outputTokens: 40,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
-		chatTokens: 20,
-		codeTokens: 80,
 		sessionCount: 2,
-		chatSessionCount: 1,
-		codeSessionCount: 1,
 		daily,
 		topModels: [{ provider: "openai", modelId: "gpt-5", totalTokens: 100 }],
 	};

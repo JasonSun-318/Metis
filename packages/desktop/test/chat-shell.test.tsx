@@ -65,10 +65,9 @@ const CHANGELOG: DesktopChangelog = {
 	],
 };
 
-function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: string): SessionSummary {
+function session(sessionId: string, cwd: string, name?: string): SessionSummary {
 	return {
 		sessionId,
-		mode,
 		cwdOrigin: "user-selected",
 		cwd,
 		...(name ? { name } : {}),
@@ -329,8 +328,8 @@ function createHarness(
 		"metis.session-grouping.v1",
 		localStorage.getItem("metis.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
 	);
-	const chat = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
-	const code = session("code-existing", "code", "/work/code-project", "Code project task");
+	const chat = session("chat-existing", "/work/chat-project", "Chat project task");
+	const code = session("code-existing", "/work/code-project", "Code project task");
 	let sessions = options.sessions ? [...options.sessions] : [chat, code];
 	let failFirstOpen = options.failFirstOpen ?? false;
 	let loseFirstCreateResponse = options.loseFirstCreateResponse ?? false;
@@ -423,24 +422,18 @@ function createHarness(
 		previewProjectDelete: vi.fn(async (input) => ({
 			ok: true as const,
 			result: {
-				mode: input.mode,
 				cwd: input.cwd,
-				sessionCount: sessions.filter(
-					(candidate) => candidate.mode === input.mode && candidate.cwd === input.cwd && !candidate.scheduled,
-				).length,
+				sessionCount: sessions.filter((candidate) => candidate.cwd === input.cwd && !candidate.scheduled).length,
 				blockingScheduleCount: 0,
 				revision: "a".repeat(64),
 			},
 		})),
 		deleteProject: vi.fn(async (input) => {
 			const before = sessions.length;
-			sessions = sessions.filter(
-				(candidate) =>
-					candidate.mode !== input.mode || candidate.cwd !== input.cwd || candidate.scheduled !== undefined,
-			);
+			sessions = sessions.filter((candidate) => candidate.cwd !== input.cwd || candidate.scheduled !== undefined);
 			return {
 				ok: true as const,
-				result: { mode: input.mode, cwd: input.cwd, deletedSessionCount: before - sessions.length },
+				result: { cwd: input.cwd, deletedSessionCount: before - sessions.length },
 			};
 		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
@@ -575,14 +568,8 @@ function createHarness(
 		}),
 		createSession: vi.fn(async (input) => {
 			order.push("create");
-			const createdMode = input.mode ?? "code";
 			const created = createdByRequestId.get(input.requestId) ?? {
-				...session(
-					createdMode === "chat" ? "chat-created" : "code-created",
-					createdMode,
-					input.cwd ?? `/managed/${createdMode}-created`,
-					input.name,
-				),
+				...session("chat-created", input.cwd ?? "/managed/created", input.name),
 				cwdOrigin: input.cwd ? "user-selected" : "managed",
 			};
 			if (!createdByRequestId.has(input.requestId)) {
@@ -665,7 +652,6 @@ function createHarness(
 		readProcess: vi.fn().mockResolvedValue({ total: 0, index: 0, process: null }),
 		getSessionStatus: vi.fn(async ({ sessionId }) => ({
 			sessionId,
-			mode: "code" as const,
 			contextTokens: 64_000,
 			contextWindow: 128_000,
 			contextBasis: "reported_total" as const,
@@ -779,7 +765,7 @@ afterEach(() => {
 describe("Chat desktop shell", () => {
 	it("streams visible text without rerendering the sessions sidebar", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-stream", "chat", "/work/chat-project", "Streaming task");
+		const active = session("chat-stream", "/work/chat-project", "Streaming task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api, emitEvent } = createHarness({ sessions: [active] });
 		vi.mocked(api.openSession).mockResolvedValue({
@@ -836,7 +822,7 @@ describe("Chat desktop shell", () => {
 
 	it("does not rerender the workspace shell on item deltas", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-shell-delta", "chat", "/work/chat-project", "Streaming task");
+		const active = session("chat-shell-delta", "/work/chat-project", "Streaming task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api, emitEvent } = createHarness({ sessions: [active] });
 		vi.mocked(api.openSession).mockResolvedValue({
@@ -933,7 +919,7 @@ describe("Chat desktop shell", () => {
 		"dismisses memory event notifications after five seconds without replaying older notices (%s)",
 		async (locale) => {
 			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-			const active = session("chat-memory", "chat", "/work/chat-project", "Memory");
+			const active = session("chat-memory", "/work/chat-project", "Memory");
 			localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 			const { api, emitEvent } = createHarness({ sessions: [active] });
 			const store = new AppStore();
@@ -1003,7 +989,7 @@ describe("Chat desktop shell", () => {
 
 	it("constrains the tools sidebar on resize without overwriting its session preference", async () => {
 		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-		const active = session("chat-width", "chat", "/work/chat-project", "Width");
+		const active = session("chat-width", "/work/chat-project", "Width");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const key = `metis.tools-sidebar-width.v2:${active.sessionId}`;
 		localStorage.setItem(key, "850");
@@ -1038,8 +1024,8 @@ describe("Chat desktop shell", () => {
 
 	it("shares the last tools sidebar width across sessions and restores it after remount", async () => {
 		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-		const first = session("chat-width-first", "chat", "/work/chat-project", "Width first");
-		const second = session("chat-width-second", "chat", "/work/chat-project", "Width second");
+		const first = session("chat-width-first", "/work/chat-project", "Width first");
+		const second = session("chat-width-second", "/work/chat-project", "Width second");
 		localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
 		localStorage.setItem(`metis.tools-sidebar-width.v2:${second.sessionId}`, "580");
 		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
@@ -1088,7 +1074,7 @@ describe("Chat desktop shell", () => {
 
 	it("restores the shared tools sidebar width after a narrow startup ahead of legacy preferences", async () => {
 		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-		const active = session("chat-width-shared", "chat", "/work/chat-project", "Shared width");
+		const active = session("chat-width-shared", "/work/chat-project", "Shared width");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		localStorage.setItem("metis.tools-sidebar-width.v3", "850");
 		localStorage.setItem(`metis.tools-sidebar-width.v2:${active.sessionId}`, "500");
@@ -1121,8 +1107,8 @@ describe("Chat desktop shell", () => {
 		"uses legacy tools sidebar widths until the first adjustment when the shared preference is %s",
 		async (stored) => {
 			Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-			const first = session("chat-width-legacy-first", "chat", "/work/chat-project", "Legacy first");
-			const second = session("chat-width-legacy-second", "chat", "/work/chat-project", "Legacy second");
+			const first = session("chat-width-legacy-first", "/work/chat-project", "Legacy first");
+			const second = session("chat-width-legacy-second", "/work/chat-project", "Legacy second");
 			localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
 			if (stored !== null) localStorage.setItem("metis.tools-sidebar-width.v3", stored);
 			localStorage.setItem(`metis.tools-sidebar-width.v2:${first.sessionId}`, "500");
@@ -1165,8 +1151,8 @@ describe("Chat desktop shell", () => {
 		"keeps the adjusted tools sidebar width in memory when preference %s fails",
 		async (failure) => {
 			Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-			const first = session("chat-width-failure-first", "chat", "/work/chat-project", "Failure first");
-			const second = session("chat-width-failure-second", "chat", "/work/chat-project", "Failure second");
+			const first = session("chat-width-failure-first", "/work/chat-project", "Failure first");
+			const second = session("chat-width-failure-second", "/work/chat-project", "Failure second");
 			const preferenceKey = "metis.tools-sidebar-width.v3";
 			localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
 			localStorage.setItem(preferenceKey, "500");
@@ -1286,12 +1272,12 @@ describe("Chat desktop shell", () => {
 		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
 		const sessions = [
 			{
-				...session("chat-today", "chat", "/work/shared", "Today unread"),
+				...session("chat-today", "/work/shared", "Today unread"),
 				updatedAt: now.toISOString(),
 				unread: true,
 			},
-			{ ...session("chat-yesterday", "chat", "/work/shared", "Yesterday read"), updatedAt: yesterday.toISOString() },
-			{ ...session("code-today", "code", "/work/shared", "Code today"), updatedAt: now.toISOString() },
+			{ ...session("chat-yesterday", "/work/shared", "Yesterday read"), updatedAt: yesterday.toISOString() },
+			{ ...session("code-today", "/work/shared", "Code today"), updatedAt: now.toISOString() },
 		];
 		const { api } = createHarness({ sessions });
 		localStorage.removeItem("metis.session-grouping.v1");
@@ -1355,7 +1341,7 @@ describe("Chat desktop shell", () => {
 			y: 730,
 			toJSON: () => ({}),
 		} as DOMRect;
-		const { api } = createHarness({ sessions: [session("chat-bottom", "chat", "/work/bottom", "Bottom task")] });
+		const { api } = createHarness({ sessions: [session("chat-bottom", "/work/bottom", "Bottom task")] });
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -1728,7 +1714,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/work/selected-project",
 				name: "Set up a scheduled task",
 			}),
@@ -1771,25 +1756,28 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		const create = vi.mocked(api.createSession).mock.calls[0]![0];
-		expect(create).toMatchObject({ mode: "chat", name: "Set up a scheduled task" });
+		expect(create).toMatchObject({ name: "Set up a scheduled task" });
 		expect(create).not.toHaveProperty("cwd");
 		expect(api.selectProjectFolder).not.toHaveBeenCalled();
 		expect(api.startTurn).toHaveBeenCalledTimes(1);
 		await act(async () => root.unmount());
 	});
 
-	it("round-trips unified project preferences without splitting Unicode aliases", () => {
-		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", `  ${"🚀".repeat(81)}  `);
-		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
-		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code alias");
+	it("round-trips cwd-only project preferences without splitting Unicode aliases", () => {
+		let preferences = setProjectAlias(new Map(), "/work/shared", `  ${"🚀".repeat(81)}  `);
+		preferences = setProjectPinned(preferences, "/work/shared", true);
+		preferences = setProjectAlias(preferences, "/work/other", "Other alias");
 		saveProjectPreferences(localStorage, preferences);
 
 		const loaded = loadProjectPreferences(localStorage);
 		expect([...loaded.values()]).toEqual(
-			expect.arrayContaining([{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true }]),
+			expect.arrayContaining([
+				{ cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true },
+				{ cwd: "/work/other", alias: "Other alias", pinned: false },
+			]),
 		);
-		const withoutChat = removeProjectPreference(loaded, "chat", "/work/shared");
-		expect([...withoutChat.values()]).toEqual([]);
+		const withoutOther = removeProjectPreference(loaded, "/work/other");
+		expect([...withoutOther.values()]).toEqual([{ cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true }]);
 	});
 
 	it("ignores malformed project preference documents and invalid entries", () => {
@@ -1797,32 +1785,49 @@ describe("Chat desktop shell", () => {
 			"{broken",
 			JSON.stringify({ version: 2, entries: [] }),
 			JSON.stringify({ version: 1, entries: [], unknown: true }),
-			JSON.stringify({ version: 1, entries: [{ mode: "other", cwd: "/work/a", pinned: false }] }),
-			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "", pinned: false }] }),
-			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: "yes" }] }),
-			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: false, extra: 1 }] }),
+			JSON.stringify({ version: 1, entries: [{ cwd: "", pinned: false }] }),
+			JSON.stringify({ version: 1, entries: [{ cwd: "/work/a", pinned: "yes" }] }),
+			JSON.stringify({ version: 1, entries: [{ cwd: "/work/a", pinned: false, extra: 1 }] }),
+			JSON.stringify({ version: 1, entries: [{ mode: "chat", cwd: "/work/a", pinned: false }] }),
 		]) {
-			localStorage.setItem("metis.projectPreferences.v1", value);
+			localStorage.setItem("metis.projectPreferences.v3", value);
 			expect(loadProjectPreferences(localStorage).size).toBe(0);
 		}
 	});
 
-	it("shares aliases across modes, clears blank aliases, and stably partitions pinned projects", () => {
+	it("reads legacy mode-keyed entries by cwd while ignoring the mode", () => {
+		localStorage.setItem("metis.work-mode.v1", "code");
+		localStorage.setItem(
+			"metis.projectPreferences.v2",
+			JSON.stringify({
+				version: 1,
+				entries: [
+					{ mode: "chat", cwd: "/work/a", alias: "Chat alias", pinned: false },
+					{ mode: "code", cwd: "/work/a", alias: "Code alias", pinned: true },
+				],
+			}),
+		);
+		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
+			{ cwd: "/work/a", alias: "Code alias", pinned: true },
+		]);
+	});
+
+	it("shares aliases, clears blank aliases, and stably partitions pinned projects", () => {
 		const store = new AppStore();
 		store.setSessions({
 			sessions: [
-				session("chat-a", "chat", "/work/a", "A"),
-				session("chat-b", "chat", "/work/b", "B"),
-				session("chat-c", "chat", "/work/c", "C"),
-				session("code-a", "code", "/work/a", "Code A"),
+				session("chat-a", "/work/a", "A"),
+				session("chat-b", "/work/b", "B"),
+				session("chat-c", "/work/c", "C"),
+				session("code-a", "/work/a", "Code A"),
 			],
 			nextAfterSessionId: null,
 		});
-		let preferences = setProjectAlias(new Map(), "chat", "/work/a", "Chat A");
-		preferences = setProjectAlias(preferences, "code", "/work/a", "Code A alias");
-		preferences = setProjectPinned(preferences, "chat", "/work/b", true);
-		preferences = setProjectPinned(preferences, "chat", "/work/c", true);
-		preferences = setProjectAlias(preferences, "chat", "/work/a", "   ");
+		let preferences = setProjectAlias(new Map(), "/work/a", "Chat A");
+		preferences = setProjectAlias(preferences, "/work/a", "Code A alias");
+		preferences = setProjectPinned(preferences, "/work/b", true);
+		preferences = setProjectPinned(preferences, "/work/c", true);
+		preferences = setProjectAlias(preferences, "/work/a", "   ");
 
 		expect(buildSessionTree(store.getSnapshot(), preferences).projects.map((project) => project.name)).toEqual([
 			"b",
@@ -1839,10 +1844,7 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const store = new AppStore();
 		store.setSessions({
-			sessions: [
-				session("chat-shared", "chat", "/work/shared", "Chat"),
-				session("code-other", "code", "/work/other", "Code"),
-			],
+			sessions: [session("chat-shared", "/work/shared", "Chat"), session("code-other", "/work/other", "Code")],
 			nextAfterSessionId: null,
 		});
 		const listSkills = vi.fn().mockResolvedValue({
@@ -1920,7 +1922,6 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/work/chat-project",
 			}),
 		);
@@ -1948,7 +1949,7 @@ describe("Chat desktop shell", () => {
 
 	it("submits an unnamed session without renderer-side naming", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const unnamed = session("chat-unnamed", "chat", "/work/chat-project");
+		const unnamed = session("chat-unnamed", "/work/chat-project");
 		localStorage.setItem("metis.activeSessionId.chat", unnamed.sessionId);
 		const { api } = createHarness({ sessions: [unnamed] });
 		const container = document.createElement("div");
@@ -1972,18 +1973,18 @@ describe("Chat desktop shell", () => {
 
 	it("groups scheduled tasks separately and deletes their generated sessions from the row action", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const ordinary = session("chat-session-ordinary", "chat", "/work/shared", "Ordinary task");
+		const ordinary = session("chat-session-ordinary", "/work/shared", "Ordinary task");
 		const loose = {
-			...session("chat-session-loose", "chat", "/work/managed", "Loose task"),
+			...session("chat-session-loose", "/work/managed", "Loose task"),
 			cwdOrigin: "managed" as const,
 		};
 		const task = scheduledTask();
 		const scheduledRun = {
-			...session("chat-session-scheduled", "chat", "/work/shared", "Generated run"),
+			...session("chat-session-scheduled", "/work/shared", "Generated run"),
 			scheduled: { taskId: task.id, runId: "30000000-0000-4000-8000-000000000001" },
 		};
 		const retainedScheduledRun = {
-			...session("chat-session-retained", "chat", "/work/retained", "检查桌面文件"),
+			...session("chat-session-retained", "/work/retained", "检查桌面文件"),
 			scheduled: {
 				taskId: "40000000-0000-4000-8000-000000000001",
 				runId: "50000000-0000-4000-8000-000000000001",
@@ -2071,10 +2072,10 @@ describe("Chat desktop shell", () => {
 
 	it("renames and deletes ordinary sessions", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-session-active", "chat", "/work/shared", "Active task");
-		const other = session("chat-session-other", "chat", "/work/shared", "Other task");
+		const active = session("chat-session-active", "/work/shared", "Active task");
+		const other = session("chat-session-other", "/work/shared", "Other task");
 		const running = {
-			...session("chat-session-running", "chat", "/work/shared", "Running task"),
+			...session("chat-session-running", "/work/shared", "Running task"),
 			state: "running" as const,
 		};
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
@@ -2147,32 +2148,32 @@ describe("Chat desktop shell", () => {
 	it("shows outcome notifications only until the user views that session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const active = {
-			...session("chat-active", "chat", "/work/shared", "Active task"),
+			...session("chat-active", "/work/shared", "Active task"),
 			unread: true,
 			lastTurnOutcome: "completed" as const,
 		};
 		const completed = {
-			...session("chat-completed", "chat", "/work/shared", "Completed task"),
+			...session("chat-completed", "/work/shared", "Completed task"),
 			unread: true,
 			lastTurnOutcome: "completed" as const,
 		};
 		const restarted = {
-			...session("chat-restarted", "chat", "/work/shared", "Restarted task"),
+			...session("chat-restarted", "/work/shared", "Restarted task"),
 			state: "running" as const,
 			unread: true,
 			lastTurnOutcome: "completed" as const,
 		};
 		const failed = {
-			...session("chat-failed", "chat", "/work/shared", "Failed task"),
+			...session("chat-failed", "/work/shared", "Failed task"),
 			unread: true,
 			lastTurnOutcome: "failed" as const,
 		};
 		const read = {
-			...session("chat-read", "chat", "/work/shared", "Read task"),
+			...session("chat-read", "/work/shared", "Read task"),
 			lastTurnOutcome: "completed" as const,
 		};
 		const attention = {
-			...session("chat-attention", "chat", "/work/shared", "Attention task"),
+			...session("chat-attention", "/work/shared", "Attention task"),
 			state: "running" as const,
 			unread: true,
 			lastTurnOutcome: "failed" as const,
@@ -2209,7 +2210,7 @@ describe("Chat desktop shell", () => {
 
 	it("exposes rename, pin, copy, and delete through the session actions", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-header-actions", "chat", "/work/shared", "Active task");
+		const active = session("chat-header-actions", "/work/shared", "Active task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api } = createHarness({ sessions: [active] });
 		const container = document.createElement("div");
@@ -2283,7 +2284,7 @@ describe("Chat desktop shell", () => {
 
 	it("reuses the session delete request id after a lost response", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-delete-retry", "chat", "/work/retry", "Retry task");
+		const active = session("chat-delete-retry", "/work/retry", "Retry task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api } = createHarness({ sessions: [active] });
 		vi.mocked(api.deleteSession).mockRejectedValueOnce(new Error("delete response lost"));
@@ -2338,8 +2339,8 @@ describe("Chat desktop shell", () => {
 	it("renames and pins the unified project without mutating sessions or Desktop APIs", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const sharedSessions = [
-			session("chat-shared-row", "chat", "/work/shared", "Chat session"),
-			session("code-shared-row", "code", "/work/shared", "Code session"),
+			session("chat-shared-row", "/work/shared", "Chat session"),
+			session("code-shared-row", "/work/shared", "Code session"),
 		];
 		const journalFixture = JSON.stringify(sharedSessions);
 		const { api } = createHarness({ sessions: sharedSessions });
@@ -2394,31 +2395,29 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("previews both legacy modes, blocks schedules and removes the whole project", async () => {
+	it("previews one cwd project, blocks schedules and removes the whole project", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const chatActive = session("chat-delete-active", "chat", "/work/shared", "Chat active");
+		const chatActive = session("chat-delete-active", "/work/shared", "Chat active");
 		const chatArchived = {
-			...session("chat-delete-archived", "chat", "/work/shared", "Chat archived"),
+			...session("chat-delete-archived", "/work/shared", "Chat archived"),
 			archived: true,
 		};
-		const code = session("code-delete-preserved", "code", "/work/shared", "Code preserved");
-		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", "Chat local");
-		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
-		preferences = setProjectAlias(preferences, "code", "/work/shared", "Code local");
+		const code = session("code-delete-preserved", "/work/shared", "Code preserved");
+		let preferences = setProjectAlias(new Map(), "/work/shared", "Chat local");
+		preferences = setProjectPinned(preferences, "/work/shared", true);
 		saveProjectPreferences(localStorage, preferences);
 		saveSessionPins(localStorage, new Set([chatActive.sessionId, chatArchived.sessionId, code.sessionId]));
 		localStorage.setItem("metis.activeSessionId.chat", chatActive.sessionId);
 		const { api } = createHarness({ sessions: [chatActive, chatArchived, code] });
 		let previewRound = 0;
-		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
-			if (mode === "chat") previewRound++;
+		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ cwd }) => {
+			previewRound++;
 			return {
 				ok: true,
 				result: {
-					mode,
 					cwd,
-					sessionCount: mode === "chat" ? 2 : 1,
-					blockingScheduleCount: mode === "chat" && previewRound === 1 ? 1 : 0,
+					sessionCount: 3,
+					blockingScheduleCount: previewRound === 1 ? 1 : 0,
 					revision: "b".repeat(64),
 				},
 			};
@@ -2432,7 +2431,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(group, "Project actions").click());
 		await act(async () => button(group, "Delete").click());
 		await flush();
-		expect(api.previewProjectDelete).toHaveBeenCalledWith({ mode: "chat", cwd: "/work/shared" });
+		expect(api.previewProjectDelete).toHaveBeenCalledWith({ cwd: "/work/shared" });
 		expect(projectDialog().textContent).toContain("3 sessions");
 		expect(projectDialog().textContent).toContain("/work/shared");
 		expect(projectDialog().textContent).toContain("source folder and its files are unchanged");
@@ -2448,7 +2447,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.deleteProject).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/work/shared",
 				expectedRevision: "b".repeat(64),
 			}),
@@ -2458,7 +2456,7 @@ describe("Chat desktop shell", () => {
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
 		expect([...loadProjectPreferences(localStorage).values()]).toEqual([]);
 		expect(loadSessionPins(localStorage)).toEqual(new Set());
-		expect(api.deleteProject).toHaveBeenCalledWith(expect.objectContaining({ mode: "code", cwd: "/work/shared" }));
+		expect(api.deleteProject).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/shared" }));
 		await act(async () => button(container, "Code").click());
 		expect(container.textContent).not.toContain("Code preserved");
 		await act(async () => root.unmount());
@@ -2466,7 +2464,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps renderer evidence on delete failure and reloads a fresh preview on Retry", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const chat = session("chat-delete-failure", "chat", "/work/failure", "Keep me");
+		const chat = session("chat-delete-failure", "/work/failure", "Keep me");
 		localStorage.setItem("metis.activeSessionId.chat", chat.sessionId);
 		const { api } = createHarness({ sessions: [chat] });
 		const lostResponse = new Error("delete response was lost");
@@ -2487,11 +2485,11 @@ describe("Chat desktop shell", () => {
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBe(chat.sessionId);
 		await act(async () => button(container, "Retry").click());
 		await flush();
-		expect(api.previewProjectDelete).toHaveBeenCalledTimes(4);
+		expect(api.previewProjectDelete).toHaveBeenCalledTimes(2);
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
 		await flush();
-		expect(api.deleteProject).toHaveBeenCalledTimes(3);
+		expect(api.deleteProject).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(api.deleteProject).mock.calls[0]![0].requestId).toBe(
 			vi.mocked(api.deleteProject).mock.calls[1]![0].requestId,
 		);
@@ -2502,20 +2500,17 @@ describe("Chat desktop shell", () => {
 	it("ignores a delayed preview after another project becomes active", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness({
-			sessions: [
-				session("chat-preview-a", "chat", "/work/a", "A"),
-				session("chat-preview-b", "chat", "/work/b", "B"),
-			],
+			sessions: [session("chat-preview-a", "/work/a", "A"), session("chat-preview-b", "/work/b", "B")],
 		});
 		let resolveA!: (value: { ok: true; result: ClientResult<"project/deletePreview"> }) => void;
-		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
+		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ cwd }) => {
 			if (cwd === "/work/a")
 				return await new Promise((resolve) => {
 					resolveA = resolve;
 				});
 			return {
 				ok: true,
-				result: { mode, cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) },
+				result: { cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) },
 			};
 		});
 		const container = document.createElement("div");
@@ -2537,7 +2532,6 @@ describe("Chat desktop shell", () => {
 			resolveA({
 				ok: true,
 				result: {
-					mode: "chat",
 					cwd: "/canonical/a",
 					sessionCount: 99,
 					blockingScheduleCount: 0,
@@ -2787,7 +2781,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/work/chat-project",
 			}),
 		);
@@ -2919,9 +2912,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		const createInput = vi.mocked(api.createSession).mock.calls[0]![0];
-		expect(createInput).toMatchObject({
-			mode: "chat",
-		});
+		expect(createInput).toMatchObject({});
 		expect(createInput).not.toHaveProperty("cwd");
 		expect(createInput).not.toHaveProperty("name");
 		expect(api.startTurn).toHaveBeenCalledTimes(1);
@@ -2960,7 +2951,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				permissionPreset: "full",
 			}),
 		);
@@ -3093,13 +3083,11 @@ describe("Chat desktop shell", () => {
 						events: [
 							{
 								type: "project/invalidated",
-								mode: "chat",
 								cwd: "/work/chat-project",
 								reason: "reload_required",
 							},
 							{
 								type: "project/invalidated",
-								mode: "chat",
 								cwd: "/work/chat-project",
 								reason: "deleted",
 							},
@@ -3118,8 +3106,8 @@ describe("Chat desktop shell", () => {
 
 	it("marks opened and visibly completed sessions read but preserves background unread state", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = { ...session("chat-existing", "chat", "/work/chat-project", "Active"), unread: true };
-		const background = session("chat-background", "chat", "/work/other", "Background");
+		const active = { ...session("chat-existing", "/work/chat-project", "Active"), unread: true };
+		const background = session("chat-background", "/work/other", "Background");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api, emitEvent } = createHarness({ sessions: [active, background] });
 		const store = new AppStore();
@@ -3174,8 +3162,8 @@ describe("Chat desktop shell", () => {
 
 	it("preserves a completion notification while switching away from the session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-active", "chat", "/work/shared", "Active task");
-		const next = session("chat-next", "chat", "/work/shared", "Next task");
+		const active = session("chat-active", "/work/shared", "Active task");
+		const next = session("chat-next", "/work/shared", "Next task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api, emitEvent } = createHarness({ sessions: [active, next] });
 		const store = new AppStore();
@@ -3224,7 +3212,7 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
-		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
+		const summary = session("chat-existing", "/work/chat-project", "Chat project task");
 		vi.mocked(api.openSession)
 			.mockResolvedValueOnce({ ...snapshot(summary), permissionPreset: "full" })
 			.mockResolvedValueOnce({ ...snapshot(summary), permissionPreset: "ask" });
@@ -3253,7 +3241,7 @@ describe("Chat desktop shell", () => {
 			localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 			const { api, emitEvent } = createHarness();
 			const running = {
-				...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				...session("chat-existing", "/work/chat-project", "Chat project task"),
 				state: "running" as const,
 			};
 			const interactionId = "22222222-2222-4222-8222-222222222222";
@@ -3391,7 +3379,7 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const running = {
-			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			...session("chat-existing", "/work/chat-project", "Chat project task"),
 			state: "running" as const,
 		};
 		vi.mocked(api.openSession).mockResolvedValueOnce({
@@ -3466,7 +3454,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/work/selected-project",
 			}),
 		);
@@ -3500,7 +3487,7 @@ describe("Chat desktop shell", () => {
 		expect(button(container, "Send message").disabled).toBe(false);
 		await act(async () => editor.closest("form")!.requestSubmit());
 		await flush();
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({ mode: "chat" }));
+		expect(api.createSession).toHaveBeenCalledWith(expect.not.objectContaining({ mode: expect.anything() }));
 		expect(vi.mocked(api.createSession).mock.calls[0]![0]).not.toHaveProperty("cwd");
 
 		await act(async () => root.unmount());
@@ -3594,7 +3581,6 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(
 			expect.objectContaining({
-				mode: "chat",
 				cwd: "/Users/test/Metis Projects/Desktop App",
 			}),
 		);
@@ -3760,7 +3746,6 @@ describe("Chat desktop shell", () => {
 		);
 		const status = (tokens: number, contextWindow: number): ClientResult<"session/status"> => ({
 			sessionId: "chat-existing",
-			mode: "code",
 			contextTokens: tokens,
 			contextWindow,
 			contextBasis: "estimated_total",
@@ -3828,7 +3813,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={store} />));
 		await flush();
 		vi.mocked(api.getSessionStatus).mockClear();
-		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
+		const summary = session("chat-existing", "/work/chat-project", "Chat project task");
 		await act(async () =>
 			store.applySnapshot({
 				...snapshot(summary),
@@ -4388,7 +4373,7 @@ describe("Chat desktop shell", () => {
 							{
 								type: "session/updated",
 								session: {
-									...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+									...session("chat-existing", "/work/chat-project", "Chat project task"),
 									state: "running",
 								},
 							},
@@ -4415,7 +4400,7 @@ describe("Chat desktop shell", () => {
 						events: [
 							{
 								type: "session/updated",
-								session: session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+								session: session("chat-existing", "/work/chat-project", "Chat project task"),
 							},
 							{
 								type: "item/completed",
@@ -4475,7 +4460,7 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) => {
-			const summary = session(sessionId, "chat", "/work/chat-project", "Chat project task");
+			const summary = session(sessionId, "/work/chat-project", "Chat project task");
 			return {
 				...snapshot({ ...summary, state: "running" }),
 				activeTurnId: "00000000-0000-4000-8000-000000000301",
@@ -4509,7 +4494,7 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		const running = {
-			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			...session("chat-existing", "/work/chat-project", "Chat project task"),
 			state: "running" as const,
 		};
 		vi.mocked(api.openSession).mockResolvedValueOnce({
@@ -4887,7 +4872,7 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
 		const codeSnapshot: SessionSnapshot = {
-			...snapshot(session("code-existing", "code", "/work/code-project", "Code project task")),
+			...snapshot(session("code-existing", "/work/code-project", "Code project task")),
 			thinkingSelection: "high" as const,
 			actualThinkingLevel: "high" as const,
 			availableThinkingSelections: ["off", "low", "medium", "high", "max"],
@@ -5238,8 +5223,8 @@ describe("Chat desktop shell", () => {
 	it("keeps unrelated navigation enabled while another session is opening", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
-		const first = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
-		const second = session("chat-other", "chat", "/work/chat-project", "Other chat task");
+		const first = session("chat-existing", "/work/chat-project", "Chat project task");
+		const second = session("chat-other", "/work/chat-project", "Other chat task");
 		const { api } = createHarness({ sessions: [first, second] });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -5296,9 +5281,7 @@ describe("Chat desktop shell", () => {
 					serverEpoch: EPOCH,
 					fromCursor: 1,
 					toCursor: 1,
-					events: [
-						{ type: "project/invalidated", mode: "chat", cwd: "/work/chat-project", reason: "reload_required" },
-					],
+					events: [{ type: "project/invalidated", cwd: "/work/chat-project", reason: "reload_required" }],
 				},
 			},
 		});
@@ -5380,9 +5363,7 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".new-task-home")).toBeNull();
 		expect(container.querySelector("#composer-input")).toBeNull();
 
-		await act(async () =>
-			resolveOpen(snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task"))),
-		);
+		await act(async () => resolveOpen(snapshot(session("chat-existing", "/work/chat-project", "Chat project task"))));
 		expect(container.querySelector('[data-active-session-id="chat-existing"]')).not.toBeNull();
 		expect(container.querySelector("#composer-input")).not.toBeNull();
 		await act(async () => root.unmount());
@@ -5614,7 +5595,7 @@ describe("Chat desktop shell", () => {
 		});
 
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
-		expect(create).toMatchObject({ mode: "chat", cwd: "/work/selected-project", permissionPreset: "auto" });
+		expect(create).toMatchObject({ cwd: "/work/selected-project", permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("name");
 		expect(api.startTurn).toHaveBeenLastCalledWith(
 			expect.objectContaining({
@@ -5644,7 +5625,7 @@ describe("Chat desktop shell", () => {
 		});
 
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
-		expect(create).toMatchObject({ mode: "chat", permissionPreset: "auto" });
+		expect(create).toMatchObject({ permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("cwd");
 		expect(api.startTurn).toHaveBeenLastCalledWith(
 			expect.objectContaining({
@@ -5734,8 +5715,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-second", "chat", "/work/second", "Second task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-second", "/work/second", "Second task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -5791,8 +5772,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -5846,8 +5827,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -5898,12 +5879,12 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		vi.mocked(api.subscribeSession).mockResolvedValue({
-			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+			...snapshot(session("chat-existing", "/work/chat-project", "Chat project task")),
 			recentItems: [
 				{
 					itemId: "item-background",
@@ -5981,8 +5962,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -6050,8 +6031,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -6114,8 +6095,8 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-other", "chat", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -6201,9 +6182,9 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("code-existing", "code", "/work/code-project", "Code project task"),
-				session("code-other", "code", "/work/other-project", "Other task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("code-existing", "/work/code-project", "Code project task"),
+				session("code-other", "/work/other-project", "Other task"),
 			],
 		});
 		const container = document.createElement("div");
@@ -6398,15 +6379,15 @@ describe("Chat desktop shell", () => {
 		};
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("code-existing", "code", "/work/code-project", "Code project task"),
-				session("code-other", "code", "/work/other-project", "Other code task"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("code-existing", "/work/code-project", "Code project task"),
+				session("code-other", "/work/other-project", "Other code task"),
 			],
 		});
 		const summaries: Record<string, SessionSummary> = {
-			"chat-existing": session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-			"code-existing": session("code-existing", "code", "/work/code-project", "Code project task"),
-			"code-other": session("code-other", "code", "/work/other-project", "Other code task"),
+			"chat-existing": session("chat-existing", "/work/chat-project", "Chat project task"),
+			"code-existing": session("code-existing", "/work/code-project", "Code project task"),
+			"code-other": session("code-other", "/work/other-project", "Other code task"),
 		};
 		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) => ({
 			...snapshot(summaries[sessionId]!),
@@ -6473,10 +6454,10 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness({
 			sessions: [
-				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
-				session("chat-two", "chat", "/work/two", "Task two"),
-				session("chat-three", "chat", "/work/three", "Task three"),
-				session("chat-four", "chat", "/work/four", "Task four"),
+				session("chat-existing", "/work/chat-project", "Chat project task"),
+				session("chat-two", "/work/two", "Task two"),
+				session("chat-three", "/work/three", "Task three"),
+				session("chat-four", "/work/four", "Task four"),
 			],
 		});
 		const container = document.createElement("div");
@@ -6578,7 +6559,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		const running = {
-			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			...session("chat-existing", "/work/chat-project", "Chat project task"),
 			state: "running" as const,
 		};
 		await act(async () =>
@@ -6603,7 +6584,7 @@ describe("Chat desktop shell", () => {
 
 		await act(async () =>
 			store.applySnapshot({
-				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+				...snapshot(session("chat-existing", "/work/chat-project", "Chat project task")),
 				process: {
 					processId: "process-one",
 					turnId: "turn-running",
@@ -6643,7 +6624,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		const running = {
-			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			...session("chat-existing", "/work/chat-project", "Chat project task"),
 			state: "running" as const,
 		};
 		await act(async () =>
@@ -6686,7 +6667,7 @@ describe("Chat desktop shell", () => {
 
 		await act(async () =>
 			store.applySnapshot({
-				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+				...snapshot(session("chat-existing", "/work/chat-project", "Chat project task")),
 				process: {
 					processId: "process-two",
 					turnId: "turn-running",
@@ -7734,8 +7715,8 @@ describe("Chat desktop shell", () => {
 
 	it("opens the originating session from a desktop notification", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("session-active", "chat", "/tmp/chat", "Active");
-		const target = session("session-target", "code", "/tmp/code", "检查登录流程");
+		const active = session("session-active", "/tmp/chat", "Active");
+		const target = session("session-target", "/tmp/code", "检查登录流程");
 		const { api, emitEvent } = createHarness({ sessions: [active, target] });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -7748,7 +7729,7 @@ describe("Chat desktop shell", () => {
 			visibleSessionId: null,
 		});
 
-		await act(async () => emitEvent({ type: "open-session", sessionId: target.sessionId, mode: "code" }));
+		await act(async () => emitEvent({ type: "open-session", sessionId: target.sessionId }));
 		await flush();
 
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: target.sessionId });

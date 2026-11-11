@@ -1,5 +1,4 @@
 import type {
-	AgentMode,
 	AgentSummaryView,
 	ConnectionEventsParams,
 	DomainEvent,
@@ -187,11 +186,11 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	return true;
 }
 
-export function removeModeProjectSessions(state: MutableProjectionState, mode: AgentMode, cwd: string): boolean {
+export function removeProjectSessions(state: MutableProjectionState, cwd: string): boolean {
 	const removed = new Set(
 		state.sessionOrder.filter((sessionId) => {
 			const session = state.sessionsById.get(sessionId);
-			return session?.mode === mode && session.cwd === cwd && session.scheduled === undefined;
+			return session?.cwd === cwd && session.scheduled === undefined;
 		}),
 	);
 	if (removed.size === 0) return false;
@@ -489,7 +488,7 @@ function targetsSessionProject(
 	session: SessionSummary | undefined,
 	event: Extract<DomainEvent, { type: "project/invalidated" }>,
 ): boolean {
-	return session?.scheduled === undefined && session?.mode === event.mode && session.cwd === event.cwd;
+	return session !== undefined && session.scheduled === undefined && session.cwd === event.cwd;
 }
 
 function canApplyEvents(session: MutableSessionProjection, events: readonly DomainEvent[]): boolean {
@@ -549,7 +548,7 @@ function applyEvent(state: MutableProjectionState, session: MutableSessionProjec
 			else if (session) session.syncStatus = "resnapshot_required";
 			return;
 		case "project/invalidated":
-			if (event.reason === "deleted") removeModeProjectSessions(state, event.mode, event.cwd);
+			if (event.reason === "deleted") removeProjectSessions(state, event.cwd);
 			else if (session) session.syncStatus = "resnapshot_required";
 			return;
 		case "session/updated":

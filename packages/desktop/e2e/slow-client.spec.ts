@@ -185,7 +185,6 @@ test("a blocked renderer catches up with 10,000 deltas without losing its app se
 				});
 				const created = await api.createSession({
 					requestId: crypto.randomUUID(),
-					mode: "chat",
 					cwd,
 					name: "Background fixture",
 				});

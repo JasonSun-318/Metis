@@ -1,11 +1,4 @@
-import type {
-	AgentMode,
-	AgentSummaryView,
-	ClientResult,
-	DomainEvent,
-	PermissionPresetView,
-	SessionSummary,
-} from "@metis/app-protocol";
+import type { AgentSummaryView, DomainEvent, PermissionPresetView, SessionSummary } from "@metis/app-protocol";
 import { RPC_ERROR_CODES as ERROR_CODES } from "@metis/app-protocol";
 import type { DesktopApiEvent, MetisDesktopApi, SupervisorView } from "../shared/desktop-api.ts";
 import { type ConversationSubmission, composerPayload, composerRequestKey } from "./composer-submission.ts";
@@ -24,7 +17,14 @@ import {
 import { loadSessionGroupingPreferences, saveSessionGroupingPreferences } from "./store/session-grouping.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "./store/session-pins.ts";
 
-import { ACTIVE_CONVERSATION_KEY, legacyActiveConversation, loadWorkMode, WORK_MODE_KEY } from "./work-mode.ts";
+import {
+	ACTIVE_CONVERSATION_KEY,
+	legacyActiveConversation,
+	loadWorkMode,
+	WORK_MODE_KEY,
+	WORK_MODES,
+	type WorkMode,
+} from "./work-mode.ts";
 
 type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinkingSelection">> &
 	Pick<
@@ -52,7 +52,7 @@ type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinki
 	>;
 
 export interface NewTaskDraft {
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly folder: string | null;
 	readonly sessionId: string | null;
 	readonly permissionPreset: PermissionPresetView;
@@ -67,7 +67,7 @@ export interface SessionWorkspaceError {
 
 export interface SessionWorkspaceSnapshot {
 	readonly version: number;
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly draft: NewTaskDraft | null;
 	readonly draftBusy: boolean;
 	readonly draftCreatePending: boolean;
@@ -92,15 +92,14 @@ export interface SessionWorkspaceWorkflowOptions {
 }
 
 export interface SessionProjectTarget {
-	readonly mode: AgentMode;
 	readonly cwd: string;
 }
 
-function activeSessionKey(mode: AgentMode): string {
+function activeSessionKey(mode: WorkMode): string {
 	return `metis.activeSessionId.${mode}`;
 }
 
-function emptyDraft(mode: AgentMode): NewTaskDraft {
+function emptyDraft(mode: WorkMode): NewTaskDraft {
 	return { mode, folder: null, sessionId: null, permissionPreset: "auto" };
 }
 
@@ -336,7 +335,7 @@ export class SessionWorkspaceWorkflow {
 			this.reconcileLiveSessions();
 			if (session.unread) await this.markSessionRead(sessionId);
 			if (!this.isCurrentOpen(generation, lifecycle)) return;
-			this.writeRememberedSession(session.mode, sessionId);
+			this.writeRememberedSession(sessionId);
 			this.commit({ message: "Session ready" });
 		} catch (cause) {
 			if (subscription !== null) this.store.cancelSubscription(sessionId, subscription);
@@ -424,12 +423,12 @@ export class SessionWorkspaceWorkflow {
 		this.liveSubscriptions.set(sessionId, pending);
 	}
 
-	async selectMode(mode: AgentMode): Promise<void> {
+	async selectMode(mode: WorkMode): Promise<void> {
 		this.persistWorkMode(mode);
 		this.commit({ mode, draft: this.state.draft ? { ...this.state.draft, mode } : null });
 	}
 
-	private persistWorkMode(mode: AgentMode): void {
+	private persistWorkMode(mode: WorkMode): void {
 		try {
 			// Freeze legacy preferences before opening a different session changes the old active-mode hint.
 			saveSessionGroupingPreferences(this.storage, loadSessionGroupingPreferences(this.storage));
@@ -440,7 +439,7 @@ export class SessionWorkspaceWorkflow {
 		}
 	}
 
-	startNewTask(mode: AgentMode = this.state.mode): void {
+	startNewTask(mode: WorkMode = this.state.mode): void {
 		this.openGeneration += 1;
 		this.clearDraftRequests();
 		this.commit({
@@ -470,8 +469,7 @@ export class SessionWorkspaceWorkflow {
 	}
 
 	async chooseDraftFolder(): Promise<void> {
-		const mode = this.state.draft?.mode;
-		if (!mode) return;
+		if (!this.state.draft) return;
 		const lifecycle = this.lifecycleGeneration;
 		const intent = this.intentGeneration;
 		this.commit({ draftBusy: true, failure: null });
@@ -499,7 +497,6 @@ export class SessionWorkspaceWorkflow {
 		let sessionId = draft.sessionId;
 		if (!sessionId) {
 			const createKey = JSON.stringify({
-				mode: "chat",
 				cwd: draft.folder,
 				name: sessionName ?? null,
 				permissionPreset: draft.permissionPreset,
@@ -512,7 +509,6 @@ export class SessionWorkspaceWorkflow {
 			this.commit({ draftCreatePending: true });
 			const created = await this.api.createSession({
 				requestId: request.requestId,
-				mode: "chat",
 				...(draft.folder ? { cwd: draft.folder } : {}),
 				...(sessionName ? { name: sessionName } : {}),
 				permissionPreset: draft.permissionPreset,
@@ -626,7 +622,7 @@ export class SessionWorkspaceWorkflow {
 		const pending = (async () => {
 			let createCompleted = false;
 			try {
-				const created = await this.api.createSession({ requestId, mode: "chat", cwd });
+				const created = await this.api.createSession({ requestId, cwd });
 				createCompleted = true;
 				if (!this.isCurrentProjectCreate(key, requestId, lifecycle)) return;
 				if (!this.isCurrentIntent(intent, lifecycle)) {
@@ -672,20 +668,9 @@ export class SessionWorkspaceWorkflow {
 
 	async previewProjectDelete(target: SessionProjectTarget): Promise<ProjectDeletePreview> {
 		try {
-			const outcomes = await Promise.all([
-				this.api.previewProjectDelete(target),
-				this.api.previewProjectDelete({ ...target, mode: target.mode === "chat" ? "code" : "chat" }),
-			]);
-			const previews = outcomes.map((outcome) => {
-				if (!outcome.ok) throw outcome.error;
-				return outcome.result;
-			});
-			return {
-				...previews[0]!,
-				sessionCount: previews.reduce((sum, value) => sum + value.sessionCount, 0),
-				blockingScheduleCount: previews.reduce((sum, value) => sum + value.blockingScheduleCount, 0),
-				additionalProjects: previews.slice(1),
-			};
+			const outcome = await this.api.previewProjectDelete(target);
+			if (!outcome.ok) throw outcome.error;
+			return outcome.result;
 		} catch (cause) {
 			const normalized = projectFailure("preview-project-delete", cause);
 			throw new Error(normalized.reason, { cause });
@@ -694,38 +679,11 @@ export class SessionWorkspaceWorkflow {
 
 	async deleteProject(target: SessionProjectTarget, preview: ProjectDeletePreview): Promise<void> {
 		const lifecycle = this.lifecycleGeneration;
-		const sessions = [...this.store.getSnapshot().sessionsById.values()].filter(
-			(session) => session.cwd === target.cwd && !session.scheduled,
-		);
-		if (sessions.some((session) => this.state.dirtySessionIds.has(session.sessionId))) {
-			throw new Error("Save or close unsaved files before deleting this task or project.");
-		}
-		for (const part of [preview, ...(preview.additionalProjects ?? [])]) {
-			await this.deleteModeProject({ mode: part.mode, cwd: part.cwd }, part);
-			if (!this.isCurrentLifecycle(lifecycle)) return;
-		}
-		// Keep shared metadata until both legacy project deletions have completed.
-		this.updateProjectPreferences(
-			removeProjectPreference(
-				removeProjectPreference(this.state.projectPreferences, "chat", preview.cwd),
-				"code",
-				preview.cwd,
-			),
-		);
-	}
-
-	private deleteModeProject(
-		target: SessionProjectTarget,
-		preview: ClientResult<"project/deletePreview">,
-	): Promise<void> {
-		const lifecycle = this.lifecycleGeneration;
 		const projectSessions = [...this.store.getSnapshot().sessionsById.values()].filter(
-			(session) => session.mode === target.mode && session.cwd === target.cwd && session.scheduled === undefined,
+			(session) => session.cwd === target.cwd && session.scheduled === undefined,
 		);
 		if (projectSessions.some((session) => this.state.dirtySessionIds.has(session.sessionId))) {
-			const cause = new Error("Save or close unsaved files before deleting this task or project.");
-			this.commit({ failure: failure("delete-project", cause) });
-			return Promise.reject(cause);
+			throw new Error("Save or close unsaved files before deleting this task or project.");
 		}
 		const key = sessionProjectKey(target.cwd);
 		const existing = this.projectDeleteRequests.get(key);
@@ -737,7 +695,6 @@ export class SessionWorkspaceWorkflow {
 			try {
 				const outcome = await this.api.deleteProject({
 					requestId,
-					mode: target.mode,
 					cwd: target.cwd,
 					expectedRevision: preview.revision,
 				});
@@ -748,19 +705,19 @@ export class SessionWorkspaceWorkflow {
 				}
 				const before = this.store.getSnapshot();
 				const active = before.activeSessionId ? before.sessionsById.get(before.activeSessionId) : undefined;
-				const removedActive =
-					active?.mode === target.mode && active.cwd === target.cwd && active.scheduled === undefined;
+				const removedActive = active?.cwd === target.cwd && active.scheduled === undefined;
 				for (const session of projectSessions) this.setSessionPin(session.sessionId, false, false);
 				this.persistSessionPins();
 				this.queueCleanup(projectSessions.map((session) => session.sessionId));
 				this.invalidateSessionLists();
-				this.store.removeModeProject(target.mode, target.cwd);
-				const rememberedId = this.readRememberedSession(target.mode);
+				this.store.removeProject(target.cwd);
+				const rememberedId = this.readRememberedSession();
 				const remembered = rememberedId ? before.sessionsById.get(rememberedId) : undefined;
 				if (remembered?.cwd === target.cwd && remembered.scheduled === undefined) {
-					this.clearRememberedSession(target.mode, remembered.sessionId);
+					this.clearRememberedSession(remembered.sessionId);
 				}
 				if (removedActive) this.handleActiveDeletion(active);
+				this.updateProjectPreferences(removeProjectPreference(this.state.projectPreferences, target.cwd));
 				await this.refreshAfterMutation(() => this.isCurrentProjectDelete(key, requestId, lifecycle));
 				if (this.isCurrentProjectDelete(key, requestId, lifecycle)) this.projectDeleteRequests.delete(key);
 			} catch (cause) {
@@ -784,11 +741,11 @@ export class SessionWorkspaceWorkflow {
 	}
 
 	renameProject(target: SessionProjectTarget, alias: string): void {
-		this.updateProjectPreferences(setProjectAlias(this.state.projectPreferences, target.mode, target.cwd, alias));
+		this.updateProjectPreferences(setProjectAlias(this.state.projectPreferences, target.cwd, alias));
 	}
 
 	pinProject(target: SessionProjectTarget, pinned: boolean): void {
-		this.updateProjectPreferences(setProjectPinned(this.state.projectPreferences, target.mode, target.cwd, pinned));
+		this.updateProjectPreferences(setProjectPinned(this.state.projectPreferences, target.cwd, pinned));
 	}
 
 	pinSession(session: SessionSummary, pinned: boolean): void {
@@ -923,7 +880,7 @@ export class SessionWorkspaceWorkflow {
 				const active = this.store.getSnapshot().activeSessionId === session.sessionId;
 				this.invalidateSessionLists();
 				this.store.removeSession(session.sessionId);
-				this.clearRememberedSession(session.mode, session.sessionId);
+				this.clearRememberedSession(session.sessionId);
 				if (active) this.handleActiveDeletion(session);
 				await this.refreshAfterMutation(isCurrent);
 				if (isCurrent()) this.sessionArchiveRequests.delete(session.sessionId);
@@ -961,7 +918,7 @@ export class SessionWorkspaceWorkflow {
 				const shouldHandleActiveDeletion = this.store.getSnapshot().activeSessionId === session.sessionId;
 				this.invalidateSessionLists();
 				this.store.removeSession(session.sessionId);
-				this.clearRememberedSession(session.mode, session.sessionId);
+				this.clearRememberedSession(session.sessionId);
 				const shouldReportWarning = this.isCurrentIntent(intent, lifecycle);
 				if (shouldHandleActiveDeletion) this.handleActiveDeletion(session);
 				if (result.warning && shouldReportWarning) {
@@ -1071,7 +1028,7 @@ export class SessionWorkspaceWorkflow {
 			let sessions: Awaited<ReturnType<SessionWorkspaceApi["listSessions"]>> | undefined;
 			while (this.isCurrentLifecycle(lifecycle) && !sessions) sessions = await this.refreshSessions();
 			if (!sessions || !this.isCurrentLifecycle(lifecycle)) return;
-			const remembered = this.readRememberedSession(this.state.mode);
+			const remembered = this.readRememberedSession();
 			if (
 				this.isCurrentIntent(intent, lifecycle) &&
 				remembered &&
@@ -1079,7 +1036,7 @@ export class SessionWorkspaceWorkflow {
 			) {
 				if (await this.openSessionForIntent(remembered, intent, lifecycle)) this.commit({ draft: null });
 			} else if (this.isCurrentIntent(intent, lifecycle)) {
-				this.commit({ message: "Start a new Chat task" });
+				this.commit({ message: "Start a new task" });
 			}
 		} catch (cause) {
 			if (this.isCurrentLifecycle(lifecycle)) this.commit({ failure: failure("bootstrap", cause) });
@@ -1148,7 +1105,7 @@ export class SessionWorkspaceWorkflow {
 		const cleanup = new Set(deletedSessions.map((event) => event.sessionId));
 		for (const project of deletedProjects) {
 			for (const session of before.sessionsById.values()) {
-				if (session.mode === project.mode && session.cwd === project.cwd && session.scheduled === undefined) {
+				if (session.cwd === project.cwd && session.scheduled === undefined) {
 					cleanup.add(session.sessionId);
 				}
 			}
@@ -1159,7 +1116,7 @@ export class SessionWorkspaceWorkflow {
 		if (before.activeSessionId === null) {
 			for (const event of events) if (event.type === "session/updated") this.store.upsertSession(event.session);
 			for (const event of deletedSessions) this.store.removeSession(event.sessionId);
-			for (const event of deletedProjects) this.store.removeModeProject(event.mode, event.cwd);
+			for (const event of deletedProjects) this.store.removeProject(event.cwd);
 			this.reconcileLiveSessions();
 			return;
 		}
@@ -1171,12 +1128,10 @@ export class SessionWorkspaceWorkflow {
 		const sessionInvalidation =
 			sessionInvalidations.find((event) => event.reason === "deleted") ?? sessionInvalidations[0];
 		const projectInvalidations =
-			activeBefore?.scheduled === undefined
+			activeBefore !== undefined && activeBefore.scheduled === undefined
 				? events.filter(
 						(event): event is Extract<DomainEvent, { type: "project/invalidated" }> =>
-							event.type === "project/invalidated" &&
-							event.mode === activeBefore?.mode &&
-							event.cwd === activeBefore.cwd,
+							event.type === "project/invalidated" && event.cwd === activeBefore.cwd,
 					)
 				: [];
 		const projectInvalidation =
@@ -1184,7 +1139,7 @@ export class SessionWorkspaceWorkflow {
 		const applyResult = this.store.applyBatch(batch);
 		this.reconcileLiveSessions();
 		for (const event of deletedSessions) this.store.removeSession(event.sessionId);
-		for (const event of deletedProjects) this.store.removeModeProject(event.mode, event.cwd);
+		for (const event of deletedProjects) this.store.removeProject(event.cwd);
 
 		const visibleSessionId = this.getVisibleSessionId ? this.getVisibleSessionId() : before.activeSessionId;
 		const visibleUnread = events.find(
@@ -1213,7 +1168,7 @@ export class SessionWorkspaceWorkflow {
 		this.openGeneration += 1;
 		if (!session) return;
 		this.clearDraftRequests();
-		this.clearRememberedSession(session.mode, session.sessionId);
+		this.clearRememberedSession(session.sessionId);
 		this.commit({
 			draft: emptyDraft(this.state.mode),
 			draftCreatePending: false,
@@ -1339,17 +1294,17 @@ export class SessionWorkspaceWorkflow {
 		}
 		let preferences = this.state.projectPreferences;
 		for (const project of deletedProjects) {
-			preferences = removeProjectPreference(preferences, project.mode, project.cwd);
-			const rememberedId = this.readRememberedSession(project.mode);
+			preferences = removeProjectPreference(preferences, project.cwd);
+			const rememberedId = this.readRememberedSession();
 			const remembered = rememberedId ? before.sessionsById.get(rememberedId) : undefined;
 			if (remembered?.cwd === project.cwd && remembered.scheduled === undefined) {
-				this.clearRememberedSession(project.mode, remembered.sessionId);
+				this.clearRememberedSession(remembered.sessionId);
 			}
 		}
 		if (preferences !== this.state.projectPreferences) this.updateProjectPreferences(preferences);
 		for (const deleted of deletedSessions) {
 			const session = before.sessionsById.get(deleted.sessionId);
-			if (session) this.clearRememberedSession(session.mode, session.sessionId);
+			if (session) this.clearRememberedSession(session.sessionId);
 		}
 	}
 
@@ -1387,12 +1342,12 @@ export class SessionWorkspaceWorkflow {
 		this.commit({ busyProjectKeys: next });
 	}
 
-	private readRememberedSession(mode: AgentMode): string | null {
+	private readRememberedSession(): string | null {
 		try {
 			return (
 				this.storage.getItem(ACTIVE_CONVERSATION_KEY) ??
 				legacyActiveConversation(this.storage) ??
-				this.storage.getItem(activeSessionKey(mode))
+				this.storage.getItem(activeSessionKey(this.state.mode))
 			);
 		} catch (cause) {
 			this.commit({ failure: failure("read-session-preference", cause) });
@@ -1400,21 +1355,23 @@ export class SessionWorkspaceWorkflow {
 		}
 	}
 
-	private writeRememberedSession(mode: AgentMode, sessionId: string): void {
+	private writeRememberedSession(sessionId: string): void {
 		try {
 			this.storage.setItem(ACTIVE_CONVERSATION_KEY, sessionId);
-			this.storage.setItem(activeSessionKey(mode), sessionId);
+			this.storage.setItem(activeSessionKey(this.state.mode), sessionId);
 		} catch (cause) {
 			this.commit({ failure: failure("write-session-preference", cause) });
 		}
 	}
 
-	private clearRememberedSession(mode: AgentMode, sessionId: string): void {
+	private clearRememberedSession(sessionId: string): void {
 		try {
 			if (this.storage.getItem(ACTIVE_CONVERSATION_KEY) === sessionId)
 				this.storage.removeItem(ACTIVE_CONVERSATION_KEY);
-			if (this.storage.getItem(activeSessionKey(mode)) === sessionId) {
-				this.storage.removeItem(activeSessionKey(mode));
+			for (const mode of WORK_MODES) {
+				if (this.storage.getItem(activeSessionKey(mode)) === sessionId) {
+					this.storage.removeItem(activeSessionKey(mode));
+				}
 			}
 		} catch (cause) {
 			this.commit({ failure: failure("clear-session-preference", cause) });

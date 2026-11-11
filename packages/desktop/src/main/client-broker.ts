@@ -151,7 +151,7 @@ interface ClientBrokerOptions {
 	readonly setWorkspaceEditState?: (state: DesktopWorkspaceEditState) => void;
 	readonly onSessionUpdated?: (session: SessionSummary) => void;
 	readonly onSessionDeleted?: (sessionId: string) => void;
-	readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
+	readonly onProjectDeleted?: (cwd: string) => void;
 	readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	readonly onSessionOpened?: (sessionId: string) => void;
 	/** Broadcasts to every open window, not just the broker owner. */
@@ -265,7 +265,7 @@ export class ClientBroker {
 	private readonly setWorkspaceEditState: (state: DesktopWorkspaceEditState) => void;
 	private readonly onSessionUpdated?: (session: SessionSummary) => void;
 	private readonly onSessionDeleted?: (sessionId: string) => void;
-	private readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
+	private readonly onProjectDeleted?: (cwd: string) => void;
 	private readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	private readonly onSessionOpened?: (sessionId: string) => void;
 	private readonly broadcastEvent?: (event: DesktopApiEvent) => void;
@@ -277,7 +277,7 @@ export class ClientBroker {
 	private readonly liveSessions = new Set<string>();
 	private focusedSessionId: string | null = null;
 	private readonly backgroundQuestionSessions = new Set<string>();
-	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
+	private readonly subscribedSessionCwds = new Map<string, string>();
 	private scheduleSubscribed = false;
 	private subscriptionMutation = Promise.resolve();
 	private readonly removeSupervisorListeners: readonly (() => void)[];
@@ -456,7 +456,7 @@ export class ClientBroker {
 					}
 					this.subscribedSessions.clear();
 					this.backgroundQuestionSessions.clear();
-					this.subscribedSessionScopes.clear();
+					this.subscribedSessionCwds.clear();
 					this.focusedSessionId = null;
 					this.scheduleSubscribed = false;
 				}
@@ -516,8 +516,8 @@ export class ClientBroker {
 		return this.sendEvent({ type: "close-tab" });
 	}
 
-	requestRendererOpenSession(sessionId: string, mode: "chat" | "code"): boolean {
-		const event = { type: "open-session", sessionId, mode } as const;
+	requestRendererOpenSession(sessionId: string): boolean {
+		const event = { type: "open-session", sessionId } as const;
 		this.pendingRendererOpenSession = undefined;
 		if (this.sendEvent(event)) return true;
 		this.pendingRendererOpenSession = event;
@@ -563,8 +563,8 @@ export class ClientBroker {
 			return this.enqueueSubscriptionMutation(async () => {
 				const outcome = await this.projectCall("project/delete", params);
 				if (!outcome.ok) return outcome;
-				const deletedSessionIds = [...this.subscribedSessionScopes]
-					.filter(([, scope]) => scope.cwd === params.cwd)
+				const deletedSessionIds = [...this.subscribedSessionCwds]
+					.filter(([, cwd]) => cwd === params.cwd)
 					.map(([sessionId]) => sessionId);
 				this.forgetSessions(deletedSessionIds);
 				return outcome;
@@ -1047,7 +1047,7 @@ export class ClientBroker {
 			else if (event.type === "session/invalidated" && event.reason === "deleted") {
 				this.onSessionDeleted?.(event.sessionId);
 			} else if (event.type === "project/invalidated" && event.reason === "deleted") {
-				this.onProjectDeleted?.(event.mode, event.cwd);
+				this.onProjectDeleted?.(event.cwd);
 			}
 		}
 		this.sendEvent({ type: "app-server", envelope: notification });
@@ -1143,12 +1143,10 @@ export class ClientBroker {
 		this.subscribedSessions.add(sessionId);
 		this.backgroundQuestionSessions.delete(sessionId);
 		const session = subscribed.snapshot.session;
-		this.subscribedSessionScopes.set(session.sessionId, {
-			mode: session.mode,
-			...(session.cwd ? { cwd: session.cwd } : {}),
-		});
-		// Conversations are no longer split into chat/code session types: the work mode is a
-		// UI concern, so any session with a working directory may use workspace tools.
+		if (session.cwd) this.subscribedSessionCwds.set(session.sessionId, session.cwd);
+		else this.subscribedSessionCwds.delete(session.sessionId);
+		// The work mode is a UI concern, so any session with a working directory may use
+		// workspace tools.
 		if (session.cwd) this.workspaceFiles.authorize(session.sessionId, session.cwd);
 		else this.workspaceFiles.revoke(sessionId);
 		for (const event of this.browserManager.replayEvents(sessionId)) this.sendBrowserEvent(event);
@@ -1315,7 +1313,7 @@ export class ClientBroker {
 			this.liveSessions.delete(sessionId);
 			if (this.focusedSessionId === sessionId) this.focusedSessionId = null;
 			this.backgroundQuestionSessions.delete(sessionId);
-			this.subscribedSessionScopes.delete(sessionId);
+			this.subscribedSessionCwds.delete(sessionId);
 		}
 		this.browserToolHost.cancelSessions(ids);
 		this.cancelPendingInteractionsForSessions(ids);
@@ -1356,13 +1354,13 @@ export class ClientBroker {
 					await this.clientCall("session/unsubscribe", { sessionId });
 					this.subscribedSessions.delete(sessionId);
 					this.backgroundQuestionSessions.delete(sessionId);
-					this.subscribedSessionScopes.delete(sessionId);
+					this.subscribedSessionCwds.delete(sessionId);
 				} catch (error) {
 					if (ignoreErrors) {
 						// Renderer teardown is authoritative locally; reconnect builds a fresh subscription set.
 						this.subscribedSessions.delete(sessionId);
 						this.backgroundQuestionSessions.delete(sessionId);
-						this.subscribedSessionScopes.delete(sessionId);
+						this.subscribedSessionCwds.delete(sessionId);
 					} else {
 						errors.push(error);
 					}

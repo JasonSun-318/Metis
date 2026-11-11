@@ -138,7 +138,6 @@ interface CodingFixtures {
 			sessionDir: string,
 			options: {
 				id: string;
-				mode: "chat" | "code";
 				permissionPreset?: "ask" | "auto" | "full";
 				agent?: {
 					agentId: string;
@@ -200,13 +199,11 @@ function createStoredSession(
 	agentDir: string,
 	projectDir: string,
 	sessionId: string,
-	mode: "chat" | "code",
 	archived = false,
 	name?: string,
 ): string {
 	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: sessionId,
-		mode,
 	});
 	if (name) manager.appendSessionInfo(name);
 	const activePath = manager.getSessionFile();
@@ -458,7 +455,6 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	];
 	const createTaskSession = (
 		sessionId: string,
-		mode: "chat" | "code",
 		name: string,
 		tasks = taskItems,
 		compacted = false,
@@ -466,17 +462,16 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	) => {
 		const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 			id: sessionId,
-			mode,
 		});
 		manager.appendSessionInfo(name);
 		manager.appendMessage({
 			...assistantMessage(Date.now() - 3, 0),
-			content: [{ type: "toolCall", id: `set-tasks-${mode}`, name: "set_tasks", arguments: { tasks } }],
+			content: [{ type: "toolCall", id: `set-tasks-${sessionId}`, name: "set_tasks", arguments: { tasks } }],
 			stopReason: "toolUse",
 		});
 		const taskEntryId = manager.appendMessage({
 			role: "toolResult",
-			toolCallId: `set-tasks-${mode}`,
+			toolCallId: `set-tasks-${sessionId}`,
 			toolName: "set_tasks",
 			content: [
 				{
@@ -493,7 +488,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			timestamp: Date.now(),
 		});
 		if (compacted) manager.appendCompaction("private packaged summary", taskEntryId, 64_000, undefined, false);
-		if (withTranscriptFixture && mode === "chat") {
+		if (withTranscriptFixture && sessionId === CHAT_ACTIVE_ID) {
 			manager.appendMessage({
 				...assistantMessage(Date.now() + 1, 0),
 				content: [
@@ -540,11 +535,10 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			});
 		manager.close();
 	};
-	createTaskSession(CHAT_ACTIVE_ID, "chat", "Task list Chat fixture", taskItems, true, true);
-	createTaskSession(CODE_ID, "code", "Task list Code fixture", taskItems, false, true);
+	createTaskSession(CHAT_ACTIVE_ID, "Task list Chat fixture", taskItems, true, true);
+	createTaskSession(CODE_ID, "Task list Code fixture", taskItems, false, true);
 	createTaskSession(
 		COMPLETED_TASK_ID,
-		"chat",
 		"Completed task list fixture",
 		taskItems.map((task) => ({ ...task, completed: true })),
 	);
@@ -802,7 +796,6 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 	const sessionId = "71000000-0000-4000-8000-000000000001";
 	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: sessionId,
-		mode: "chat",
 		permissionPreset: "full",
 	});
 	manager.appendSessionInfo("Queued message session");
@@ -1034,7 +1027,6 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 	const sessionId = "70000000-0000-4000-8000-000000000001";
 	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: sessionId,
-		mode: "chat",
 		permissionPreset: "auto",
 	});
 	manager.appendSessionInfo("Permission sandbox session");
@@ -1782,7 +1774,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(assistedSessions.sessions).toHaveLength(1);
-		expect(assistedSessions.sessions[0]).toMatchObject({ mode: "chat", cwdOrigin: "managed" });
+		expect(assistedSessions.sessions[0]).toMatchObject({ cwdOrigin: "managed" });
 		await page.evaluate(async (sessionId) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.deleteSession({
 				sessionId,
@@ -1998,7 +1990,6 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		);
 		expect(sessionsAfterFirstSend.sessions).toHaveLength(1);
 		expect(sessionsAfterFirstSend.sessions[0]).toMatchObject({
-			mode: "chat",
 			cwdOrigin: "managed",
 			name: "Packaged smoke title",
 		});
@@ -2516,10 +2507,8 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	const now = Date.now() - 60 * 60_000;
 	const skillNames = ["pdf", "ponytail", "writing-plans"];
 	for (let index = 0; index < 18; index += 1) {
-		const mode = index < 12 ? "code" : "chat";
 		const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 			id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-			mode,
 		});
 		const timestamp = now - index * 2 * 86_400_000;
 		manager.appendMessage({ role: "user", content: `profile fixture ${index}`, timestamp });
@@ -2603,8 +2592,6 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(measurements.first).toMatchObject({
 			totalTokens: 145_350,
 			sessionCount: 18,
-			mostUsedMode: "code",
-			mostUsedModePercent: 67,
 			mostUsedThinkingLevel: "high",
 			mostUsedThinkingLevelPercent: 67,
 			usedSkillCount: 3,
@@ -2691,10 +2678,6 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 		expect(usage).toMatchObject({
 			rangeDays: 30,
 			totalTokens: 102_000,
-			chatTokens: 35_700,
-			codeTokens: 66_300,
-			chatSessionCount: 3,
-			codeSessionCount: 12,
 			topModels: [{ provider: "openai", modelId: "profile-fixture", totalTokens: 102_000 }],
 		});
 		await page.locator(".usage-bar").last().hover();
@@ -2845,7 +2828,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 	const stdioFixture = path.resolve(desktopRoot, "../coding-agent/test/fixtures/mcp-stdio-server.mjs");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 	await writeFile(path.join(agentDir, "settings.json"), JSON.stringify({ mcpServers: {} }));
-	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "MCP matrix fixture");
+	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, false, "MCP matrix fixture");
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const [urlServer, customServer, jsonServer] = await Promise.all([
@@ -3087,7 +3070,7 @@ test("packaged Code session tree lists durable agents and opens their conversati
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Agent fixture");
+	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, false, "Agent fixture");
 	const childId = "30000000-0000-4000-8000-000000000001";
 	const taskId = "30000000-0000-4000-8000-000000000002";
 	const archivedId = "30000000-0000-4000-8000-000000000003";
@@ -3114,7 +3097,6 @@ test("packaged Code session tree lists durable agents and opens their conversati
 	};
 	const child = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
 		id: childId,
-		mode: "code",
 		permissionPreset: "ask",
 		agent: agentHeader,
 	});
@@ -3215,7 +3197,6 @@ test("packaged Code session tree lists durable agents and opens their conversati
 
 	const nested = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
 		id: nestedId,
-		mode: "code",
 		permissionPreset: "ask",
 		agent: {
 			agentId: nestedId,
@@ -3262,7 +3243,6 @@ test("packaged Code session tree lists durable agents and opens their conversati
 
 	const archived = fixtures.SessionManager.create(projectDir, fixtures.getSessionAgentDir(agentDir, CODE_ID), {
 		id: archivedId,
-		mode: "code",
 		permissionPreset: "ask",
 		agent: {
 			agentId: archivedId,
@@ -3596,7 +3576,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		writeFile(path.join(projectDir, "pixel.png"), Buffer.from(TINY_PNG, "base64")),
 		writeFile(path.join(projectDir, "binary.bin"), Buffer.from([0, 1, 2, 3])),
 	]);
-	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "File browser fixture");
+	createStoredSession(fixtures, agentDir, projectDir, CODE_ID, false, "File browser fixture");
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
@@ -3865,7 +3845,7 @@ reviewPerformanceTest(
 				`export const change${index} = ${index};\n`,
 			);
 		}
-		createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code", false, "Review fixture");
+		createStoredSession(fixtures, agentDir, projectDir, CODE_ID, false, "Review fixture");
 
 		const debuggingPort = await reservePort();
 		const diagnostics: string[] = [];
@@ -4512,7 +4492,6 @@ test("packaged General settings and Personalization persist across restart", asy
 		agentDir,
 		projectDir,
 		CHAT_ACTIVE_ID,
-		"chat",
 		false,
 		"Settings session",
 	);
@@ -4539,7 +4518,6 @@ test("packaged General settings and Personalization persist across restart", asy
 		agentDir,
 		projectDir,
 		"11111111-2222-4333-8444-555566667778",
-		"code",
 		false,
 		"修复登录与账户同步",
 	);
@@ -4548,7 +4526,6 @@ test("packaged General settings and Personalization persist across restart", asy
 		agentDir,
 		projectDir,
 		"11111111-2222-4333-8444-555566667779",
-		"chat",
 		true,
 		"产品设计讨论 · 已归档",
 	);
@@ -5051,7 +5028,7 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Browser settings session");
+	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, false, "Browser settings session");
 	const now = Date.now();
 	await Promise.all([
 		writeFile(
@@ -5422,7 +5399,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 	}
 });
 
-test("packaged mode project actions preserve the other mode and shared project data", async () => {
+test("packaged project actions keep shared project data", async () => {
 	test.setTimeout(90_000);
 	const fixtures = await loadCodingFixtures();
 	const executable = packagedExecutable();
@@ -5445,15 +5422,14 @@ test("packaged mode project actions preserve the other mode and shared project d
 	]);
 	fixtures.ensureVaultLayout(agentDir);
 
-	const chatActivePath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat");
-	const chatArchivedPath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ARCHIVED_ID, "chat", true);
-	const codePath = createStoredSession(fixtures, agentDir, projectDir, CODE_ID, "code");
+	const chatActivePath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID);
+	const chatArchivedPath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ARCHIVED_ID, true);
+	const codePath = createStoredSession(fixtures, agentDir, projectDir, CODE_ID);
 	const sessionActionPath = createStoredSession(
 		fixtures,
 		agentDir,
 		projectDir,
 		SESSION_ACTION_ID,
-		"chat",
 		false,
 		"Session action target",
 	);
@@ -5582,7 +5558,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(group.locator(".project-heading")).toHaveAttribute("aria-expanded", "true");
 		await expect(group.locator(".project-sessions")).toHaveCSS("transform", "none");
 
-		phase = "renaming and pinning Chat";
+		phase = "renaming and pinning the project";
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		const projectActionMenu = page.getByRole("menu", { name: `${projectName} project actions` });
@@ -5596,13 +5572,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await projectActionMenu.getByRole("menuitem", { name: "Rename" }).click();
 		await expect(page.getByRole("dialog", { name: "Rename project" })).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "rename-dialog-normal.png") });
-		await page.locator("#project-rename-input").fill("Pinned Chat Project");
+		await page.locator("#project-rename-input").fill("Pinned Project");
 		await page.getByRole("dialog", { name: "Rename project" }).getByRole("button", { name: "Rename" }).click();
 		await page.getByRole("menuitem", { name: "Pin" }).click();
-		group = projectGroup(page, "Pinned Chat Project");
+		group = projectGroup(page, "Pinned Project");
 		await expect(group).toBeVisible();
 
-		phase = "checking mode-scoped preferences";
+		phase = "checking shared preferences across work modes";
 		await page.evaluate((sessionId) => localStorage.setItem("metis.activeSessionId.code", sessionId), CODE_ID);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
@@ -5621,12 +5597,21 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await codeGroup.getByRole("button", { name: "Project actions" }).click();
 		await expect(page.getByRole("menuitem", { name: "Pin" })).toBeVisible();
 		await page.keyboard.press("Escape");
+		await codeGroup.locator(".session-button").first().click();
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", ".+", {
+			timeout: 10_000,
+		});
+		await page.getByRole("button", { name: "Customize", exact: true }).click();
+		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
+		await page.getByRole("option", { name: "Project", exact: true }).click();
+		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
+		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 
-		phase = "creating an empty Chat session";
-		group = projectGroup(page, "Pinned Chat Project");
+		phase = "creating an empty session in the project";
+		group = projectGroup(page, "Pinned Project");
 		await showProjectActions(group);
-		await group.getByRole("button", { name: "New task in Pinned Chat Project" }).click();
+		await group.getByRole("button", { name: "New task in Pinned Project" }).click();
 		const workspaceHeader = page.locator(".workspace-titlebar");
 		await expect
 			.poll(async () => {
@@ -5640,7 +5625,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await expect(page.locator(".transcript-turn")).toHaveCount(0);
 
 		phase = "checking the schedule blocker";
-		group = projectGroup(page, "Pinned Chat Project");
+		group = projectGroup(page, "Pinned Project");
 		const projectActions = group.getByRole("button", { name: "Project actions" });
 		await showProjectActions(group);
 		await expect(projectActions).toBeEnabled();
@@ -5660,8 +5645,8 @@ test("packaged mode project actions preserve the other mode and shared project d
 		} finally {
 			resumeAppServer(utilityPid);
 		}
-		const deleteDialog = page.getByRole("dialog", { name: "Delete Chat project?" });
-		await expect(deleteDialog.getByText("3 Chat sessions", { exact: false })).toBeVisible();
+		const deleteDialog = page.getByRole("dialog", { name: "Delete project?" });
+		await expect(deleteDialog.getByText("4 sessions", { exact: false })).toBeVisible();
 		await expect(
 			deleteDialog.getByText("1 fixed-workspace schedules block deletion", { exact: false }),
 		).toBeVisible();
@@ -5678,13 +5663,13 @@ test("packaged mode project actions preserve the other mode and shared project d
 		app = launchPackagedApp(executable, debuggingPort, userDataDir, projectDir, agentDir, homeDir, diagnostics);
 		({ browser, page } = await connectToApp(debuggingPort));
 		await waitForServerReady(page);
-		await expect(projectGroup(page, "Pinned Chat Project")).toBeVisible();
+		await expect(projectGroup(page, "Pinned Project")).toBeVisible();
 		await page.setViewportSize({ width: 900, height: 720 });
-		group = projectGroup(page, "Pinned Chat Project");
+		group = projectGroup(page, "Pinned Project");
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		await page.getByRole("menuitem", { name: "Delete" }).click();
-		const readyDeleteDialog = page.getByRole("dialog", { name: "Delete Chat project?" });
+		const readyDeleteDialog = page.getByRole("dialog", { name: "Delete project?" });
 		await expect(readyDeleteDialog.getByRole("button", { name: "Move to Trash" })).toBeEnabled();
 		await page.screenshot({ path: path.join(qaDir, "delete-ready-narrow.png") });
 		await page.setViewportSize({ width: 450, height: 360 });
@@ -5694,30 +5679,21 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.screenshot({ path: path.join(qaDir, "delete-ready-zoom-200.png") });
 		await page.setViewportSize({ width: 900, height: 720 });
 
-		phase = "deleting Chat through the visible dialog";
+		phase = "deleting the project through the visible dialog";
 		await readyDeleteDialog.getByRole("button", { name: "Move to Trash" }).click();
 		await page.screenshot({ path: path.join(qaDir, "delete-deleting-narrow.png") });
-		await expect(projectGroup(page, "Pinned Chat Project")).toHaveCount(0);
+		await expect(projectGroup(page, "Pinned Project")).toHaveCount(0);
 		await page.screenshot({ path: path.join(qaDir, "delete-success-narrow.png") });
 
 		phase = "verifying exact disk preservation";
-		for (const removedPath of [chatActivePath, chatArchivedPath, ...ownedPaths]) {
+		for (const removedPath of [chatActivePath, chatArchivedPath, codePath, ...ownedPaths]) {
 			expect(existsSync(removedPath), removedPath).toBe(false);
 		}
-		for (const preservedPath of [codePath, sourcePath, skillPath]) {
+		for (const preservedPath of [sourcePath, skillPath]) {
 			expect(existsSync(preservedPath), preservedPath).toBe(true);
 		}
 		expect(await readFile(sourcePath, "utf8")).toBe("source must survive");
 		expect(new fixtures.ProjectTrustStore(agentDir).get(projectDir)).toBe(true);
-
-		phase = "reopening Code and shared Skills";
-		await page.getByRole("button", { name: "Code", exact: true }).click();
-		await projectGroup(page, projectName).locator(".session-button").click();
-		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Customize", exact: true }).click();
-		await page.getByRole("button", { name: "Skill sources", exact: true }).click();
-		await page.getByRole("option", { name: "Project", exact: true }).click();
-		await expect(page.getByText("shared-project-skill", { exact: true })).toBeVisible();
 	} catch (error) {
 		const bodyText = await page
 			?.locator("body")
@@ -5752,8 +5728,8 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	const canonicalProjectDir = await realpath(projectDir);
 	fixtures.ensureVaultLayout(agentDir);
 
-	const chatPath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CHAT_ACTIVE_ID, "chat");
-	const codePath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CODE_ID, "code");
+	const chatPath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CHAT_ACTIVE_ID);
+	const codePath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CODE_ID);
 	const vaultRoot = fixtures.getVaultRoot(agentDir);
 	const projectKey = fixtures.resolveVaultProject(canonicalProjectDir, "user-selected")!.projectKey;
 	const projectScope = fixtures.getScopeDir(vaultRoot, "project", projectKey);
@@ -5789,26 +5765,25 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 		({ browser, page } = await connectToApp(debuggingPort));
 		page.setDefaultTimeout(10_000);
 		await waitForServerReady(page);
-		phase = "deleting Chat through packaged RPC";
+		phase = "deleting the project through packaged RPC";
 		const deletion = await page.evaluate(async (cwd) => {
 			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-			const preview = await api.previewProjectDelete({ mode: "chat", cwd });
+			const preview = await api.previewProjectDelete({ cwd });
 			if (!preview.ok) throw new Error(preview.error.message);
 			const result = await api.deleteProject({
 				requestId: "10000000-0000-4000-8000-000000000007",
-				mode: "chat",
 				cwd,
 				expectedRevision: preview.result.revision,
 			});
 			if (!result.ok) throw new Error(result.error.message);
 			return result.result;
 		}, canonicalProjectDir);
-		expect(deletion).toMatchObject({ mode: "chat", cwd: canonicalProjectDir, deletedSessionCount: 1 });
+		expect(deletion).toMatchObject({ cwd: canonicalProjectDir, deletedSessionCount: 2 });
 
 		phase = "verifying shared memory preservation";
 		expect(existsSync(chatPath), chatPath).toBe(false);
+		expect(existsSync(codePath), codePath).toBe(false);
 		for (const preservedPath of [
-			codePath,
 			sharedMemoryIndexPath,
 			projectMemoryTopicPath,
 			globalMemoryPath,
@@ -5858,7 +5833,6 @@ test("packaged project delete fails closed for a held session lease and retries"
 	]);
 	const held = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: CHAT_ACTIVE_ID,
-		mode: "chat",
 	});
 	const sessionPath = held.getSessionFile();
 	if (!sessionPath) throw new Error("Held session fixture was not persisted");
@@ -5881,7 +5855,7 @@ test("packaged project delete fails closed for a held session lease and retries"
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "Project actions" }).click();
 		await page.getByRole("menuitem", { name: "Delete" }).click();
-		const dialog = page.getByRole("dialog", { name: "Delete Chat project?" });
+		const dialog = page.getByRole("dialog", { name: "Delete project?" });
 		await expect(dialog.getByRole("button", { name: "Move to Trash" })).toBeEnabled();
 
 		phase = "verifying the held-lease failure";

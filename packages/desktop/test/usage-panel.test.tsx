@@ -11,8 +11,6 @@ import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date(Date.UTC(2026, 7, 8 - rangeDays + index + 1)).toISOString().slice(0, 10),
-		chatTokens: index === rangeDays - 1 ? 20 : 0,
-		codeTokens: index === rangeDays - 1 ? 80 : 0,
 		inputTokens: index === rangeDays - 1 ? 60 : 0,
 		outputTokens: index === rangeDays - 1 ? 40 : 0,
 		cacheReadTokens: 0,
@@ -26,11 +24,7 @@ function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 		outputTokens: 40,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
-		chatTokens: 20,
-		codeTokens: 80,
 		sessionCount: 2,
-		chatSessionCount: 1,
-		codeSessionCount: 1,
 		daily,
 		topModels: [{ provider: "openai", modelId: "gpt-5", totalTokens: 100 }],
 	};
@@ -116,7 +110,6 @@ describe("UsagePanel", () => {
 		await act(async () => button(container, "7d").click());
 		await flush();
 		expect(container.querySelector(".usage-bar")).toBeNull();
-		expect(container.querySelector(".usage-summary-cards")).toBeNull();
 		expect(button(container, "7d").getAttribute("aria-pressed")).toBe("true");
 		expect(button(container, "7d")).toBeTruthy();
 
@@ -168,6 +161,28 @@ describe("UsagePanel", () => {
 		await flush();
 		expect(container.querySelectorAll(".usage-bar")).toHaveLength(90);
 		expect(button(container, "90d").getAttribute("aria-pressed")).toBe("true");
+		await act(async () => root.unmount());
+	});
+
+	it("shows total-token bars, totals, and top models without a Chat/Code split", async () => {
+		const getUsage = vi.fn(() => Promise.resolve(usage(30)));
+		const { container, root } = renderUsagePanel();
+		await act(async () => root.render(<UsagePanel api={{ getUsage } as unknown as MetisDesktopApi} serverReady />));
+		await flush();
+
+		expect(container.querySelector(".usage-summary-cards")).toBeNull();
+		expect(container.querySelector(".usage-legend")).toBeNull();
+		expect(container.textContent).not.toContain("Code share");
+		expect(container.textContent).not.toContain("Most used mode");
+		expect(container.querySelectorAll(".usage-bar")).toHaveLength(30);
+		expect(container.querySelector(".usage-bar > i.total")).not.toBeNull();
+		expect(container.textContent).toContain("100");
+		expect(container.textContent).toContain("gpt-5");
+
+		await act(async () => button(container, "Table view").click());
+		await flush();
+		const headers = [...container.querySelectorAll("thead th")].map((header) => header.textContent);
+		expect(headers).toEqual(["Date", "Total"]);
 		await act(async () => root.unmount());
 	});
 

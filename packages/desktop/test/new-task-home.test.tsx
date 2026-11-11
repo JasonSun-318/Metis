@@ -16,13 +16,11 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 function project(cwd: string, name: string, updatedAt: string): ProjectSessionGroup {
 	return {
 		cwd,
-		mode: "code",
 		name,
 		pinned: false,
 		sessions: [
 			{
 				sessionId: `${name}-session`,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				cwd,
 				createdAt: updatedAt,

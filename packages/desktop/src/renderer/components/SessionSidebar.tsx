@@ -1,4 +1,4 @@
-import type { AgentMode, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
+import type { ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,7 @@ import { CaretDown, CaretRight } from "../icons.tsx";
 import type { ProjectDeletePreview, ProjectSessionGroup } from "../session-groups.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
-import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
+import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
 import {
 	DEFAULT_SESSION_GROUPING,
 	groupSessionsByDate,
@@ -22,6 +22,7 @@ import {
 	sidebarSessions,
 } from "../store/session-grouping.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { AccountMenu } from "./AccountMenu.tsx";
 import { AgentSidebarBranch, type AgentSidebarNavigation } from "./AgentSidebarBranch.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
@@ -87,9 +88,9 @@ interface SessionSidebarProps {
 
 export interface SessionSidebarWorkspace {
 	readonly busy: boolean;
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly newTaskOpen: boolean;
-	readonly onModeChange: (mode: AgentMode) => void;
+	readonly onModeChange: (mode: WorkMode) => void;
 	readonly onNewTask: () => void;
 	readonly onOpen: (sessionId: string) => Promise<void>;
 	readonly onArchiveSession?: (session: SessionSummary) => Promise<void>;
@@ -121,10 +122,6 @@ export function buildSessionTree(
 	preferences: ProjectPreferenceMap,
 	excludedSessionIds: ReadonlySet<string> = new Set(),
 ): SessionTree {
-	const modePreferences = new Map<string, ProjectPreference>();
-	for (const preference of preferences.values()) {
-		if (preference.mode === "chat") modePreferences.set(preference.cwd, preference);
-	}
 	const projects = new Map<string, SessionSummary[]>();
 	const tasks: SessionSummary[] = [];
 	for (const session of sidebarSessions(state)) {
@@ -138,9 +135,8 @@ export function buildSessionTree(
 		projects.set(session.cwd, sessions);
 	}
 	const groups = [...projects].map(([cwd, sessions]) => {
-		const preference = modePreferences.get(cwd);
+		const preference = preferences.get(cwd);
 		return {
-			mode: "chat" as const,
 			cwd,
 			name: preference?.alias ?? projectName(cwd),
 			pinned: preference?.pinned ?? false,
@@ -319,20 +315,20 @@ function ProjectGroup({
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(true);
-	const owner = `${group.mode}:${group.cwd}`;
+	const owner = group.cwd;
 	const expansion = useRef({ owner, open });
 	if (expansion.current.owner !== owner) expansion.current = { owner, open: true };
 	else expansion.current = { owner, open };
 	if (open !== expansion.current.open) setOpen(expansion.current.open);
 	const busy = workspace.busy || workspace.projectBusy(group);
 	return (
-		<div className="project-group" data-open={open} data-sidebar-motion-key={`project:${group.mode}:${group.cwd}`}>
+		<div className="project-group" data-open={open} data-sidebar-motion-key={`project:${group.cwd}`}>
 			<button
 				aria-expanded={open}
 				aria-label={t(open ? "Collapse {{name}} project" : "Expand {{name}} project", { name: group.name })}
 				className="project-heading"
 				data-sidebar-motion-exit="true"
-				data-sidebar-motion-key={`project:${group.mode}:${group.cwd}:header`}
+				data-sidebar-motion-key={`project:${group.cwd}:header`}
 				onClick={() => setOpen((current) => !current)}
 				title={group.cwd}
 				type="button"
@@ -625,10 +621,10 @@ export const SessionSidebar = memo(function SessionSidebar({
 							<ProjectGroup
 								activityBySession={activityBySession}
 								agentNavigation={agentNavigation}
-								actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
+								actionsActive={activeProjectActions === group.cwd}
 								group={group}
-								key={JSON.stringify([group.mode, group.cwd])}
-								onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
+								key={group.cwd}
+								onActivateActions={() => setActiveProjectActions(group.cwd)}
 								onDeactivateActions={() => setActiveProjectActions(null)}
 								isDeleteDisabled={isDeleteDisabled}
 								selectedSessionId={selectedSessionId}

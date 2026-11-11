@@ -138,7 +138,6 @@ describe("single-level session grouping menu", () => {
 function session(sessionId: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
 	return {
 		sessionId,
-		mode: "chat",
 		name: sessionId,
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
@@ -170,8 +169,8 @@ function sidebarProps(store: AppStore): ComponentProps<typeof SessionSidebar> {
 		onWidthChange: vi.fn(),
 		workspace: {
 			busy: false,
-			mode: "chat",
 			newTaskOpen: false,
+			mode: "chat",
 			preferences: new Map(),
 			pinnedSessionIds: new Set(),
 			onModeChange: vi.fn(),

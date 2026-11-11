@@ -1,5 +1,4 @@
 import type {
-	AgentMode,
 	InteractionResponseInput,
 	ModelOptionView,
 	ModelSettingsView,
@@ -35,6 +34,7 @@ import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import type { ComposerSubmission } from "./Composer.tsx";
 import { ConversationScopeProvider, type PermissionRuleReference } from "./ConversationScope.tsx";
@@ -124,7 +124,7 @@ interface AppShellState {
 	// reads those values off `sessions`, so the key copies them at selection time.
 	readonly sessionShellKey: string;
 	// `sessionsById` is a Map mutated in place, so reference equality misses
-	// summary updates (mode, cwd, title, ...) that the shell renders.
+	// summary updates (cwd, title, ...) that the shell renders.
 	readonly sessionIndexKey: string;
 }
 
@@ -705,7 +705,7 @@ export function App({ api, store }: AppProps) {
 	);
 	const copySessionTitle = useCallback((title: string) => api.writeClipboardText({ text: title }), [api]);
 	const previewProjectDelete = useCallback(
-		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ mode: group.mode, cwd: group.cwd }),
+		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ cwd: group.cwd }),
 		[workspaceWorkflow],
 	);
 	const closeCodeProjectSetup = useCallback(() => {
@@ -895,7 +895,7 @@ export function App({ api, store }: AppProps) {
 		setCodeProjectSetupOpen(true);
 	}, [workspaceWorkflow]);
 	const setHomeDraftFolder = useCallback(
-		(projectMode: AgentMode, cwd: string | null) => {
+		(projectMode: WorkMode, cwd: string | null) => {
 			const draft = workspaceWorkflow.getSnapshot().draft;
 			if (!draft || draft.mode !== projectMode || draft.sessionId !== null) return;
 			workspaceWorkflow.setDraftFolder(cwd);
@@ -903,13 +903,13 @@ export function App({ api, store }: AppProps) {
 		[workspaceWorkflow],
 	);
 	const selectHomeProject = useCallback(
-		(projectMode: AgentMode, cwd: string) => {
+		(projectMode: WorkMode, cwd: string) => {
 			setHomeDraftFolder(projectMode, cwd);
 		},
 		[setHomeDraftFolder],
 	);
 	const clearHomeProject = useCallback(
-		(projectMode: AgentMode) => {
+		(projectMode: WorkMode) => {
 			setHomeDraftFolder(projectMode, null);
 		},
 		[setHomeDraftFolder],
@@ -991,7 +991,7 @@ export function App({ api, store }: AppProps) {
 	);
 
 	const changeMode = useCallback(
-		(nextMode: AgentMode) => {
+		(nextMode: WorkMode) => {
 			void workspaceWorkflow.selectMode(nextMode);
 		},
 		[workspaceWorkflow],

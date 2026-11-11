@@ -404,7 +404,6 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 			sessions: [
 				{
 					sessionId: "live-session",
-					mode: "chat",
 					cwdOrigin: "user-selected",
 					cwd: "/work/project",
 					name: "live-session",

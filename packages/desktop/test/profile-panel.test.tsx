@@ -22,8 +22,6 @@ const profile: ProfileUsageSummaryView = {
 	currentStreakDays: 2,
 	longestStreakDays: 5,
 	sessionCount: 12,
-	mostUsedMode: "code",
-	mostUsedModePercent: 75,
 	mostUsedThinkingLevel: "high",
 	mostUsedThinkingLevelPercent: 67,
 	usedSkillCount: 3,
@@ -90,7 +88,6 @@ describe("ProfilePanel", () => {
 		expect(container.textContent).toContain("Most used Skills");
 		expect(container.textContent).toContain("Most used reasoning effort");
 		expect(container.textContent).toContain("High · 67%");
-		expect(container.textContent).toContain("Code · 75%");
 		expect(container.textContent).toContain("ponytail");
 		expect(container.querySelectorAll(".profile-heatmap-week")).toHaveLength(53);
 		const animatedCells = container.querySelectorAll<HTMLElement>(".profile-heatmap-cell");

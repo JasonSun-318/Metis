@@ -1,13 +1,13 @@
-import type { AgentMode } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 import { FolderSimple, Plus, X } from "../icons.tsx";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 
 export interface HomeProjectPickerProps {
 	readonly busy: boolean;
 	readonly folder: string | null;
 	readonly folderLocked: boolean;
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly onChooseFolder: () => Promise<void>;
 	readonly onClearFolder?: () => void;
 	readonly onCreateProject?: () => void;

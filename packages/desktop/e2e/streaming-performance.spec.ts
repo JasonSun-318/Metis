@@ -59,7 +59,7 @@ async function launchWorkspace(): Promise<{
 			create(
 				cwd: string,
 				sessionDir: string,
-				options: { id: string; mode: "chat" | "code"; permissionPreset: "full" },
+				options: { id: string; permissionPreset: "full" },
 			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
@@ -84,7 +84,6 @@ async function launchWorkspace(): Promise<{
 	]) {
 		const manager = sessions.SessionManager.create(projectDir, sessions.getDefaultSessionDir(projectDir, agentDir), {
 			id: seed.id,
-			mode: "chat",
 			permissionPreset: "full",
 		});
 		manager.appendSessionInfo(seed.name);

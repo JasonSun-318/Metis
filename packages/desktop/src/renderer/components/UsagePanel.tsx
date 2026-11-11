@@ -16,7 +16,7 @@ function usageCacheKey(rangeDays: UsageRangeDays): string {
 }
 
 function dayTotal(day: UsageDailyView): number {
-	return day.chatTokens + day.codeTokens;
+	return day.inputTokens + day.outputTokens + day.cacheReadTokens + day.cacheWriteTokens;
 }
 
 export function UsagePanel({
@@ -59,7 +59,7 @@ export function UsagePanel({
 	};
 	const rangeToolbar = (
 		<div className="usage-toolbar">
-			<p>{t("Local token usage across Chat and Code on this device.")}</p>
+			<p>{t("Local token usage on this device.")}</p>
 			<fieldset aria-label={t("Usage range")} className="control-group settings-segmented">
 				{RANGE_DAYS.map((days) => (
 					<button aria-pressed={rangeDays === days} key={days} onClick={() => selectRange(days)} type="button">
@@ -132,40 +132,15 @@ export function UsagePanel({
 		selected && usage.daily.length > 0
 			? Math.min(88, Math.max(12, ((hovered! + 0.5) / usage.daily.length) * 100))
 			: activeLeftRef.current;
-	const modeShare = usage.totalTokens === 0 ? 0 : Math.round((usage.codeTokens / usage.totalTokens) * 100);
-
 	return (
 		<section className="settings-page usage-page">
 			{rangeToolbar}
-
-			<div className="usage-summary-cards">
-				<article className="usage-metric-card">
-					<div className="usage-metric-header">
-						<span>{t("Chat")}</span>
-						<span className="usage-metric-badge chat">
-							{full.format(usage.chatSessionCount)} {t("sessions")}
-						</span>
-					</div>
-					<strong>{compact.format(usage.chatTokens)}</strong>
-					<small>{t("{{count}} sessions", { count: full.format(usage.chatSessionCount) })}</small>
-				</article>
-				<article className="usage-metric-card">
-					<div className="usage-metric-header">
-						<span>{t("Code")}</span>
-						<span className="usage-metric-badge code">
-							{full.format(usage.codeSessionCount)} {t("sessions")}
-						</span>
-					</div>
-					<strong>{compact.format(usage.codeTokens)}</strong>
-					<small>{t("{{count}} sessions", { count: full.format(usage.codeSessionCount) })}</small>
-				</article>
-			</div>
 
 			<section className="settings-card usage-chart-card">
 				<header className="usage-chart-header">
 					<div>
 						<h2>{t("Tokens per day")}</h2>
-						<p>{t("Input and output tokens by mode, last {{count}} days", { count: rangeDays })}</p>
+						<p>{t("Total tokens per day, last {{count}} days", { count: rangeDays })}</p>
 					</div>
 					<fieldset aria-label={t("Usage view")} className="control-group usage-view-toggle">
 						<button
@@ -186,16 +161,6 @@ export function UsagePanel({
 						</button>
 					</fieldset>
 				</header>
-				<div className="usage-legend">
-					<span>
-						<i className="chat" />
-						{t("Chat")}
-					</span>
-					<span>
-						<i className="code" />
-						{t("Code")}
-					</span>
-				</div>
 				{display === "chart" ? (
 					<div className="usage-chart-wrap">
 						<div
@@ -206,27 +171,22 @@ export function UsagePanel({
 							onPointerLeave={() => setHovered(null)}
 							role="img"
 						>
-							{usage.daily.map((day, index) => {
-								const chatHeight = (day.chatTokens / peak) * 100;
-								const codeHeight = (day.codeTokens / peak) * 100;
-								return (
-									<span
-										role="img"
-										aria-label={t("{{date}}: {{tokens}} Tokens", {
-											date: date.format(new Date(`${day.date}T12:00:00`)),
-											tokens: full.format(day.chatTokens + day.codeTokens),
-										})}
-										className={`usage-bar ${hovered === index ? "active" : ""}`}
-										key={day.date}
-										onMouseEnter={() => setHovered(index)}
-										onPointerEnter={() => setHovered(index)}
-										style={{ "--bar-index": index } as CSSProperties}
-									>
-										<i className="code" style={{ height: `${codeHeight}%` }} />
-										<i className="chat" style={{ height: `${chatHeight}%` }} />
-									</span>
-								);
-							})}
+							{usage.daily.map((day, index) => (
+								<span
+									role="img"
+									aria-label={t("{{date}}: {{tokens}} Tokens", {
+										date: date.format(new Date(`${day.date}T12:00:00`)),
+										tokens: full.format(dayTotal(day)),
+									})}
+									className={`usage-bar ${hovered === index ? "active" : ""}`}
+									key={day.date}
+									onMouseEnter={() => setHovered(index)}
+									onPointerEnter={() => setHovered(index)}
+									style={{ "--bar-index": index } as CSSProperties}
+								>
+									<i className="total" style={{ height: `${(dayTotal(day) / peak) * 100}%` }} />
+								</span>
+							))}
 						</div>
 						<div className="usage-chart-axis">
 							<span>{date.format(new Date(`${usage.daily[0]!.date}T12:00:00`))}</span>
@@ -242,12 +202,8 @@ export function UsagePanel({
 							>
 								<strong>{date.format(new Date(`${displaySelected.date}T12:00:00`))}</strong>
 								<span>
-									<i className="chat" />
-									{full.format(displaySelected.chatTokens)} {t("Chat")}
-								</span>
-								<span>
-									<i className="code" />
-									{full.format(displaySelected.codeTokens)} {t("Code")}
+									<i className="total" />
+									{full.format(dayTotal(displaySelected))} {t("Total")}
 								</span>
 							</output>
 						) : null}
@@ -258,8 +214,6 @@ export function UsagePanel({
 							<thead>
 								<tr>
 									<th>{t("Date")}</th>
-									<th>{t("Chat")}</th>
-									<th>{t("Code")}</th>
 									<th>{t("Total")}</th>
 								</tr>
 							</thead>
@@ -267,8 +221,6 @@ export function UsagePanel({
 								{[...usage.daily].reverse().map((day) => (
 									<tr key={day.date}>
 										<td>{date.format(new Date(`${day.date}T12:00:00`))}</td>
-										<td>{full.format(day.chatTokens)}</td>
-										<td>{full.format(day.codeTokens)}</td>
 										<td>{full.format(dayTotal(day))}</td>
 									</tr>
 								))}
@@ -310,10 +262,6 @@ export function UsagePanel({
 						<div>
 							<dt>{t("Sessions")}</dt>
 							<dd>{full.format(usage.sessionCount)}</dd>
-						</div>
-						<div>
-							<dt>{t("Code share")}</dt>
-							<dd>{modeShare}%</dd>
 						</div>
 					</dl>
 				</section>

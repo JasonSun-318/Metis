@@ -27,7 +27,6 @@ void setLocale("zh-CN").then(() =>
 				onClose={() => undefined}
 				status={{
 					sessionId: "fixture",
-					mode: "chat",
 					contextTokens: 15_000,
 					contextWindow: 1_000_000,
 					contextBasis: "reported_total",

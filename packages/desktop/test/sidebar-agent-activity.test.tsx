@@ -12,7 +12,6 @@ vi.mock("../src/renderer/components/AccountMenu.tsx", () => ({ AccountMenu: () =
 const DATE = "2026-10-26T08:00:00Z";
 const session: SessionSummary = {
 	sessionId: "root",
-	mode: "code",
 	cwdOrigin: "managed",
 	cwd: "/tmp/work",
 	name: "Parent task",
@@ -67,8 +66,8 @@ it("keeps parent activity and status grouping aligned while rows move, without c
 	store.setSessions({ sessions: [session], nextAfterSessionId: null });
 	const workspace: ComponentProps<typeof SessionSidebar>["workspace"] = {
 		busy: false,
-		mode: "code",
 		newTaskOpen: false,
+		mode: "chat",
 		onModeChange: vi.fn(),
 		onNewTask: vi.fn(),
 		onOpen: vi.fn(),

@@ -1,5 +1,4 @@
 import type {
-	AgentMode,
 	InteractionResponseInput,
 	McpServerSummaryView,
 	ModelOptionView,
@@ -24,6 +23,7 @@ import { latestAssistantUsageKey, queuedTurnActionError } from "../session-view-
 import type { AppStore } from "../store/app-store.ts";
 import { emptyProjection } from "../store/reducer.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
@@ -49,7 +49,7 @@ export type SessionChatSubmit = (input: ConversationSubmission) => Promise<void>
 // the pane's sessionId explicitly so one implementation serves every visible
 // session, not just the projected one.
 export interface SessionChatViewContext {
-	readonly appearance?: AgentMode;
+	readonly appearance?: WorkMode;
 	readonly api: MetisDesktopApi;
 	readonly bootstrapped: boolean;
 	readonly composerFormRef: RefObject<HTMLFormElement | null>;

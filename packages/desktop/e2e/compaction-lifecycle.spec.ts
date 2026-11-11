@@ -70,7 +70,7 @@ for (const mode of ["chat", "code"] as const) {
 			const sessionId = await page.evaluate(
 				async ({ cwd, mode }) => {
 					const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-					const result = await api.createSession({ requestId: crypto.randomUUID(), mode, cwd });
+					const result = await api.createSession({ requestId: crypto.randomUUID(), cwd });
 					localStorage.setItem(`metis.activeSessionId.${mode}`, result.session.sessionId);
 					return result.session.sessionId;
 				},

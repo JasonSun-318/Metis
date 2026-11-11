@@ -114,7 +114,6 @@ function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 				{
 					sessionId: "99999999-8888-4777-8666-555544443333",
 					name: "Memory test",
-					mode: "code",
 					cwdOrigin: "user-selected",
 					cwd: "/work/metis",
 					createdAt: "2026-09-18T00:00:00Z",

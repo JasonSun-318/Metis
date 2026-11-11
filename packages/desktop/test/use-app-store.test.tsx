@@ -37,7 +37,6 @@ describe("useAppStore selector", () => {
 		await act(async () =>
 			store.upsertSession({
 				sessionId: "session-1",
-				mode: "chat",
 				cwdOrigin: "managed",
 				cwd: null,
 				createdAt: "2026-08-31T00:00:00.000Z",

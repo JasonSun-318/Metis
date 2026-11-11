@@ -13,7 +13,6 @@ function session(id: number, name: string, archived = true): SessionSummary {
 	return {
 		sessionId: `${String(id).padStart(8, "0")}-1111-4111-8111-111111111111`,
 		name,
-		mode: id === 2 ? "code" : "chat",
 		cwd: null,
 		cwdOrigin: "managed",
 		state: "idle",
@@ -74,8 +73,6 @@ const api = {
 		currentStreakDays: 0,
 		longestStreakDays: 0,
 		sessionCount: 0,
-		mostUsedMode: null,
-		mostUsedModePercent: 0,
 		mostUsedThinkingLevel: null,
 		mostUsedThinkingLevelPercent: 0,
 		usedSkillCount: 0,

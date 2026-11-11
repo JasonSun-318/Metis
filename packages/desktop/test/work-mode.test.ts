@@ -8,7 +8,7 @@ import {
 import { legacyActiveConversation, loadWorkMode, WORK_MODE_KEY } from "../src/renderer/work-mode.ts";
 
 beforeEach(() => localStorage.clear());
-it("migrates the focused legacy code conversation and shared project preferences once", () => {
+it("migrates the focused legacy code conversation and mode-keyed project preferences once", () => {
 	const id = "11111111-1111-4111-8111-111111111111";
 	localStorage.setItem("metis.activeSessionId.code", id);
 	localStorage.setItem(
@@ -22,7 +22,7 @@ it("migrates the focused legacy code conversation and shared project preferences
 	);
 	localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "project" }));
 	localStorage.setItem(
-		"metis.projectPreferences.v1",
+		"metis.projectPreferences.v2",
 		JSON.stringify({
 			version: 1,
 			entries: [
@@ -34,7 +34,7 @@ it("migrates the focused legacy code conversation and shared project preferences
 	expect(legacyActiveConversation(localStorage)).toBe(id);
 	expect(loadWorkMode(localStorage)).toBe("code");
 	const preferences = loadProjectPreferences(localStorage);
-	expect([...preferences.values()]).toEqual([{ mode: "chat", cwd: "/project", alias: "development", pinned: true }]);
+	expect([...preferences.values()]).toEqual([{ cwd: "/project", alias: "development", pinned: true }]);
 	saveProjectPreferences(localStorage, preferences);
 	saveSessionGroupingPreferences(localStorage, loadSessionGroupingPreferences(localStorage));
 	localStorage.setItem(WORK_MODE_KEY, "chat");

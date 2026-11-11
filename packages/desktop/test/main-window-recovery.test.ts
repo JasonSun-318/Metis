@@ -219,7 +219,6 @@ function clickNotification(sessionId: string): void {
 	};
 	completionOptions.notify?.({
 		sessionId,
-		mode: "chat",
 		name: "Background task",
 		outcome: "completed",
 	});
@@ -461,7 +460,6 @@ describe("main window recovery", () => {
 		};
 		completionOptions.notify?.({
 			sessionId: "session-1",
-			mode: "chat",
 			name: "Background task",
 			outcome: "completed",
 		});

@@ -1,4 +1,4 @@
-import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@metis/app-protocol";
+import type { PlanView, SessionProcessView, SessionSummary } from "@metis/app-protocol";
 import type {
 	CSSProperties,
 	DragEvent,
@@ -21,6 +21,7 @@ import { Books, ClipboardText, ClockCounterClockwise, FileText, Globe, Plus, Ter
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { useWorkspaceLayout } from "../use-workspace-layout.ts";
+import type { WorkMode } from "../work-mode.ts";
 import {
 	displayFileName,
 	FILE_BROWSER_STORAGE_PREFIX,
@@ -179,14 +180,14 @@ interface SessionWorkspaceViewProps {
 	readonly cleanupSessionIds: readonly string[];
 	/** Bumped by the Cmd/Ctrl+W shortcut to close the focused tab. */
 	readonly closeTabRequest?: number;
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly onActivateSession: (sessionId: string) => void;
 	readonly onChatSession: (sessionId: string | null) => void;
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
 	readonly onDirtySessionIdsChange: (sessionIds: readonly string[]) => void;
 	readonly onError: (cause: unknown) => void;
 	readonly onLiveSessionsChange: (sessionIds: readonly string[], chatSessionIds: readonly string[]) => void;
-	readonly onNewSession?: (target: { readonly mode: AgentMode; readonly cwd: string } | null) => void;
+	readonly onNewSession?: (target: { readonly cwd: string } | null) => void;
 	readonly chatView: SessionChatViewContext;
 	/** Pending questions and approvals; they render only inside their session's conversation. */
 	readonly inlineInteractions?: readonly { readonly interactionId: string; readonly sessionId: string }[];
@@ -198,7 +199,7 @@ interface SessionWorkspaceViewProps {
 	readonly projectFor?: (sessionId: string) => WorkspaceProject | null;
 	readonly sessionsById: ReadonlyMap<
 		string,
-		Pick<SessionSummary, "sessionId" | "cwd" | "mode"> &
+		Pick<SessionSummary, "sessionId" | "cwd"> &
 			Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>
 	>;
 	readonly sessionTitleFor: (sessionId: string) => string;
@@ -1214,9 +1215,7 @@ export function SessionWorkspaceView({
 	// The "+ " in a pane strip starts a session beside that pane's context.
 	const sessionTargetFor = (paneId: string) => {
 		const target = paneTarget(paneId);
-		return target.sessionId === null || target.cwd === null
-			? null
-			: { mode: sessionsById.get(target.sessionId)?.mode ?? mode, cwd: target.cwd };
+		return target.sessionId === null || target.cwd === null ? null : { cwd: target.cwd };
 	};
 
 	// Tools always attach to the session behind the focused pane.

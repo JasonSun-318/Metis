@@ -27,7 +27,6 @@ else document.documentElement.dataset.motion = params.get("motion") === "reduced
 function session(id: string, name: string, rank: number, project?: string, unread = false): SessionSummary {
 	return {
 		sessionId: id,
-		mode: "chat",
 		cwdOrigin: project ? "user-selected" : "managed",
 		cwd: project ? `/fixture/${project}` : `/fixture/tasks/${id}`,
 		name,

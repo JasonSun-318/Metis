@@ -43,9 +43,9 @@ function mount() {
 		string,
 		ComponentProps<typeof SessionWorkspaceView>["sessionsById"] extends ReadonlyMap<string, infer V> ? V : never
 	>([
-		[ALPHA_1, { sessionId: ALPHA_1, cwd: "/work/alpha", mode: "code", state: "idle", unread: false }],
-		[BETA, { sessionId: BETA, cwd: "/work/beta", mode: "code", state: "running", unread: false }],
-		[ALPHA_2, { sessionId: ALPHA_2, cwd: "/work/alpha", mode: "code", state: "idle", unread: false }],
+		[ALPHA_1, { sessionId: ALPHA_1, cwd: "/work/alpha", state: "idle", unread: false }],
+		[BETA, { sessionId: BETA, cwd: "/work/beta", state: "running", unread: false }],
+		[ALPHA_2, { sessionId: ALPHA_2, cwd: "/work/alpha", state: "idle", unread: false }],
 	]);
 	const container = document.createElement("div");
 	document.body.append(container);
@@ -292,7 +292,6 @@ describe("workspace tab strip", () => {
 	it.each(["chat", "code"] as const)("omits mode icons from conversation tabs in %s presentation", async (mode) => {
 		const view = mount();
 		const sessions = new Map(view.sessionsById);
-		sessions.set(ALPHA_1, { ...sessions.get(ALPHA_1)!, mode: "chat" });
 		await view.render({ sessionsById: sessions, chatSessionId: ALPHA_1, mode });
 		await view.render({ sessionsById: sessions, chatSessionId: BETA, mode });
 		expect(view.tabs()).toEqual(["Alpha one", "Beta*"]);
@@ -311,7 +310,6 @@ describe("workspace tab strip", () => {
 			chatSessionId: null,
 			chatIsDraft: true,
 			chatFocusRequest: { nonce: 1, sessionId: null },
-			mode: "chat",
 		});
 		expect(view.tabs()).toContain("New task*");
 		expect(view.container.querySelectorAll('[role="tab"] > svg')).toHaveLength(0);

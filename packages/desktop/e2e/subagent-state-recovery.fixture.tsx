@@ -37,7 +37,6 @@ let child: AgentSummaryView = {
 	depth: 1,
 	status: "done",
 	archived: false,
-	mode: "chat",
 	tasks: [],
 	createdAt: stamp(0),
 	updatedAt: stamp(1),

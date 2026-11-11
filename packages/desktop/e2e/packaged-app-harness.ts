@@ -333,7 +333,7 @@ export async function waitForServerReady(page: Page): Promise<void> {
 export async function createAndRestoreChatSession(page: Page, cwd: string, waitForActive = true): Promise<string> {
 	const created = await page.evaluate(async (projectCwd) => {
 		const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-		const result = await api.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd: projectCwd });
+		const result = await api.createSession({ requestId: crypto.randomUUID(), cwd: projectCwd });
 		localStorage.setItem("metis.activeSessionId.chat", result.session.sessionId);
 		return result.session;
 	}, cwd);

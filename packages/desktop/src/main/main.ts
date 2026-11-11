@@ -203,7 +203,7 @@ async function launch(): Promise<void> {
 		setBadgeCount: (count) => {
 			if (process.platform === "darwin") app.setBadgeCount(count);
 		},
-		notify: ({ sessionId, mode, name, outcome }) => {
+		notify: ({ sessionId, name, outcome }) => {
 			if (!Notification.isSupported()) return;
 			const zh = workspaceEditState.language === "zh";
 			const taskName = name || (zh ? "当前任务" : "Current task");
@@ -220,7 +220,7 @@ async function launch(): Promise<void> {
 			notification.on("click", () => {
 				release();
 				suppressNextFocusAcknowledgement = true;
-				broker.requestRendererOpenSession(sessionId, mode);
+				broker.requestRendererOpenSession(sessionId);
 				void restoreMainWindow().catch((error) => reportWindowReopenFailure("from notification", error));
 			});
 			notification.on("close", release);
@@ -274,7 +274,7 @@ async function launch(): Promise<void> {
 		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),
 		onSessionUpdated: (session) => completionTracker.update(session),
 		onSessionDeleted: (sessionId) => completionTracker.forgetSession(sessionId),
-		onProjectDeleted: (_mode, cwd) => completionTracker.forgetProject(cwd),
+		onProjectDeleted: (cwd) => completionTracker.forgetProject(cwd),
 		onUserInterruptPending: (sessionId, pending) => completionTracker.setUserInterruptPending(sessionId, pending),
 		onSessionOpened: (sessionId) => {
 			suppressNextFocusAcknowledgement = false;

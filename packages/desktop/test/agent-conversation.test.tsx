@@ -84,7 +84,6 @@ function agent(): AgentSummaryView {
 		tasks: [],
 		createdAt: DATE,
 		updatedAt: DATE,
-		mode: "chat",
 		tools: ["read"],
 		writePolicy: "deny",
 		runControl: "enabled",

@@ -48,7 +48,6 @@ const agents: Record<QueueChild, AgentSummaryView> = Object.fromEntries(
 				depth: 1,
 				name: `Worker ${key.toUpperCase()}`,
 				agentType: "worker",
-				mode: "chat",
 				status: "running",
 				runControl: "enabled",
 				archived: false,

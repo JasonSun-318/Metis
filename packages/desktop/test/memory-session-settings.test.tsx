@@ -9,7 +9,6 @@ import { setLocale } from "../src/renderer/i18n.ts";
 const session = (id: string, cwd: string): SessionSummary => ({
 	sessionId: id,
 	name: "Same title",
-	mode: "code",
 	cwd,
 	cwdOrigin: "user-selected",
 	createdAt: "2026-09-18T00:00:00Z",

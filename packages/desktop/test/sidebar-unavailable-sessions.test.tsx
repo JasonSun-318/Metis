@@ -18,7 +18,6 @@ it("keeps unavailable sessions readable without fetching their agents and preser
 	const base: SessionSummary = {
 		sessionId: "healthy",
 		name: "Healthy",
-		mode: "code",
 		cwdOrigin: "managed",
 		cwd: "/tmp/work",
 		createdAt: "2026-10-26T08:00:00Z",
@@ -42,8 +41,8 @@ it("keeps unavailable sessions readable without fetching their agents and preser
 	const onOpen = vi.fn();
 	const workspace: ComponentProps<typeof SessionSidebar>["workspace"] = {
 		busy: false,
-		mode: "code",
 		newTaskOpen: false,
+		mode: "chat",
 		onModeChange: vi.fn(),
 		onNewTask: vi.fn(),
 		onOpen,

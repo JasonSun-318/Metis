@@ -24,7 +24,6 @@ function agent(agentId: string, extra: Partial<AgentSummaryView> = {}): AgentSum
 }
 const root: SessionSummary = {
 	sessionId: "root",
-	mode: "code",
 	cwd: "/tmp/project",
 	cwdOrigin: "user-selected",
 	createdAt: date,

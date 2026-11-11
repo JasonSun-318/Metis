@@ -174,7 +174,7 @@ test("remembered permission management defaults to all projects and revokes the 
 		await app.waitDone("case-multi-grant-first");
 		const second = await app.page.evaluate(async (cwd) => {
 			const api = (globalThis as unknown as { metis: MetisDesktopApi }).metis;
-			return api.createSession({ requestId: crypto.randomUUID(), mode: "chat", cwd, permissionPreset: "ask" });
+			return api.createSession({ requestId: crypto.randomUUID(), cwd, permissionPreset: "ask" });
 		}, otherProject);
 		await app.openSession(second.session.sessionId);
 		await app.submit("case-multi-grant-second");

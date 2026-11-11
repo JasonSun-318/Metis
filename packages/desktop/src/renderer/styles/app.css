@@ -2850,24 +2850,13 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .settings-segmented button { min-width: 48px; height: var(--control-height-compact); border-radius: var(--radius-compact); color: var(--text-10); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); transition: background-color var(--motion-duration-fast) ease, color var(--motion-duration-fast) ease; }
 .work-mode-segmented button { padding: 0 var(--space-12); white-space: nowrap; }
 .settings-segmented button[aria-pressed="true"], .usage-view-toggle button[aria-pressed="true"] { background: var(--panel-selected); color: var(--text-strong); }
-.usage-summary-cards { display: grid; gap: var(--space-12); margin-top: var(--space-8); margin-bottom: var(--space-16); grid-template-columns: 1fr 1fr; }
-.usage-metric-card { display: grid; gap: 5px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-02); padding: 14px 16px; }
-.usage-metric-header { display: flex; align-items: center; justify-content: space-between; }
-.usage-metric-header span { color: var(--text-17); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
-.usage-metric-badge { border-radius: var(--radius-full); padding: 2px 8px; font-size: var(--font-size-2xs); font-weight: var(--font-weight-medium); }
-.usage-metric-badge.chat { background: var(--surface-08); color: var(--accent); }
-.usage-metric-badge.code { background: var(--surface-08); color: var(--usage-code); }
-.usage-metric-card strong { color: var(--text-28); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); letter-spacing: -.02em; }
-.usage-metric-card small { color: var(--text-10); font-size: var(--font-size-2xs); }
 .usage-chart-card { position: relative; overflow: hidden; padding: 16px 18px; margin-bottom: var(--space-16); }
 .usage-chart-header { display: flex; justify-content: space-between; gap: var(--space-24); }
 .usage-chart-header p { margin: 3px 0 0; }
 .usage-view-toggle button { display: grid; width: var(--control-height-compact); height: var(--control-height-compact); place-items: center; border-radius: var(--radius-compact); color: var(--text-08); }
-.usage-legend { display: flex; gap: 18px; margin-top: var(--space-12); color: var(--text-14); font-size: var(--font-size-2xs); }
-.usage-legend span, .usage-tooltip span { display: inline-flex; align-items: center; gap: 7px; }
-.usage-legend i, .usage-tooltip i { width: 9px; height: 9px; border-radius: var(--radius-compact); }
-.usage-legend i.chat, .usage-tooltip i.chat { background: var(--accent); }
-.usage-legend i.code, .usage-tooltip i.code { background: var(--usage-code); }
+.usage-tooltip span { display: inline-flex; align-items: center; gap: 7px; }
+.usage-tooltip i { width: 9px; height: 9px; border-radius: var(--radius-compact); }
+.usage-tooltip i.total { background: var(--accent); }
 .usage-chart-wrap, .usage-table-wrap { height: 180px; margin-top: var(--space-12); }
 .usage-chart-wrap { position: relative; display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
 .usage-chart { display: flex; min-height: 0; align-items: flex-end; gap: clamp(2px, .45vw, 7px); border-bottom: 1px solid var(--surface-11); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(25% - 1px), var(--border-weak) 25%); padding: 0 var(--space-4); }
@@ -2878,8 +2867,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .usage-bar { display: flex; height: 100%; min-width: 3px; flex: 1; align-items: stretch; justify-content: flex-end; flex-direction: column; border-radius: var(--radius-compact) var(--radius-compact) 0 0; cursor: pointer; transform-origin: bottom; background: var(--surface-02); animation: usage-bar-rise 280ms cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--bar-index, 0) * 6ms); transition: background-color 100ms ease; }
 .usage-bar:hover, .usage-bar.active { background: var(--surface-07); }
 .usage-bar > i { display: block; width: 100%; min-height: 0; transition: height 280ms cubic-bezier(.16, 1, .3, 1); }
-.usage-bar > i.code { border-radius: var(--radius-compact) var(--radius-compact) 0 0; background: var(--usage-code); }
-.usage-bar > i.chat { background: var(--accent); }
+.usage-bar > i.total { border-radius: var(--radius-compact) var(--radius-compact) 0 0; background: var(--accent); }
 .usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-10); margin-top: var(--space-8); font-size: var(--font-size-2xs); font-weight: var(--font-weight-medium); }
 .usage-tooltip { position: absolute; z-index: 2; top: 12px; display: grid; min-width: 165px; gap: var(--space-8); border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-08); box-shadow: var(--overlay-shadow); color: var(--text-22); padding: var(--space-12) 12px; font-size: var(--font-size-2xs); transform: translateX(-50%); pointer-events: none; opacity: 0; transition: left var(--motion-duration-fast) cubic-bezier(.16, 1, .3, 1), opacity var(--motion-duration-fast) ease; }
 .usage-tooltip.is-visible { opacity: 1; }
@@ -3165,8 +3153,6 @@ classes so their inline layout wins the cascade. */
 	.reviewer-model-fields, .reviewer-model-budgets { grid-template-columns: minmax(0, 1fr); }
 	.usage-toolbar { align-items: stretch; flex-direction: column; }
 	.settings-segmented { align-self: flex-start; }
-	.usage-summary-cards { gap: var(--space-12); }
-	.usage-summary-cards article { min-height: 112px; padding: var(--space-16); }
 	.usage-chart-card { padding: 17px; }
 	.usage-chart { gap: 2px; }
 	.settings-page-scroll-profile { overflow: auto; }

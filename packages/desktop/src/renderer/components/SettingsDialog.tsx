@@ -1,10 +1,4 @@
-import type {
-	AgentMode,
-	ModelSettingsView,
-	PermissionPresetView,
-	SessionSnapshot,
-	SessionSummary,
-} from "@metis/app-protocol";
+import type { ModelSettingsView, PermissionPresetView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -23,6 +17,7 @@ import {
 } from "../icons.tsx";
 import type { AppTheme } from "../theme.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { ArchivedConversationsPanel } from "./ArchivedConversationsPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
@@ -70,8 +65,8 @@ export function SettingsDialog({
 }: {
 	readonly api: MetisDesktopApi;
 	readonly closeDelayMs?: number;
-	readonly workMode?: AgentMode;
-	readonly onWorkModeChange?: (mode: AgentMode) => void;
+	readonly workMode?: WorkMode;
+	readonly onWorkModeChange?: (mode: WorkMode) => void;
 	readonly generalPreferences: GeneralPreferences;
 	readonly onClose: () => void;
 	readonly onDeleteSession?: (session: SessionSummary) => Promise<void>;

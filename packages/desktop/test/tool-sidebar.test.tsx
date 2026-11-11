@@ -111,8 +111,8 @@ function mount() {
 		onLiveSessionsChange: vi.fn(),
 		chatView: { api, store } as WorkspaceProps["chatView"],
 		sessionsById: new Map([
-			[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "code" }],
-			[OTHER, { sessionId: OTHER, cwd: "/work/two", mode: "code" }],
+			[SESSION, { sessionId: SESSION, cwd: "/work/one" }],
+			[OTHER, { sessionId: OTHER, cwd: "/work/two" }],
 		]),
 		sessionTitleFor: (id) => (id === SESSION ? "One" : "Two"),
 		store,
@@ -220,18 +220,18 @@ describe("per-session tools sidebar", () => {
 		expect(document.querySelector(".tool-add-menu")).toBeNull();
 	});
 
-	it("offers Files and Review for code work regardless of the session creation mode", async () => {
+	it("offers Files and Review for code work", async () => {
 		const view = mount();
 		await view.render({
 			sessionsById: new Map([
-				[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "chat" }],
-				[OTHER, { sessionId: OTHER, cwd: "/work/two", mode: "code" }],
+				[SESSION, { sessionId: SESSION, cwd: "/work/one" }],
+				[OTHER, { sessionId: OTHER, cwd: "/work/two" }],
 			]),
 		});
 
 		const menu = () => view.container.querySelector(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu")!;
-		// Switching the work mode to Code keeps historical sessions on their creation
-		// mode, but code tools still apply to the session being viewed.
+		// Work mode only decides which tools are visible; code tools still apply to
+		// the session being viewed.
 		const chatTools = [...menu().querySelectorAll("button")].map((tool) => tool.textContent?.trim());
 		expect(chatTools).toContain("Terminal");
 		expect(chatTools).toContain("Files");
@@ -248,13 +248,13 @@ describe("per-session tools sidebar", () => {
 		});
 	});
 
-	it("hides code tools for chat work even when the session history says code", async () => {
+	it("hides code tools for chat work", async () => {
 		const view = mount();
 		await view.render({
 			chatCwd: "/work/one",
 			chatSessionId: SESSION,
 			mode: "chat",
-			sessionsById: new Map([[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "code" }]]),
+			sessionsById: new Map([[SESSION, { sessionId: SESSION, cwd: "/work/one" }]]),
 		});
 
 		const menu = () => view.container.querySelector(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu")!;

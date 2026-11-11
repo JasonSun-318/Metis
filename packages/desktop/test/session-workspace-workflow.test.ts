@@ -15,12 +15,11 @@ import type { DesktopApiEvent, MetisDesktopApi } from "../src/shared/desktop-api
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 
-function summary(sessionId: string, mode: "chat" | "code" = "chat", unread = false): SessionSummary {
+function summary(sessionId: string, userSelectedCwd = false, unread = false): SessionSummary {
 	return {
 		sessionId,
-		mode,
-		cwdOrigin: mode === "chat" ? "managed" : "user-selected",
-		cwd: mode === "chat" ? `/managed/${sessionId}` : `/work/${sessionId}`,
+		cwdOrigin: userSelectedCwd ? "user-selected" : "managed",
+		cwd: userSelectedCwd ? `/work/${sessionId}` : `/managed/${sessionId}`,
 		createdAt: "2026-08-30T00:00:00.000Z",
 		updatedAt: "2026-08-30T00:00:00.000Z",
 		state: "idle",
@@ -42,9 +41,9 @@ function item(itemId: string, sessionId: string, text: string): ItemView {
 	};
 }
 
-function snapshot(sessionId: string, mode: "chat" | "code" = "chat", unread = false): SessionSnapshot {
+function snapshot(sessionId: string, userSelectedCwd = false, unread = false): SessionSnapshot {
 	return {
-		session: summary(sessionId, mode, unread),
+		session: summary(sessionId, userSelectedCwd, unread),
 		collaborationMode: "default",
 		permissionPreset: "ask",
 		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
@@ -130,8 +129,8 @@ describe("SessionWorkspaceWorkflow", () => {
 	beforeEach(() => localStorage.clear());
 
 	it("switches presentation without changing the active session or pending draft creation", async () => {
-		const { api, store, workflow } = harness([summary("old", "code")]);
-		vi.mocked(api.openSession).mockResolvedValue(snapshot("old", "code"));
+		const { api, store, workflow } = harness([summary("old", true)]);
+		vi.mocked(api.openSession).mockResolvedValue(snapshot("old", true));
 		await workflow.openVisibleSession("old");
 		await workflow.selectMode("code");
 		expect(store.getSnapshot().activeSessionId).toBe("old");
@@ -149,7 +148,7 @@ describe("SessionWorkspaceWorkflow", () => {
 		await submission;
 		expect(api.createSession).toHaveBeenCalledOnce();
 		expect(api.createSession).toHaveBeenCalledWith(
-			expect.objectContaining({ mode: "chat", cwd: "/chosen", permissionPreset: "full" }),
+			expect.objectContaining({ cwd: "/chosen", permissionPreset: "full" }),
 		);
 		expect(api.startTurn).toHaveBeenCalledOnce();
 		expect(store.getSnapshot().activeSessionId).toBe("new");
@@ -157,7 +156,7 @@ describe("SessionWorkspaceWorkflow", () => {
 	});
 
 	it("persists the upgraded work mode before opening a conversation from the other legacy list", async () => {
-		const old = summary("11111111-1111-4111-8111-111111111111", "code");
+		const old = summary("11111111-1111-4111-8111-111111111111", true);
 		localStorage.setItem("metis.activeSessionId.code", old.sessionId);
 		localStorage.setItem(
 			"metis.workspace-layout.v1",
@@ -171,7 +170,7 @@ describe("SessionWorkspaceWorkflow", () => {
 		localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "project" }));
 		const { api, workflow } = harness([old, summary("other")]);
 		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) =>
-			snapshot(sessionId, sessionId === old.sessionId ? "code" : "chat"),
+			snapshot(sessionId, sessionId === old.sessionId),
 		);
 		await workflow.start();
 		expect(workflow.getSnapshot().mode).toBe("code");
@@ -189,8 +188,8 @@ describe("SessionWorkspaceWorkflow", () => {
 			setModel: vi.fn().mockResolvedValue({}),
 			setThinkingSelection: vi.fn().mockResolvedValue({}),
 		});
-		vi.mocked(api.createSession).mockResolvedValue({ session: summary("new-code", "code") });
-		vi.mocked(api.openSession).mockResolvedValue(snapshot("new-code", "code"));
+		vi.mocked(api.createSession).mockResolvedValue({ session: summary("new-code", true) });
+		vi.mocked(api.openSession).mockResolvedValue(snapshot("new-code", true));
 		workflow.startNewTask("code");
 		workflow.setDraftFolder("/project");
 		await workflow.submitNewTask({ text: "Build it", attachments: [] }, undefined, {
@@ -474,10 +473,10 @@ describe("SessionWorkspaceWorkflow", () => {
 	});
 
 	it("deduplicates mark-read while a request is pending", async () => {
-		const unread = summary("unread", "chat", true);
+		const unread = summary("unread", false, true);
 		const { api, workflow } = harness([unread]);
 		const pending = deferred<{ session: SessionSummary }>();
-		vi.mocked(api.openSession).mockResolvedValue(snapshot(unread.sessionId, "chat", true));
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(unread.sessionId, false, true));
 		vi.mocked(api.markSessionRead).mockReturnValue(pending.promise);
 
 		const opening = workflow.openSession(unread.sessionId);
@@ -665,7 +664,7 @@ describe("SessionWorkspaceWorkflow", () => {
 
 	it("allows a managed Code draft and locks its directory after creation", async () => {
 		const { api, workflow } = harness();
-		const created = summary("code-created", "code");
+		const created = summary("code-created", true);
 		const opening = deferred<SessionSnapshot>();
 		vi.mocked(api.createSession).mockResolvedValue({ session: created });
 		vi.mocked(api.openSession).mockReturnValue(opening.promise);
@@ -676,7 +675,7 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(workflow.getSnapshot().draft?.sessionId).toBe(created.sessionId);
 		workflow.setDraftFolder("/work/other");
 		expect(workflow.getSnapshot().draft?.folder).toBeNull();
-		opening.resolve(snapshot(created.sessionId, "code"));
+		opening.resolve(snapshot(created.sessionId, true));
 		await submission;
 	});
 
@@ -712,9 +711,9 @@ describe("SessionWorkspaceWorkflow", () => {
 			setModel: vi.fn().mockResolvedValue({}),
 			setThinkingSelection: vi.fn().mockResolvedValue({}),
 		});
-		const created = summary("editor-knowledge", "code");
+		const created = summary("editor-knowledge", true);
 		vi.mocked(api.createSession).mockResolvedValue({ session: created });
-		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, true));
 		workflow.startNewTask("code");
 		workflow.setDraftFolder("/project");
 		expect(await workflow.prepareNewTask()).toBe(created.sessionId);
@@ -732,10 +731,10 @@ describe("SessionWorkspaceWorkflow", () => {
 	});
 	it("deduplicates an in-flight empty project session create", async () => {
 		const { api, workflow } = harness();
-		const created = summary("project-created", "code");
+		const created = summary("project-created", true);
 		const pending = deferred<{ session: SessionSummary }>();
 		vi.mocked(api.createSession).mockReturnValue(pending.promise);
-		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, true));
 
 		const first = workflow.createSessionInProject("/work/project");
 		const second = workflow.createSessionInProject("/work/project");
@@ -747,11 +746,11 @@ describe("SessionWorkspaceWorkflow", () => {
 
 	it("uses a new project create request ID after a definitive server failure", async () => {
 		const { api, workflow } = harness();
-		const created = summary("project-retry", "code");
+		const created = summary("project-retry", true);
 		vi.mocked(api.createSession)
 			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.OPERATION_FAILED, "create rejected"))
 			.mockResolvedValue({ session: created });
-		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, true));
 
 		await expect(workflow.createSessionInProject("/work/retry")).rejects.toThrow("create rejected");
 		const rejectedRequestId = vi.mocked(api.createSession).mock.calls[0]![0].requestId;
@@ -762,11 +761,11 @@ describe("SessionWorkspaceWorkflow", () => {
 
 	it("reuses a completed project create request when opening the session fails", async () => {
 		const { api, workflow } = harness();
-		const created = summary("project-open-retry", "code");
+		const created = summary("project-open-retry", true);
 		vi.mocked(api.createSession).mockResolvedValue({ session: created });
 		vi.mocked(api.openSession)
 			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.OPERATION_FAILED, "open rejected"))
-			.mockResolvedValue(snapshot(created.sessionId, "code"));
+			.mockResolvedValue(snapshot(created.sessionId, true));
 
 		await expect(workflow.createSessionInProject("/work/open-retry")).rejects.toThrow("open rejected");
 		const completedCreateRequestId = vi.mocked(api.createSession).mock.calls[0]![0].requestId;
@@ -775,11 +774,10 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(vi.mocked(api.createSession).mock.calls[1]![0].requestId).toBe(completedCreateRequestId);
 	});
 
-	it.each(["chat", "code"] as const)(
-		"restores a %s conversation to its original list without changing the active conversation",
-		async (mode) => {
-			const active = summary("active");
-			const archived = { ...summary("archived", mode), archived: true, name: "Old conversation" };
+	it("restores an archived conversation without changing the active conversation", async () => {
+		const active = summary("active");
+		const archived = { ...summary("archived", true), archived: true, name: "Old conversation" };
+		{
 			const { api, workflow, store } = harness([active]);
 			store.upsertSession(active);
 			vi.mocked(api.openSession).mockResolvedValue(snapshot(active.sessionId));
@@ -797,10 +795,10 @@ describe("SessionWorkspaceWorkflow", () => {
 			expect(api.openSession).toHaveBeenCalledTimes(1);
 			expect(api.archiveAgent).not.toHaveBeenCalled();
 			expect(api.listAgents).not.toHaveBeenCalled();
-		},
-	);
+		}
+	});
 	it("restores only the necessary child ancestry across bounded catalog pages", async () => {
-		const archived = { ...summary("archived", "code"), archived: true };
+		const archived = { ...summary("archived", true), archived: true };
 		const { api, workflow, store } = harness([]);
 		vi.mocked(api.unarchiveSession).mockResolvedValue({ session: { ...archived, archived: false } });
 		const parent = { agentId: "parent", agentPath: ["parent"], archived: true } as AgentSummaryView;
@@ -1172,10 +1170,9 @@ describe("SessionWorkspaceWorkflow", () => {
 	});
 
 	it("reuses a project delete request ID for the same preview revision", async () => {
-		const target = summary("project", "code");
+		const target = summary("project", true);
 		const { api, workflow } = harness([target]);
 		const preview = {
-			mode: "code" as const,
 			cwd: target.cwd!,
 			sessionCount: 1,
 			blockingScheduleCount: 0,
@@ -1185,60 +1182,41 @@ describe("SessionWorkspaceWorkflow", () => {
 			.mockRejectedValueOnce(new Error("response lost"))
 			.mockResolvedValue({
 				ok: true,
-				result: { mode: "code", cwd: target.cwd!, deletedSessionCount: 1 },
+				result: { cwd: target.cwd!, deletedSessionCount: 1 },
 			});
 
-		await expect(workflow.deleteProject({ mode: "code", cwd: target.cwd! }, preview)).rejects.toThrow(
-			"response lost",
-		);
+		await expect(workflow.deleteProject({ cwd: target.cwd! }, preview)).rejects.toThrow("response lost");
 		const requestId = vi.mocked(api.deleteProject).mock.calls[0]![0].requestId;
-		await workflow.deleteProject({ mode: "code", cwd: target.cwd! }, preview);
+		await workflow.deleteProject({ cwd: target.cwd! }, preview);
 
 		expect(vi.mocked(api.deleteProject).mock.calls[1]![0].requestId).toBe(requestId);
 	});
 
-	it("reconciles a partially deleted mixed project and retains its shared preferences for retry", async () => {
+	it("retains shared project preferences through a failed delete and clears them on retry", async () => {
 		const chat = { ...summary("chat-project"), cwd: "/work/shared", cwdOrigin: "user-selected" as const };
-		const code = { ...summary("code-project", "code"), cwd: chat.cwd };
+		const code = { ...summary("code-project", true), cwd: chat.cwd };
 		const { api, store, workflow } = harness([chat, code]);
 		store.setSessions({ sessions: [chat, code], nextAfterSessionId: null });
-		workflow.renameProject({ mode: "chat", cwd: chat.cwd }, "Shared project");
-		workflow.pinProject({ mode: "chat", cwd: chat.cwd }, true);
+		workflow.renameProject({ cwd: chat.cwd }, "Shared project");
+		workflow.pinProject({ cwd: chat.cwd }, true);
 		const preview = {
-			mode: "chat" as const,
 			cwd: chat.cwd,
 			sessionCount: 2,
 			blockingScheduleCount: 0,
 			revision: "a".repeat(64),
-			additionalProjects: [
-				{
-					mode: "code" as const,
-					cwd: chat.cwd,
-					sessionCount: 1,
-					blockingScheduleCount: 0,
-					revision: "b".repeat(64),
-				},
-			],
 		};
-		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [code], nextAfterSessionId: null });
-		vi.mocked(api.deleteProject)
-			.mockResolvedValueOnce({ ok: true, result: { mode: "chat", cwd: chat.cwd, deletedSessionCount: 1 } })
-			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.SESSION_IN_USE, "project in use"));
-		await expect(workflow.deleteProject({ mode: "chat", cwd: chat.cwd }, preview)).rejects.toThrow("still in use");
-		expect(store.getSnapshot().sessionsById.has(chat.sessionId)).toBe(false);
-		expect(store.getSnapshot().sessionsById.has(code.sessionId)).toBe(true);
-		expect([...workflow.getSnapshot().projectPreferences.values()]).toEqual([
-			{ mode: "chat", cwd: chat.cwd, alias: "Shared project", pinned: true },
-		]);
 		vi.mocked(api.listSessions).mockResolvedValue({ sessions: [], nextAfterSessionId: null });
-		vi.mocked(api.deleteProject).mockImplementation(async (input) => ({
-			ok: true,
-			result: { mode: input.mode, cwd: input.cwd, deletedSessionCount: input.mode === "code" ? 1 : 0 },
-		}));
-		await workflow.deleteProject(
-			{ mode: "chat", cwd: chat.cwd },
-			{ ...preview, revision: "c".repeat(64), sessionCount: 1 },
-		);
+		vi.mocked(api.deleteProject)
+			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.SESSION_IN_USE, "project in use"))
+			.mockResolvedValue({ ok: true, result: { cwd: chat.cwd, deletedSessionCount: 2 } });
+
+		await expect(workflow.deleteProject({ cwd: chat.cwd }, preview)).rejects.toThrow("still in use");
+		expect(store.getSnapshot().sessionsById.size).toBe(2);
+		expect([...workflow.getSnapshot().projectPreferences.values()]).toEqual([
+			{ cwd: chat.cwd, alias: "Shared project", pinned: true },
+		]);
+
+		await workflow.deleteProject({ cwd: chat.cwd }, preview);
 		expect(store.getSnapshot().sessionsById.size).toBe(0);
 		expect(workflow.getSnapshot().projectPreferences.size).toBe(0);
 	});
@@ -1251,7 +1229,6 @@ describe("SessionWorkspaceWorkflow", () => {
 			.mockResolvedValue({
 				ok: true,
 				result: {
-					mode: "chat",
 					cwd: "/work/b",
 					sessionCount: 1,
 					blockingScheduleCount: 0,
@@ -1259,8 +1236,8 @@ describe("SessionWorkspaceWorkflow", () => {
 				},
 			});
 
-		const first = workflow.previewProjectDelete({ mode: "chat", cwd: "/work/a" });
-		await workflow.previewProjectDelete({ mode: "chat", cwd: "/work/b" });
+		const first = workflow.previewProjectDelete({ cwd: "/work/a" });
+		await workflow.previewProjectDelete({ cwd: "/work/b" });
 		stale.resolve({
 			ok: false,
 			error: rpcFailure(RPC_ERROR_CODES.OPERATION_FAILED, "stale A preview failed"),
@@ -1271,10 +1248,9 @@ describe("SessionWorkspaceWorkflow", () => {
 	});
 
 	it("uses a new project delete request ID after a definitive server failure", async () => {
-		const target = summary("project-delete-retry", "code");
+		const target = summary("project-delete-retry", true);
 		const { api, workflow } = harness([target]);
 		const preview = {
-			mode: "code" as const,
 			cwd: target.cwd!,
 			sessionCount: 1,
 			blockingScheduleCount: 0,
@@ -1284,26 +1260,26 @@ describe("SessionWorkspaceWorkflow", () => {
 			.mockRejectedValueOnce(rpcFailure(RPC_ERROR_CODES.SESSION_IN_USE, "project in use"))
 			.mockResolvedValue({
 				ok: true,
-				result: { mode: "code", cwd: target.cwd!, deletedSessionCount: 1 },
+				result: { cwd: target.cwd!, deletedSessionCount: 1 },
 			});
 
-		await expect(workflow.deleteProject({ mode: "code", cwd: target.cwd! }, preview)).rejects.toThrow("still in use");
+		await expect(workflow.deleteProject({ cwd: target.cwd! }, preview)).rejects.toThrow("still in use");
 		const rejectedRequestId = vi.mocked(api.deleteProject).mock.calls[0]![0].requestId;
-		await workflow.deleteProject({ mode: "code", cwd: target.cwd! }, preview);
+		await workflow.deleteProject({ cwd: target.cwd! }, preview);
 
 		expect(vi.mocked(api.deleteProject).mock.calls[1]![0].requestId).not.toBe(rejectedRequestId);
 	});
 
 	it("persists project and session pins through the workflow snapshot", () => {
-		const target = summary("pinned", "code");
+		const target = summary("pinned", true);
 		const { workflow } = harness([target]);
 
-		workflow.renameProject({ mode: "code", cwd: target.cwd! }, "Workbench");
-		workflow.pinProject({ mode: "code", cwd: target.cwd! }, true);
+		workflow.renameProject({ cwd: target.cwd! }, "Workbench");
+		workflow.pinProject({ cwd: target.cwd! }, true);
 		workflow.pinSession(target, true);
 
 		expect([...workflow.getSnapshot().projectPreferences.values()]).toEqual([
-			{ mode: "code", cwd: target.cwd, alias: "Workbench", pinned: true },
+			{ cwd: target.cwd, alias: "Workbench", pinned: true },
 		]);
 		expect(workflow.getSnapshot().pinnedSessionIds.has(target.sessionId)).toBe(true);
 		expect(localStorage.getItem("metis.sessionPins.v1")).toContain(target.sessionId);

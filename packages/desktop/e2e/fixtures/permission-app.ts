@@ -72,7 +72,6 @@ export interface PermissionAppDirs {
 interface DesktopMetisApi {
 	createSession(input: {
 		readonly requestId: string;
-		readonly mode: "chat" | "code";
 		readonly cwd: string;
 		readonly permissionPreset?: "ask" | "auto" | "full";
 	}): Promise<{ readonly session: { readonly sessionId: string } }>;
@@ -304,17 +303,16 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 		}
 		if (!sessionId) {
 			sessionId = await page.evaluate(
-				async ({ cwd, permissionPreset, mode }) => {
+				async ({ cwd, permissionPreset }) => {
 					const metis = (globalThis as unknown as { metis: DesktopMetisApi }).metis;
 					const result = await metis.createSession({
 						requestId: crypto.randomUUID(),
-						mode,
 						cwd,
 						...(permissionPreset ? { permissionPreset } : {}),
 					});
 					return result.session.sessionId;
 				},
-				{ cwd: dirs.projectDir, permissionPreset: options.preset, mode: options.mode ?? "chat" },
+				{ cwd: dirs.projectDir, permissionPreset: options.preset },
 			);
 			await setActiveSession(sessionId);
 		} else {
@@ -403,17 +401,16 @@ export async function launchPermissionApp(options: LaunchPermissionAppOptions): 
 		},
 		async createSession(preset) {
 			const id = await page!.evaluate(
-				async ({ cwd, permissionPreset, mode }) => {
+				async ({ cwd, permissionPreset }) => {
 					const metis = (globalThis as unknown as { metis: DesktopMetisApi }).metis;
 					const result = await metis.createSession({
 						requestId: crypto.randomUUID(),
-						mode,
 						cwd,
 						...(permissionPreset ? { permissionPreset } : {}),
 					});
 					return result.session.sessionId;
 				},
-				{ cwd: dirs.projectDir, permissionPreset: preset, mode: options.mode ?? "chat" },
+				{ cwd: dirs.projectDir, permissionPreset: preset },
 			);
 			await setActiveSession(id);
 			return id;

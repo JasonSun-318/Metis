@@ -177,9 +177,7 @@ export function ArchivedConversationsPanel({
 													conversation: entry.session.name || t("Untitled conversation"),
 												})}
 											</span>
-										) : (
-											<span>{entry.session.mode === "code" ? "Code" : "Chat"}</span>
-										)}
+										) : null}
 										<time dateTime={stamp}>
 											{new Date(stamp).toLocaleDateString(
 												i18n.resolvedLanguage === "zh-CN" ? "zh-CN" : "en",

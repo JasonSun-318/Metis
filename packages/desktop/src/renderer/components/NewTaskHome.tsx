@@ -1,4 +1,4 @@
-import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
+import type { SkillSummaryView } from "@metis/app-protocol";
 import { type ReactNode, type Ref, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
@@ -30,6 +30,7 @@ import { getHomeStarters, type HomeStarter, type HomeStarterId, pickHomeGreeting
 import { useProfileIdentity } from "../profile-identity.ts";
 import type { ProjectSessionGroup } from "../session-groups.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
@@ -117,7 +118,7 @@ interface NewTaskHomeProps {
 	readonly disabledSlashReasons?: Partial<Record<ComposerSlashCommand, string>>;
 	readonly folder: string | null;
 	readonly folderLocked: boolean;
-	readonly mode: AgentMode;
+	readonly mode: WorkMode;
 	readonly modelControl?: ReactNode;
 	readonly knowledge?: KnowledgeLinkMenuProps;
 	readonly permissionControl?: ReactNode;

@@ -12,12 +12,11 @@ const epoch = "11111111-1111-4111-8111-111111111111";
 const params = new URLSearchParams(location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
 localStorage.setItem("metis.theme.v1", theme);
-let sessions: SessionSummary[] = (["chat", "code"] as const).map((mode, index) => ({
+let sessions: SessionSummary[] = ["日常工作中修改的文件", "历史代码会话"].map((name, index) => ({
 	sessionId: `${index + 1}1111111-1111-4111-8111-111111111111`,
-	mode,
 	cwd: "/tmp/metis-demo",
 	cwdOrigin: "user-selected",
-	name: mode === "chat" ? "日常工作中修改的文件" : "历史代码会话",
+	name,
 	createdAt: date,
 	updatedAt: date,
 	state: "idle",
@@ -135,8 +134,6 @@ const api = {
 		currentStreakDays: 0,
 		longestStreakDays: 0,
 		sessionCount: 2,
-		mostUsedMode: null,
-		mostUsedModePercent: 0,
 		mostUsedThinkingLevel: null,
 		mostUsedThinkingLevelPercent: 0,
 		usedSkillCount: 0,
@@ -188,7 +185,6 @@ const api = {
 		const session = {
 			...root,
 			sessionId: input.requestId,
-			mode: input.mode,
 			cwd: input.cwd ?? `/managed/${input.requestId}`,
 			cwdOrigin: input.cwd ? ("user-selected" as const) : ("managed" as const),
 			name: "新任务",

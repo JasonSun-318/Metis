@@ -73,7 +73,6 @@ function key(target: EventTarget, value: string) {
 function status(sessionId = COMPOSER_SESSION_ID, tokens = 64_000): ClientResult<"session/status"> {
 	return {
 		sessionId,
-		mode: "chat",
 		contextTokens: tokens,
 		contextWindow: 128_000,
 		contextBasis: "estimated_total",

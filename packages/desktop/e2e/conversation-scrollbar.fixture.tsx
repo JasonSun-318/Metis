@@ -1,11 +1,12 @@
-import type { AgentMode, ItemView } from "@metis/app-protocol";
+import type { ItemView } from "@metis/app-protocol";
 import { StrictMode, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Transcript } from "../src/renderer/components/Transcript.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
+import type { WorkMode } from "../src/renderer/work-mode.ts";
 
 const params = new URLSearchParams(location.search);
-const appearance: AgentMode = params.get("mode") === "code" ? "code" : "chat";
+const appearance: WorkMode = params.get("mode") === "code" ? "code" : "chat";
 const count = Math.max(1, Math.min(1000, Number(params.get("count") ?? 80)));
 const hasInitialOlder = params.has("older");
 const single = params.has("single");

@@ -6,7 +6,6 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
 	return {
 		sessionId: "session-1",
 		name: "检查登录流程",
-		mode: "code",
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: "2026-08-14T00:00:00.000Z",

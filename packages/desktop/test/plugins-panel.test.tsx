@@ -22,7 +22,6 @@ function session(
 ): SessionSummary {
 	return {
 		sessionId,
-		mode: "chat",
 		cwdOrigin,
 		cwd,
 		name: sessionId,

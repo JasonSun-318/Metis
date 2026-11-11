@@ -31,7 +31,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 			create(
 				cwd: string,
 				sessionDir: string,
-				options: { id: string; mode: "chat"; permissionPreset: "full" },
+				options: { id: string; permissionPreset: "full" },
 			): {
 				appendSessionInfo(name: string): void;
 				close(): void;
@@ -53,7 +53,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 	const sessionManager = sessions.SessionManager.create(
 		projectDir,
 		sessions.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sourceId, mode: "chat", permissionPreset: "full" },
+		{ id: sourceId, permissionPreset: "full" },
 	);
 	sessionManager.appendSessionInfo("Fork source title");
 	sessionManager.close();

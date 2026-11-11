@@ -503,7 +503,6 @@ export async function createSubagentSession(
 			const api = (globalThis as unknown as DesktopGlobals).metis;
 			const result = await api.createSession({
 				requestId: crypto.randomUUID(),
-				mode: input.mode,
 				cwd: input.cwd,
 				name: input.name,
 				permissionPreset: "full",

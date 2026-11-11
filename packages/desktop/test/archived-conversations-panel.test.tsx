@@ -16,7 +16,6 @@ const CHILD = "22222222-2222-4222-8222-222222222222";
 const session: SessionSummary = {
 	sessionId: ROOT,
 	name: "Archived project",
-	mode: "chat",
 	cwd: null,
 	cwdOrigin: "managed",
 	state: "idle",
@@ -241,8 +240,6 @@ describe("archived conversations settings", () => {
 				currentStreakDays: 0,
 				longestStreakDays: 0,
 				sessionCount: 0,
-				mostUsedMode: null,
-				mostUsedModePercent: 0,
 				mostUsedThinkingLevel: null,
 				mostUsedThinkingLevelPercent: 0,
 				usedSkillCount: 0,

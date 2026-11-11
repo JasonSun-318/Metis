@@ -2,7 +2,6 @@ import type { SessionSummary } from "@metis/app-protocol";
 
 export interface CompletionNotification {
 	readonly sessionId: string;
-	readonly mode: SessionSummary["mode"];
 	readonly outcome: "completed" | "failed";
 	readonly name: string;
 }
@@ -12,10 +11,7 @@ export function createBackgroundCompletionTracker(options: {
 	readonly setBadgeCount: (count: number) => void;
 	readonly notify: (notification: CompletionNotification) => void;
 }) {
-	const sessions = new Map<
-		string,
-		{ readonly state: SessionSummary["state"]; readonly mode: SessionSummary["mode"]; readonly cwd: string | null }
-	>();
+	const sessions = new Map<string, { readonly state: SessionSummary["state"]; readonly cwd: string | null }>();
 	const completedAway = new Set<string>();
 	const userInterrupts = new Set<string>();
 	const forgetSession = (sessionId: string): void => {
@@ -28,7 +24,7 @@ export function createBackgroundCompletionTracker(options: {
 	return {
 		update(session: SessionSummary): void {
 			const previous = sessions.get(session.sessionId)?.state;
-			sessions.set(session.sessionId, { state: session.state, mode: session.mode, cwd: session.cwd });
+			sessions.set(session.sessionId, { state: session.state, cwd: session.cwd });
 			if (session.state === "running") return;
 			const userInterrupted = userInterrupts.delete(session.sessionId);
 			if (
@@ -44,7 +40,6 @@ export function createBackgroundCompletionTracker(options: {
 			options.setBadgeCount(completedAway.size);
 			options.notify({
 				sessionId: session.sessionId,
-				mode: session.mode,
 				outcome: session.lastTurnOutcome,
 				name: session.name ?? "",
 			});

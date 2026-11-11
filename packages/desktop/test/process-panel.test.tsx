@@ -64,8 +64,8 @@ const command = (id: string, output = "", state: SessionProcessView["state"] = "
 const activeProcessTab = () => container.querySelector('[role="tab"][aria-label="Activity log"][aria-selected="true"]');
 
 const sessionsById = new Map([
-	[sessionId, { sessionId, cwd: "/tmp/project", mode: "chat" as const }],
-	["other", { sessionId: "other", cwd: "/tmp/other", mode: "chat" as const }],
+	[sessionId, { sessionId, cwd: "/tmp/project" }],
+	["other", { sessionId: "other", cwd: "/tmp/other" }],
 ]);
 
 const chatView: SessionChatViewContext = {

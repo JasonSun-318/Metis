@@ -1,5 +1,4 @@
 import type {
-	AgentMode,
 	ClientResult,
 	ConnectionEventsParams,
 	InteractionView,
@@ -23,8 +22,8 @@ import {
 	type MutableSessionProjection,
 	prependProjectionItems,
 	type RendererNotification,
-	removeModeProjectSessions,
 	removePendingInteraction,
+	removeProjectSessions,
 	removeSession,
 	replaceProjectionSnapshot,
 	replaceSessionList,
@@ -126,8 +125,8 @@ export class AppStore {
 		this.commit();
 	}
 
-	removeModeProject(mode: AgentMode, cwd: string): void {
-		if (removeModeProjectSessions(this.state, mode, cwd)) {
+	removeProject(cwd: string): void {
+		if (removeProjectSessions(this.state, cwd)) {
 			this.sidebarRevision += 1;
 			this.commit();
 		}

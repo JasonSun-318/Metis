@@ -1,4 +1,3 @@
-import type { AgentMode } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
@@ -12,6 +11,7 @@ import { APP_LOCALES, type AppLocale, setLocale } from "../i18n.ts";
 import { Desktop, Moon, Sun } from "../icons.tsx";
 import { APP_THEMES, type AppTheme } from "../theme.ts";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { WebSearchSettingsPanel } from "./WebSearchSettingsPanel.tsx";
 
@@ -30,8 +30,8 @@ export function GeneralPanel({
 		MetisDesktopApi,
 		"getWebSearchSettings" | "revealWebSearchCredential" | "updateWebSearchSettings"
 	>;
-	readonly workMode?: AgentMode;
-	readonly onWorkModeChange?: (mode: AgentMode) => void;
+	readonly workMode?: WorkMode;
+	readonly onWorkModeChange?: (mode: WorkMode) => void;
 	readonly generalPreferences: GeneralPreferences;
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;

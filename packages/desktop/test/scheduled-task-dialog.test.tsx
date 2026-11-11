@@ -25,7 +25,6 @@ const TASK: ScheduleTaskView = {
 function sessionSummary(overrides: Partial<SessionSummary>): SessionSummary {
 	return {
 		sessionId: "session",
-		mode: "chat",
 		cwdOrigin: "user-selected",
 		cwd: "/work",
 		createdAt: 1,
@@ -105,8 +104,8 @@ describe("ScheduledTaskDialog", () => {
 				api={{} as MetisDesktopApi}
 				models={[]}
 				sessions={[
-					sessionSummary({ sessionId: "chat-1", mode: "chat", cwd: "/work/chat" }),
-					sessionSummary({ sessionId: "code-1", mode: "code", cwd: "/work/code" }),
+					sessionSummary({ sessionId: "chat-1", cwd: "/work/chat" }),
+					sessionSummary({ sessionId: "code-1", cwd: "/work/code" }),
 				]}
 				onClose={vi.fn()}
 				onSaved={vi.fn()}

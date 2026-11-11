@@ -23,7 +23,6 @@ import {
 
 interface SeedSession {
 	readonly id: string;
-	readonly mode: "chat" | "code";
 	readonly name: string;
 	readonly cwdOrigin?: "managed" | "user-selected";
 	/** A sibling project folder for the session, instead of the shared project. */
@@ -60,7 +59,6 @@ async function launchWorkspace(options: {
 				sessionDir: string,
 				options: {
 					id: string;
-					mode: "chat" | "code";
 					permissionPreset: "full";
 					cwdOrigin?: "managed" | "user-selected";
 				},
@@ -91,7 +89,6 @@ async function launchWorkspace(options: {
 		await mkdir(cwd, { recursive: true });
 		const manager = sessions.SessionManager.create(cwd, sessions.getDefaultSessionDir(cwd, agentDir), {
 			id: seed.id,
-			mode: seed.mode,
 			permissionPreset: "full",
 			...(seed.cwdOrigin ? { cwdOrigin: seed.cwdOrigin } : {}),
 		});
@@ -298,7 +295,7 @@ async function dragPaneDivider(page: Page, axis: "column" | "row", delta: number
 test("tab menus follow pointer and keyboard anchors without hiding the conversation draft", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const sessionId = "81000000-0000-4000-8000-000000000071";
-	const workspace = await launchWorkspace({ sessions: [{ id: sessionId, mode: "chat", name: "Menu Alpha" }] });
+	const workspace = await launchWorkspace({ sessions: [{ id: sessionId, name: "Menu Alpha" }] });
 	const { page } = workspace;
 	try {
 		await page.setViewportSize({ width: 1600, height: 1000 });
@@ -385,9 +382,9 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 	const gamma = "81000000-0000-4000-8000-000000000083";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: alpha, mode: "chat", name: "Resize Alpha" },
-			{ id: beta, mode: "chat", name: "Resize Beta" },
-			{ id: gamma, mode: "chat", name: "Resize Gamma" },
+			{ id: alpha, name: "Resize Alpha" },
+			{ id: beta, name: "Resize Beta" },
+			{ id: gamma, name: "Resize Gamma" },
 		],
 	});
 	const { page } = workspace;
@@ -502,7 +499,7 @@ test("split placeholders, pane dividers and preferred ratios survive a renderer 
 test("compact tabs and release notes stay usable when the sidebar is clipped and a new task opens", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const sessionId = "81000000-0000-4000-8000-0000000000f1";
-	const workspace = await launchWorkspace({ sessions: [{ id: sessionId, mode: "code", name: "Polish Alpha" }] });
+	const workspace = await launchWorkspace({ sessions: [{ id: sessionId, name: "Polish Alpha" }] });
 	const { page } = workspace;
 	try {
 		await page.getByRole("button", { name: "Code", exact: true }).click();
@@ -675,9 +672,9 @@ test("deleting a Chat project preserves a managed task sharing its workspace", a
 	const sharedProject = path.join("agent", "workspaces", managedId);
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: managedId, mode: "chat", name: "Original temporary task", project: sharedProject, cwdOrigin: "managed" },
-			{ id: selectedId, mode: "chat", name: "Selected Alpha", project: sharedProject },
-			{ id: "81000000-0000-4000-8000-0000000000f4", mode: "chat", name: "Selected Beta", project: sharedProject },
+			{ id: managedId, name: "Original temporary task", project: sharedProject, cwdOrigin: "managed" },
+			{ id: selectedId, name: "Selected Alpha", project: sharedProject },
+			{ id: "81000000-0000-4000-8000-0000000000f4", name: "Selected Beta", project: sharedProject },
 		],
 	});
 	const { page } = workspace;
@@ -734,8 +731,8 @@ test("the latest tools sidebar width survives session switches and a narrow-wind
 	const second = "81000000-0000-4000-8000-0000000000e2";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: first, mode: "chat", name: "Width Alpha" },
-			{ id: second, mode: "chat", name: "Width Beta" },
+			{ id: first, name: "Width Alpha" },
+			{ id: second, name: "Width Beta" },
 		],
 	});
 	const { page } = workspace;
@@ -801,8 +798,8 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 	const second = "81000000-0000-4000-8000-0000000000d2";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: first, mode: "code", name: "Browser Alpha" },
-			{ id: second, mode: "code", name: "Browser Beta" },
+			{ id: first, name: "Browser Alpha" },
+			{ id: second, name: "Browser Beta" },
 		],
 	});
 	const { page } = workspace;
@@ -929,8 +926,8 @@ test("terminal keeps its content in the sidebar while chat tabs split", async ()
 	const sessionTwo = "81000000-0000-4000-8000-0000000000c4";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: sessionId, mode: "chat", name: "Layout Alpha" },
-			{ id: sessionTwo, mode: "chat", name: "Layout Beta" },
+			{ id: sessionId, name: "Layout Alpha" },
+			{ id: sessionTwo, name: "Layout Beta" },
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
@@ -1005,9 +1002,9 @@ test("project tab groups collapse from their label and move as one", async () =>
 	const beta = "81000000-0000-4000-8000-0000000000b1";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: alphaOne, mode: "chat", name: "Group Alpha One" },
-			{ id: alphaTwo, mode: "chat", name: "Group Alpha Two" },
-			{ id: beta, mode: "chat", name: "Group Beta", project: "beta-project" },
+			{ id: alphaOne, name: "Group Alpha One" },
+			{ id: alphaTwo, name: "Group Alpha Two" },
+			{ id: beta, name: "Group Beta", project: "beta-project" },
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
@@ -1095,8 +1092,8 @@ test("two visible chat panes each run their own live session", async () => {
 	const betaId = "81000000-0000-4000-8000-0000000000f2";
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: alphaId, mode: "chat", name: "Live Alpha" },
-			{ id: betaId, mode: "chat", name: "Live Beta" },
+			{ id: alphaId, name: "Live Alpha" },
+			{ id: betaId, name: "Live Beta" },
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
@@ -1171,8 +1168,8 @@ test("a file tab keeps workspace authorization after another session is opened",
 	const workspace = await launchWorkspace({
 		projectFiles: { "README.md": "metis p0b readme\n" },
 		sessions: [
-			{ id: alphaId, mode: "code", name: "Files Alpha" },
-			{ id: betaId, mode: "code", name: "Files Beta" },
+			{ id: alphaId, name: "Files Alpha" },
+			{ id: betaId, name: "Files Beta" },
 		],
 	});
 	const { consoleErrors, diagnostics, page, projectDir } = workspace;
@@ -1215,12 +1212,12 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 	);
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: ids.a, mode: "chat", name: "Grid Alpha" },
-			{ id: ids.b, mode: "chat", name: "Grid Bravo" },
-			{ id: ids.c, mode: "chat", name: "Grid Charlie" },
-			{ id: ids.d, mode: "chat", name: "Grid Delta" },
-			{ id: ids.e, mode: "chat", name: "Grid Echo" },
-			{ id: ids.f, mode: "chat", name: "Grid Foxtrot" },
+			{ id: ids.a, name: "Grid Alpha" },
+			{ id: ids.b, name: "Grid Bravo" },
+			{ id: ids.c, name: "Grid Charlie" },
+			{ id: ids.d, name: "Grid Delta" },
+			{ id: ids.e, name: "Grid Echo" },
+			{ id: ids.f, name: "Grid Foxtrot" },
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
@@ -1309,8 +1306,8 @@ test("packaged conversation quotes reach the model and restore as source-linked 
 	test.setTimeout(90_000);
 	const workspace = await launchWorkspace({
 		sessions: [
-			{ id: "92000000-0000-4000-8000-000000000001", mode: "chat", name: "Quote Chat" },
-			{ id: "92000000-0000-4000-8000-000000000002", mode: "code", name: "Quote Code" },
+			{ id: "92000000-0000-4000-8000-000000000001", name: "Quote Chat" },
+			{ id: "92000000-0000-4000-8000-000000000002", name: "Quote Code" },
 		],
 	});
 	const { page } = workspace;

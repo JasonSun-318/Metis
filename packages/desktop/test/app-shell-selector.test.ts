@@ -5,7 +5,6 @@ import { selectSessionIndexKey } from "../src/renderer/app-shell-selector.ts";
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
 	return {
 		sessionId: "session-1",
-		mode: "chat",
 		cwdOrigin: "project",
 		cwd: "/work",
 		createdAt: 1,
@@ -23,7 +22,7 @@ describe("selectSessionIndexKey", () => {
 	it("changes when a session summary is updated in place", () => {
 		const sessions = new Map<string, SessionSummary>([["session-1", summary()]]);
 		const before = selectSessionIndexKey(sessions);
-		sessions.set("session-1", summary({ mode: "code", cwd: "/elsewhere" }));
+		sessions.set("session-1", summary({ cwd: "/elsewhere" }));
 		expect(selectSessionIndexKey(sessions)).not.toBe(before);
 	});
 

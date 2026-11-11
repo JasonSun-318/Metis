@@ -29,7 +29,6 @@ if (params.has("typography"))
 const store = new AppStore();
 store.setSupervisor({ state: "ready", serverEpoch: COMPOSER_EPOCH, restartAttempt: 0, failure: null });
 let current = composerSnapshot();
-if (params.get("mode") === "code") current = { ...current, session: { ...current.session, mode: "code" } };
 const history: ItemView[] = [
 	{
 		itemId: "plan-item",
@@ -157,7 +156,6 @@ const api = {
 		if (params.has("statusDelay")) await new Promise((resolve) => setTimeout(resolve, 120));
 		return {
 			sessionId: COMPOSER_SESSION_ID,
-			mode: current.session.mode,
 			contextTokens: 3200,
 			contextWindow: 128000,
 			contextBasis: "reported_total",

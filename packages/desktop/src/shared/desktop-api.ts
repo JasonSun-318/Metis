@@ -75,7 +75,7 @@ export type DesktopApiEvent =
 	| { readonly type: "close-tab" }
 	| { readonly type: "knowledge-libraries" }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
-	| { readonly type: "open-session"; readonly sessionId: string; readonly mode: "chat" | "code" }
+	| { readonly type: "open-session"; readonly sessionId: string }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
 
 export const DESKTOP_IPC_CHANNELS = {
@@ -1732,13 +1732,9 @@ export function validateDesktopApiEvent(value: unknown): DesktopApiEvent {
 		assertSchema(interactionIdValidator, event.interactionId, "invalid_params", "interaction id");
 		return { type: "interaction-cancelled", interactionId: event.interactionId as string };
 	}
-	if (
-		event.type === "open-session" &&
-		Object.keys(event).length === 3 &&
-		(event.mode === "chat" || event.mode === "code")
-	) {
+	if (event.type === "open-session" && Object.keys(event).length === 2) {
 		assertSchema(sessionIdValidator, event.sessionId, "invalid_params", "session id");
-		return { type: "open-session", sessionId: event.sessionId as string, mode: event.mode };
+		return { type: "open-session", sessionId: event.sessionId as string };
 	}
 	throw new TypeError("Invalid desktop event");
 }

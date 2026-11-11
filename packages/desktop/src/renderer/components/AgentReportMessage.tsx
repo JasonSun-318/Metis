@@ -1,4 +1,5 @@
-import type { AgentMode, ItemView } from "@metis/app-protocol";
+import type { ItemView } from "@metis/app-protocol";
+import type { WorkMode } from "../work-mode.ts";
 import { Markdown } from "./Markdown.tsx";
 import { MessageOrigin } from "./MessageOrigin.tsx";
 import { messageText } from "./transcript-turn-model.ts";
@@ -8,7 +9,7 @@ export function AgentReportMessage({
 	appearance = "chat",
 }: {
 	readonly item: ItemView;
-	readonly appearance?: AgentMode;
+	readonly appearance?: WorkMode;
 }) {
 	if (!item.agentReport) return null;
 	return (

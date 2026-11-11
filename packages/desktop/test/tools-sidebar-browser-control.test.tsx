@@ -107,7 +107,7 @@ function fixture() {
 				onDirtySessionIdsChange={vi.fn()}
 				onError={vi.fn()}
 				onLiveSessionsChange={vi.fn()}
-				sessionsById={new Map([[SESSION_ID, { sessionId: SESSION_ID, cwd: null, mode: "chat" }]])}
+				sessionsById={new Map([[SESSION_ID, { sessionId: SESSION_ID, cwd: null }]])}
 				sessionTitleFor={() => "Chat"}
 				store={{} as AppStore}
 				theme="dark"

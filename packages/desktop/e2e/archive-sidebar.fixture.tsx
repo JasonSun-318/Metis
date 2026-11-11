@@ -82,7 +82,6 @@ const api = {
 const session: SessionSummary = {
 	sessionId: ROOT,
 	name: "季度研究报告",
-	mode: "chat",
 	cwdOrigin: "managed",
 	unread: false,
 	useMemory: true,

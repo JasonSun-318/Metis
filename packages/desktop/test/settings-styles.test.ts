@@ -41,7 +41,7 @@ describe("Settings visual states", () => {
 		expect(rule(".usage-detail-card").background).toBe("transparent");
 		expect(rule(".usage-detail-card").padding).toBe("var(--space-4) var(--space-16)");
 		expect(rule(".model-settings-card small").color).toBe("var(--text-10)");
-		expect(rule(".usage-metric-card small").color).toBe("var(--text-10)");
+		expect(rule(".usage-table-wrap table").color).toBe("var(--text-14)");
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").fontSize).toBe("var(--font-size-2xs)");
 		expect(rule(".usage-detail-card li small").color).toBe("var(--text-09)");

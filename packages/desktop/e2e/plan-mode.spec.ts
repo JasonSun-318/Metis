@@ -129,7 +129,7 @@ interface CodingFixtures {
 		create(
 			cwd: string,
 			sessionDir: string,
-			options: { id: string; mode: "code"; permissionPreset: "full" },
+			options: { id: string; permissionPreset: "full" },
 		): {
 			appendSessionInfo(name: string): void;
 			getSessionFile(): string | undefined;
@@ -196,7 +196,6 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	const sessionId = "91000000-0000-4000-8000-000000000001";
 	const manager = fixtures.SessionManager.create(projectDir, fixtures.getDefaultSessionDir(projectDir, agentDir), {
 		id: sessionId,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	manager.appendSessionInfo("Plan mode fixture");

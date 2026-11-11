@@ -1,10 +1,11 @@
-import type { AgentMode, ItemView, PlanView, RetryStatusView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { ItemView, PlanView, RetryStatusView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTranscriptScrollFade } from "../hooks/use-transcript-scroll-fade.ts";
 import { ArrowDown } from "../icons.tsx";
 import { iconSize } from "../ui/icon-size.ts";
+import type { WorkMode } from "../work-mode.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import {
 	ConversationInteractionContext,
@@ -31,7 +32,7 @@ interface TranscriptProps {
 	readonly activeTurnId?: string | null;
 	readonly activeRunId?: string;
 	readonly activeTurnStartedAt?: string;
-	readonly appearance: AgentMode;
+	readonly appearance: WorkMode;
 	readonly autoLoadOlder?: boolean;
 	readonly hasOlder: boolean;
 	readonly itemIds: readonly string[];
@@ -64,7 +65,7 @@ export function shouldFollowTranscript(scrollHeight: number, scrollTop: number, 
 }
 
 function transcriptRows(
-	appearance: AgentMode,
+	appearance: WorkMode,
 	itemIds: readonly string[],
 	itemsById: ReadonlyMap<string, ItemView>,
 ): TranscriptRow[] {

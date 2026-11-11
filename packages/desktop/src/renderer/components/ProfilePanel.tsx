@@ -240,9 +240,6 @@ export function ProfilePanel({
 		[formatDays(profile.currentStreakDays, locale, fullNumber), "Current streak"],
 		[formatDays(profile.longestStreakDays, locale, fullNumber), "Longest streak"],
 	] as const;
-	const mode = profile.mostUsedMode
-		? `${t(profile.mostUsedMode === "chat" ? "Chat" : "Code")} · ${profile.mostUsedModePercent}%`
-		: "—";
 	const thinkingLabels = {
 		off: "Off",
 		minimal: "Minimal",
@@ -405,10 +402,6 @@ export function ProfilePanel({
 								<section>
 									<h2>{t("Activity insights")}</h2>
 									<dl>
-										<div>
-											<dt>{t("Most used mode")}</dt>
-											<dd>{mode}</dd>
-										</div>
 										<div>
 											<dt>{t("Most used reasoning effort")}</dt>
 											<dd>{thinking}</dd>

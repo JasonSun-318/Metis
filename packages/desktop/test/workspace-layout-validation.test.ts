@@ -9,7 +9,6 @@ const DATE = "2026-10-25T00:00:00.000Z";
 function session(sessionId: string, archived = false): SessionSummary {
 	return {
 		sessionId,
-		mode: "chat",
 		cwdOrigin: "managed",
 		cwd: `/fixture/${sessionId}`,
 		createdAt: DATE,

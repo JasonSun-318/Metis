@@ -1,12 +1,13 @@
-import type { AgentMode, ItemView } from "@metis/app-protocol";
+import type { ItemView } from "@metis/app-protocol";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConversationScopeContext } from "../src/renderer/components/ConversationScope.tsx";
 import { Transcript } from "../src/renderer/components/Transcript.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
+import type { WorkMode } from "../src/renderer/work-mode.ts";
 
 const params = new URLSearchParams(location.search);
-const mode: AgentMode = params.get("mode") === "code" ? "code" : "chat";
+const mode: WorkMode = params.get("mode") === "code" ? "code" : "chat";
 document.documentElement.dataset.theme = params.get("theme") === "light" ? "light" : "dark";
 setLocale("zh-CN");
 const sessionId = "11111111-1111-4111-8111-111111111111";

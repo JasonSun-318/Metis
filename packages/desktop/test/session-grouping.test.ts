@@ -15,10 +15,9 @@ import {
 const local = (year: number, month: number, day: number, hour: number) =>
 	new Date(year, month - 1, day, hour).toISOString();
 
-function session(sessionId: string, mode: "chat" | "code", updatedAt: string, unread = false): SessionSummary {
+function session(sessionId: string, updatedAt: string, unread = false): SessionSummary {
 	return {
 		sessionId,
-		mode,
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: updatedAt,
@@ -32,38 +31,45 @@ function session(sessionId: string, mode: "chat" | "code", updatedAt: string, un
 }
 
 describe("session grouping", () => {
-	it("sorts both legacy modes deterministically into local date and unread sections", () => {
+	it("sorts sessions deterministically into local date and unread sections", () => {
 		const store = new AppStore();
 		const sessions = [
-			session("b", "chat", local(2026, 7, 31, 1), true),
-			session("a", "chat", local(2026, 7, 31, 1)),
-			session("yesterday", "chat", local(2026, 7, 30, 12)),
-			session("older", "chat", local(2026, 7, 29, 12)),
-			session("previous-year", "chat", local(2025, 7, 31, 12)),
-			session("code", "code", local(2026, 7, 31, 23), true),
+			session("b", local(2026, 7, 31, 1), true),
+			session("a", local(2026, 7, 31, 1)),
+			session("yesterday", local(2026, 7, 30, 12)),
+			session("older", local(2026, 7, 29, 12)),
+			session("previous-year", local(2025, 7, 31, 12)),
+			session("latest", local(2026, 7, 31, 23), true),
 		];
 		store.setSessions({ sessions: sessions.reverse(), nextAfterSessionId: null });
-		const chat = sidebarSessions(store.getSnapshot());
+		const visible = sidebarSessions(store.getSnapshot());
 
-		expect(chat.map(({ sessionId }) => sessionId)).toEqual(["code", "a", "b", "yesterday", "older", "previous-year"]);
-		expect(groupSessionsByDate(chat, new Date(2026, 6, 31, 12)).map(({ label }) => label)).toEqual([
+		expect(visible.map(({ sessionId }) => sessionId)).toEqual([
+			"latest",
+			"a",
+			"b",
+			"yesterday",
+			"older",
+			"previous-year",
+		]);
+		expect(groupSessionsByDate(visible, new Date(2026, 6, 31, 12)).map(({ label }) => label)).toEqual([
 			"Today",
 			"Yesterday",
 			"Jul 29",
 			"Jul 31, 2025",
 		]);
 		expect(
-			groupSessionsByUnread(chat).map(({ label, sessions: grouped }) => [
+			groupSessionsByUnread(visible).map(({ label, sessions: grouped }) => [
 				label,
 				grouped.map(({ sessionId }) => sessionId),
 			]),
 		).toEqual([
-			["Unread", ["code", "b"]],
+			["Unread", ["latest", "b"]],
 			["Read", ["a", "yesterday", "older", "previous-year"]],
 		]);
-		expect(
-			groupSessionsByUnread([session("read", "chat", "2026-07-31T00:00:00Z")]).map(({ label }) => label),
-		).toEqual(["Read"]);
+		expect(groupSessionsByUnread([session("read", "2026-07-31T00:00:00Z")]).map(({ label }) => label)).toEqual([
+			"Read",
+		]);
 	});
 
 	it("loads safe defaults and saves unified preferences", () => {
@@ -86,7 +92,7 @@ describe("session grouping", () => {
 
 	it("groups durable task states in priority order without treating unread or idle as unfinished or completed work", () => {
 		const make = (id: string, overrides: Partial<SessionSummary> = {}): SessionSummary => ({
-			...session(id, "chat", "2026-10-25T12:00:00Z"),
+			...session(id, "2026-10-25T12:00:00Z"),
 			...overrides,
 		});
 		const sessions = [
@@ -117,7 +123,7 @@ describe("session grouping", () => {
 	});
 
 	it("uses live interaction order and the effective actor owner, independent of viewing or unread state", () => {
-		const make = (id: string) => session(id, "chat", "2026-10-25T12:00:00Z");
+		const make = (id: string) => session(id, "2026-10-25T12:00:00Z");
 		const request: InteractionView = {
 			interactionId: "request",
 			sessionId: "root",

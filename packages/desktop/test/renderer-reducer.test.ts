@@ -15,7 +15,6 @@ const EPOCH_B = "22222222-2222-4222-8222-222222222222";
 function session(sessionId = "session-1"): SessionSummary {
 	return {
 		sessionId,
-		mode: "code",
 		cwdOrigin: "user-selected",
 		cwd: "/tmp/project",
 		createdAt: "2026-07-16T00:00:00.000Z",
@@ -409,37 +408,32 @@ describe("renderer projection reducer", () => {
 		expect(state.itemOrder).toEqual(["item-1"]);
 	});
 
-	it("combines legacy classifications and separates managed tasks from project folders", () => {
+	it("groups project folders by cwd and separates managed tasks", () => {
 		const store = new AppStore();
-		const first = { ...session("session-1"), mode: "chat" as const, cwd: "/work/alpha", name: "First" };
-		const code = { ...session("session-2"), cwd: "/work/beta", name: "Code" };
-		const third = { ...session("session-3"), mode: "chat" as const, cwd: "/work/alpha", name: "Third" };
+		const first = { ...session("session-1"), cwd: "/work/alpha", name: "First" };
+		const second = { ...session("session-2"), cwd: "/work/beta", name: "Second" };
+		const third = { ...session("session-3"), cwd: "/work/alpha", name: "Third" };
 		const managed = {
 			...session("session-4"),
-			mode: "chat" as const,
 			cwdOrigin: "managed" as const,
-			cwd: "/internal/chat",
+			cwd: "/internal/task",
 			name: "Managed",
 		};
 		const legacy = { ...session("session-5"), cwd: null, name: "Legacy" };
-		store.setSessions({ sessions: [first, code, third, managed, legacy], nextAfterSessionId: null });
+		store.setSessions({ sessions: [first, second, third, managed, legacy], nextAfterSessionId: null });
 
-		const chat = buildSessionTree(store.getSnapshot(), new Map());
-		expect(chat.projects.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
+		const tree = buildSessionTree(store.getSnapshot(), new Map());
+		expect(tree.projects.map(({ name, sessions }) => [name, sessions.map((item) => item.sessionId)])).toEqual([
 			["alpha", ["session-1", "session-3"]],
 			["beta", ["session-2"]],
 		]);
-		expect(chat.tasks.map((item) => item.sessionId)).toEqual(["session-4", "session-5"]);
-		expect(chat.projects[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
-
-		const codeTree = buildSessionTree(store.getSnapshot(), new Map());
-		expect(codeTree.projects.map((group) => group.name)).toEqual(["alpha", "beta"]);
-		expect(codeTree.tasks.map((item) => item.sessionId)).toEqual(["session-4", "session-5"]);
+		expect(tree.tasks.map((item) => item.sessionId)).toEqual(["session-4", "session-5"]);
+		expect(tree.projects[0]?.sessions[0]).toBe(store.getSnapshot().sessionsById.get("session-1"));
 	});
 
-	it("removes only one mode-project and clears its active projection idempotently", () => {
+	it("removes a project's sessions by cwd and clears its active projection idempotently", () => {
 		const store = new AppStore();
-		const active = { ...session("chat-active"), mode: "chat" as const, cwd: "/work/root" };
+		const active = { ...session("chat-active"), cwd: "/work/root" };
 		store.applySnapshot({
 			...snapshot(EPOCH_A, 4, [{ ...item("active-item", "visible"), sessionId: active.sessionId }]),
 			session: active,
@@ -448,12 +442,11 @@ describe("renderer projection reducer", () => {
 		store.setSessions({
 			sessions: [
 				active,
-				{ ...session("chat-archived"), mode: "chat", cwd: "/work/root", archived: true },
+				{ ...session("chat-archived"), cwd: "/work/root", archived: true },
 				{ ...session("code-same"), cwd: "/work/root" },
-				{ ...session("chat-child"), mode: "chat", cwd: "/work/root/child" },
+				{ ...session("chat-child"), cwd: "/work/root/child" },
 				{
 					...session("chat-scheduled"),
-					mode: "chat",
 					cwd: "/work/root",
 					scheduled: { taskId: "task", runId: "run" },
 				},
@@ -461,9 +454,9 @@ describe("renderer projection reducer", () => {
 			nextAfterSessionId: null,
 		});
 
-		store.removeModeProject("chat", "/work/root");
+		store.removeProject("/work/root");
 		const state = store.getSnapshot();
-		expect([...state.sessionsById.keys()]).toEqual(["code-same", "chat-child", "chat-scheduled"]);
+		expect([...state.sessionsById.keys()]).toEqual(["chat-child", "chat-scheduled"]);
 		expect(state.activeSessionId).toBeNull();
 		expect(state.itemOrder).toEqual([]);
 		expect(state.agents).toEqual([]);
@@ -471,7 +464,7 @@ describe("renderer projection reducer", () => {
 		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
 		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });
 		const afterFirst = store.getSnapshot();
-		store.removeModeProject("chat", "/work/root");
+		store.removeProject("/work/root");
 		expect(store.getSnapshot()).toBe(afterFirst);
 	});
 
@@ -550,12 +543,12 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().syncStatus).toBe("ready");
 	});
 
-	it("applies one project invalidation without removing the other mode", () => {
+	it("applies a project invalidation to every session in the cwd", () => {
 		const store = new AppStore();
-		const chat = { ...session("chat-active"), mode: "chat" as const };
-		store.applySnapshot({ ...snapshot(EPOCH_A, 2), session: chat });
+		const first = { ...session("project-active"), cwd: "/work/project" };
+		store.applySnapshot({ ...snapshot(EPOCH_A, 2), session: first });
 		store.setSessions({
-			sessions: [chat, { ...session("code-preserved"), mode: "code", cwd: chat.cwd }],
+			sessions: [first, { ...session("project-sibling"), cwd: "/work/project" }, session("elsewhere")],
 			nextAfterSessionId: null,
 		});
 
@@ -564,11 +557,11 @@ describe("renderer projection reducer", () => {
 				serverEpoch: EPOCH_A,
 				fromCursor: 3,
 				toCursor: 3,
-				events: [{ type: "project/invalidated", mode: "chat", cwd: chat.cwd!, reason: "deleted" }],
+				events: [{ type: "project/invalidated", cwd: "/work/project", reason: "deleted" }],
 			}),
 		).toBe("applied");
 		expect(store.getSnapshot().activeSessionId).toBeNull();
-		expect(store.getSnapshot().sessionOrder).toEqual(["code-preserved"]);
+		expect(store.getSnapshot().sessionOrder).toEqual(["elsewhere"]);
 	});
 
 	it("replaces and streams the active session collaboration mode", () => {
@@ -1399,7 +1392,7 @@ describe("renderer projection reducer", () => {
 			serverEpoch: EPOCH_A,
 			fromCursor: 11,
 			toCursor: 11,
-			events: [{ type: "project/invalidated", mode: "code", cwd: "/tmp/other", reason: "reload_required" }],
+			events: [{ type: "project/invalidated", cwd: "/tmp/other", reason: "reload_required" }],
 		});
 		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("subscribing");
 		store.applySnapshot({
