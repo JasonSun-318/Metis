@@ -306,15 +306,9 @@ const scheduleCases = [
 			outputTokens: 5,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
-			chatTokens: 5,
-			codeTokens: 7,
 			sessionCount: 2,
-			chatSessionCount: 1,
-			codeSessionCount: 1,
 			daily: Array.from({ length: 7 }, (_, index) => ({
 				date: `2026-08-0${index + 2}`,
-				chatTokens: index === 6 ? 5 : 0,
-				codeTokens: index === 6 ? 7 : 0,
 				inputTokens: index === 6 ? 7 : 0,
 				outputTokens: index === 6 ? 5 : 0,
 				cacheReadTokens: 0,
@@ -2033,13 +2027,12 @@ describe("exact limits", () => {
 		expect(() => validateClientRequest(start)).toThrow(ProtocolValidationError);
 	});
 
-	it("accepts chat creation without a cwd and rejects unknown modes", () => {
+	it("accepts creation without a cwd and rejects a retired mode field", () => {
 		const create = makeClientRequest("session/create", {
 			requestId: "22222222-2222-4222-8222-222222222224",
-			mode: "chat",
 		});
 		expect(() => validateClientRequest(create)).not.toThrow();
-		(create.params as { mode: string }).mode = "cowork";
+		(create.params as Record<string, unknown>).mode = "chat";
 		expect(() => validateClientRequest(create)).toThrow(ProtocolValidationError);
 	});
 
@@ -2263,10 +2256,9 @@ describe("exact limits", () => {
 
 	it("keeps project deletion requests and results strict and fixed-size", () => {
 		const revision = "a".repeat(64);
-		const preview = makeClientRequest("project/deletePreview", { mode: "chat", cwd: "/canonical/project" });
+		const preview = makeClientRequest("project/deletePreview", { cwd: "/canonical/project" });
 		const deletion = makeClientRequest("project/delete", {
 			requestId: "00000000-0000-4000-8000-000000000001",
-			mode: "chat",
 			cwd: "/canonical/project",
 			expectedRevision: revision,
 		});
@@ -2274,25 +2266,22 @@ describe("exact limits", () => {
 		expect(validateClientRequest(deletion)).toEqual(deletion);
 
 		const invalidRequests = [
-			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "/canonical/project", extra: true }),
-			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "" }),
-			makeClientRequest("project/deletePreview", { mode: "chat", cwd: "a".repeat(MAX_PATH_UTF8_BYTES + 1) }),
-			makeClientRequest("project/deletePreview", { mode: "cowork", cwd: "/canonical/project" }),
+			makeClientRequest("project/deletePreview", { cwd: "/canonical/project", extra: true }),
+			makeClientRequest("project/deletePreview", { cwd: "" }),
+			makeClientRequest("project/deletePreview", { cwd: "a".repeat(MAX_PATH_UTF8_BYTES + 1) }),
+			makeClientRequest("project/deletePreview", { cwd: "/canonical/project", mode: "cowork" }),
 			makeClientRequest("project/delete", {
 				requestId: "not-a-uuid",
-				mode: "chat",
 				cwd: "/canonical/project",
 				expectedRevision: revision,
 			}),
 			makeClientRequest("project/delete", {
 				requestId: "00000000-0000-4000-8000-000000000001",
-				mode: "chat",
 				cwd: "/canonical/project",
 				expectedRevision: "g".repeat(64),
 			}),
 			makeClientRequest("project/delete", {
 				requestId: "00000000-0000-4000-8000-000000000001",
-				mode: "chat",
 				cwd: "/canonical/project",
 				expectedRevision: "a".repeat(63),
 			}),
@@ -2305,7 +2294,6 @@ describe("exact limits", () => {
 			jsonrpc: "2.0",
 			id: "limit-test",
 			result: {
-				mode: "chat",
 				cwd: "/canonical/project",
 				sessionCount: 1,
 				blockingScheduleCount: 0,
@@ -2320,7 +2308,7 @@ describe("exact limits", () => {
 			previewResult({ sessionCount: Number.MAX_SAFE_INTEGER + 1 }),
 			previewResult({ blockingScheduleCount: -1 }),
 			previewResult({ blockingScheduleCount: 100_001 }),
-			previewResult({ mode: "cowork" }),
+			previewResult({ mode: "chat" }),
 			previewResult({ cwd: "" }),
 			previewResult({ revision: "g".repeat(64) }),
 			previewResult({ sessionIds: [SESSION_ID] }),
@@ -2332,7 +2320,7 @@ describe("exact limits", () => {
 		const deleteResult = {
 			jsonrpc: "2.0",
 			id: "limit-test",
-			result: { mode: "chat", cwd: "/canonical/project", deletedSessionCount: 1 },
+			result: { cwd: "/canonical/project", deletedSessionCount: 1 },
 		};
 		expect(() => validateResponseFor("client", deletion, deleteResult)).not.toThrow();
 		for (const deletedSessionCount of [-1, 100_001, Number.MAX_SAFE_INTEGER + 1]) {

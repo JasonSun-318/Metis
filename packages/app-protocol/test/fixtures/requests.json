@@ -289,7 +289,6 @@
 			"id": "project-preview",
 			"method": "project/deletePreview",
 			"params": {
-				"mode": "chat",
 				"cwd": "/tmp/metis-project"
 			}
 		}
@@ -303,7 +302,6 @@
 			"method": "project/delete",
 			"params": {
 				"requestId": "00000000-0000-4000-8000-000000000001",
-				"mode": "chat",
 				"cwd": "/tmp/metis-project",
 				"expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			}
@@ -1053,7 +1051,7 @@
 			"params": {
 				"libraryId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 				"sourcePath": "topic/Source.md",
-				"reference": "设计说明#核心流程",
+				"reference": "\u8bbe\u8ba1\u8bf4\u660e#\u6838\u5fc3\u6d41\u7a0b",
 				"kind": "wiki"
 			}
 		}

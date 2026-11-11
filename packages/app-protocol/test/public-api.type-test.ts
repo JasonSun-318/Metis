@@ -23,19 +23,16 @@ import type {
 
 const projectDelete = {
 	requestId: "00000000-0000-4000-8000-000000000001",
-	mode: "chat",
 	cwd: "/tmp/project",
 	expectedRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 } satisfies ClientParams<"project/delete">;
 const projectDeletePreview = {
-	mode: "chat",
 	cwd: "/tmp/project",
 	sessionCount: 1,
 	blockingScheduleCount: 0,
 	revision: projectDelete.expectedRevision,
 } satisfies ClientResult<"project/deletePreview">;
 const projectDeleteResult = {
-	mode: "chat",
 	cwd: "/tmp/project",
 	deletedSessionCount: 1,
 } satisfies ClientResult<"project/delete">;
@@ -55,7 +52,6 @@ const sessionStatusParams = {
 } satisfies ClientParams<"session/status">;
 const sessionStatusResult = {
 	sessionId: sessionStatusParams.sessionId,
-	mode: "code",
 	contextTokens: 64_000,
 	contextWindow: 128_000,
 	contextBasis: "reported_total",
@@ -130,7 +126,6 @@ const agentInterruptResult = {
 
 const session = {
 	sessionId: "11111111-1111-4111-8111-111111111111",
-	mode: "code",
 	cwdOrigin: "user-selected",
 	cwd: "/tmp/project",
 	createdAt: "2026-07-16T00:00:00.000Z",
@@ -262,8 +257,6 @@ const profile = {
 	currentStreakDays: 2,
 	longestStreakDays: 3,
 	sessionCount: 2,
-	mostUsedMode: "chat",
-	mostUsedModePercent: 100,
 	mostUsedThinkingLevel: "high",
 	mostUsedThinkingLevelPercent: 75,
 	usedSkillCount: 2,

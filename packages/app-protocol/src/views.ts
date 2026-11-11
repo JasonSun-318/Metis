@@ -32,7 +32,6 @@ export const SessionStateSchema = Type.Union([
 	Type.Literal("unsupported"),
 ]);
 
-export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
 export const PermissionPresetSchema = Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]);
 export const SandboxPolicySchema = Type.Union([
 	Type.Literal("read-only"),
@@ -90,7 +89,6 @@ export const PublicErrorDataSchema = StrictObject({
 export const SessionSummarySchema = StrictObject({
 	sessionId: SessionIdSchema,
 	name: Type.Optional(OptionalNameSchema),
-	mode: AgentModeSchema,
 	cwdOrigin: CwdOriginSchema,
 	// Legacy journals may not contain a working directory. App-server projects
 	// their empty-string sentinel to null instead of exposing it on the wire.
@@ -405,8 +403,6 @@ export const ProfileUsageSummaryViewSchema = Type.Refine(
 		currentStreakDays: Type.Integer({ minimum: 0, maximum: 366_000 }),
 		longestStreakDays: Type.Integer({ minimum: 0, maximum: 366_000 }),
 		sessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-		mostUsedMode: Type.Union([AgentModeSchema, Type.Null()]),
-		mostUsedModePercent: Type.Integer({ minimum: 0, maximum: 100 }),
 		mostUsedThinkingLevel: Type.Union([ActualThinkingLevelSchema, Type.Null()]),
 		mostUsedThinkingLevelPercent: Type.Integer({ minimum: 0, maximum: 100 }),
 		usedSkillCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -431,7 +427,6 @@ export const ProfileUsageSummaryViewSchema = Type.Refine(
 			skillsSorted &&
 			value.currentStreakDays <= value.longestStreakDays &&
 			value.peakDailyTokens <= value.totalTokens &&
-			(value.mostUsedMode === null) === (value.mostUsedModePercent === 0) &&
 			(value.mostUsedThinkingLevel === null) === (value.mostUsedThinkingLevelPercent === 0) &&
 			value.usedSkillCount >= value.topSkills.length &&
 			value.skillUseCount >= listedSkillUses
@@ -1215,8 +1210,6 @@ export const HooksListViewSchema = StrictObject({
 export const UsageRangeDaysSchema = Type.Union([Type.Literal(7), Type.Literal(30), Type.Literal(90)]);
 export const UsageDailyViewSchema = StrictObject({
 	date: Type.Refine(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }), isCalendarDate, "invalid calendar date"),
-	chatTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-	codeTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	inputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 	cacheReadTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
@@ -1236,18 +1229,11 @@ export const UsageSummaryViewSchema = Type.Refine(
 		outputTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 		cacheReadTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 		cacheWriteTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-		chatTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-		codeTokens: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 		sessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-		chatSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-		codeSessionCount: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 		daily: Type.Array(UsageDailyViewSchema, { minItems: 7, maxItems: 90 }),
 		topModels: Type.Array(UsageModelViewSchema, { maxItems: 8 }),
 	}),
-	(value) =>
-		value.daily.length === value.rangeDays &&
-		value.sessionCount === value.chatSessionCount + value.codeSessionCount &&
-		value.totalTokens === value.chatTokens + value.codeTokens,
+	(value) => value.daily.length === value.rangeDays,
 	"usage summary fields are inconsistent",
 );
 export const AgentTypeIdSchema = Type.String({
@@ -1308,7 +1294,6 @@ export const RetryStatusViewSchema = Type.Refine(
 export const AgentSummaryViewSchema = StrictObject({
 	retry: Type.Optional(RetryStatusViewSchema),
 	agentId: SessionIdSchema,
-	mode: Type.Optional(AgentModeSchema),
 	model: Type.Optional(ModelRefSchema),
 	tools: Type.Optional(Type.Array(NameSchema, { maxItems: 256 })),
 	writePolicy: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("deny")])),
@@ -1390,7 +1375,6 @@ export const ContextUsageBreakdownItemViewSchema = StrictObject({
 export const SessionStatusViewSchema = Type.Refine(
 	StrictObject({
 		sessionId: SessionIdSchema,
-		mode: AgentModeSchema,
 		contextTokens: Type.Union([Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), Type.Null()]),
 		contextWindow: Type.Union([Type.Integer({ minimum: 1, maximum: 10_000_000 }), Type.Null()]),
 		contextBasis: ContextUsageBasisViewSchema,
@@ -1613,7 +1597,6 @@ export const SessionInvalidatedEventSchema = StrictObject({
 
 export const ProjectInvalidatedEventSchema = StrictObject({
 	type: Type.Literal("project/invalidated"),
-	mode: AgentModeSchema,
 	cwd: PathSchema,
 	reason: Type.Union([Type.Literal("deleted"), Type.Literal("reload_required")]),
 });
@@ -1902,7 +1885,6 @@ export const ConnectionEventsParamsSchema = Type.Refine(
 );
 
 export type PublicErrorData = Static<typeof PublicErrorDataSchema>;
-export type AgentMode = Static<typeof AgentModeSchema>;
 export type CwdOrigin = Static<typeof CwdOriginSchema>;
 export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type ArchivedConversationView = Static<typeof ArchivedConversationViewSchema>;

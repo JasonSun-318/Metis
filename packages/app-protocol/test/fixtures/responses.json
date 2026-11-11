@@ -33,8 +33,6 @@
 				"currentStreakDays": 2,
 				"longestStreakDays": 3,
 				"sessionCount": 2,
-				"mostUsedMode": "chat",
-				"mostUsedModePercent": 100,
 				"mostUsedThinkingLevel": "high",
 				"mostUsedThinkingLevelPercent": 75,
 				"usedSkillCount": 2,
@@ -91,7 +89,6 @@
 			"jsonrpc": "2.0",
 			"id": "project-preview",
 			"result": {
-				"mode": "chat",
 				"cwd": "/tmp/metis-project",
 				"sessionCount": 3,
 				"blockingScheduleCount": 1,
@@ -106,7 +103,6 @@
 			"jsonrpc": "2.0",
 			"id": "project-delete",
 			"result": {
-				"mode": "chat",
 				"cwd": "/tmp/metis-project",
 				"deletedSessionCount": 3
 			}
@@ -768,7 +764,6 @@
 						"unread": false,
 						"useMemory": true,
 						"contributeMemory": true,
-						"mode": "code",
 						"cwdOrigin": "user-selected"
 					}
 				],
@@ -794,7 +789,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -817,7 +811,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -840,7 +833,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -890,7 +882,6 @@
 			"id": "client-status",
 			"result": {
 				"sessionId": "11111111-1111-4111-8111-111111111111",
-				"mode": "code",
 				"contextTokens": 64000,
 				"contextWindow": 128000,
 				"contextBasis": "reported_total",
@@ -994,7 +985,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -1018,7 +1008,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				},
 				"entryId": "aaaaaaaa"
@@ -1055,7 +1044,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -1078,7 +1066,6 @@
 					"unread": false,
 					"useMemory": true,
 					"contributeMemory": true,
-					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
 			}
@@ -1102,7 +1089,6 @@
 						"unread": false,
 						"useMemory": true,
 						"contributeMemory": true,
-						"mode": "code",
 						"cwdOrigin": "user-selected"
 					},
 					"collaborationMode": "default",
@@ -1469,12 +1455,12 @@
 			"id": "knowledge-knowledge-resource-resolve",
 			"result": {
 				"libraryId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-				"path": "topic/设计说明.md",
+				"path": "topic/\u8bbe\u8ba1\u8bf4\u660e.md",
 				"kind": "note",
 				"mimeType": "text/markdown",
 				"revision": "1762900000000:1762900000000:128",
-				"fragment": "核心流程",
-				"absolutePath": "/Users/test/knowledge/topic/设计说明.md",
+				"fragment": "\u6838\u5fc3\u6d41\u7a0b",
+				"absolutePath": "/Users/test/knowledge/topic/\u8bbe\u8ba1\u8bf4\u660e.md",
 				"rootPath": "/Users/test/knowledge"
 			}
 		}
@@ -1604,7 +1590,6 @@
 							"unread": false,
 							"useMemory": true,
 							"contributeMemory": true,
-							"mode": "code",
 							"cwdOrigin": "user-selected"
 						}
 					},
@@ -1620,7 +1605,6 @@
 							"unread": false,
 							"useMemory": true,
 							"contributeMemory": true,
-							"mode": "code",
 							"cwdOrigin": "user-selected"
 						},
 						"agentId": "22222222-2222-4222-8222-222222222222",

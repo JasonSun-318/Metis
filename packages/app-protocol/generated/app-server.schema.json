@@ -2644,22 +2644,9 @@
                 "params": {
                   "type": "object",
                   "required": [
-                    "mode",
                     "cwd"
                   ],
                   "properties": {
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
                     "cwd": {
                       "type": "string",
                       "minLength": 1,
@@ -2698,7 +2685,6 @@
                   "type": "object",
                   "required": [
                     "requestId",
-                    "mode",
                     "cwd",
                     "expectedRevision"
                   ],
@@ -2706,18 +2692,6 @@
                     "requestId": {
                       "type": "string",
                       "format": "uuid"
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwd": {
                       "type": "string",
@@ -2766,18 +2740,6 @@
                     "requestId": {
                       "type": "string",
                       "format": "uuid"
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwd": {
                       "type": "string",
@@ -13694,7 +13656,6 @@
                                 "type": "object",
                                 "required": [
                                   "sessionId",
-                                  "mode",
                                   "cwdOrigin",
                                   "cwd",
                                   "createdAt",
@@ -13715,18 +13676,6 @@
                                     "type": "string",
                                     "maxLength": 256,
                                     "x-metis-maxUtf16Units": 256
-                                  },
-                                  "mode": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "chat"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "code"
-                                      }
-                                    ]
                                   },
                                   "cwdOrigin": {
                                     "anyOf": [
@@ -13883,7 +13832,6 @@
                             "type": "object",
                             "required": [
                               "type",
-                              "mode",
                               "cwd",
                               "reason"
                             ],
@@ -13891,18 +13839,6 @@
                               "type": {
                                 "type": "string",
                                 "const": "project/invalidated"
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "cwd": {
                                 "type": "string",
@@ -18104,18 +18040,6 @@
                                     "type": "string",
                                     "minLength": 1,
                                     "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                                  },
-                                  "mode": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "chat"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "code"
-                                      }
-                                    ]
                                   },
                                   "model": {
                                     "type": "object",
@@ -23725,7 +23649,6 @@
                         "type": "object",
                         "required": [
                           "sessionId",
-                          "mode",
                           "cwdOrigin",
                           "cwd",
                           "createdAt",
@@ -23746,18 +23669,6 @@
                             "type": "string",
                             "maxLength": 256,
                             "x-metis-maxUtf16Units": 256
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "chat"
-                              },
-                              {
-                                "type": "string",
-                                "const": "code"
-                              }
-                            ]
                           },
                           "cwdOrigin": {
                             "anyOf": [
@@ -23939,7 +23850,6 @@
                                 "type": "object",
                                 "required": [
                                   "sessionId",
-                                  "mode",
                                   "cwdOrigin",
                                   "cwd",
                                   "createdAt",
@@ -23960,18 +23870,6 @@
                                     "type": "string",
                                     "maxLength": 256,
                                     "x-metis-maxUtf16Units": 256
-                                  },
-                                  "mode": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "chat"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "code"
-                                      }
-                                    ]
                                   },
                                   "cwdOrigin": {
                                     "anyOf": [
@@ -24110,7 +24008,6 @@
                                 "type": "object",
                                 "required": [
                                   "sessionId",
-                                  "mode",
                                   "cwdOrigin",
                                   "cwd",
                                   "createdAt",
@@ -24131,18 +24028,6 @@
                                     "type": "string",
                                     "maxLength": 256,
                                     "x-metis-maxUtf16Units": 256
-                                  },
-                                  "mode": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "chat"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "code"
-                                      }
-                                    ]
                                   },
                                   "cwdOrigin": {
                                     "anyOf": [
@@ -28377,8 +28262,6 @@
                     "currentStreakDays",
                     "longestStreakDays",
                     "sessionCount",
-                    "mostUsedMode",
-                    "mostUsedModePercent",
                     "mostUsedThinkingLevel",
                     "mostUsedThinkingLevelPercent",
                     "usedSkillCount",
@@ -28421,30 +28304,6 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
-                    },
-                    "mostUsedMode": {
-                      "anyOf": [
-                        {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "mostUsedModePercent": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 100
                     },
                     "mostUsedThinkingLevel": {
                       "anyOf": [
@@ -28643,25 +28502,12 @@
                 "result": {
                   "type": "object",
                   "required": [
-                    "mode",
                     "cwd",
                     "sessionCount",
                     "blockingScheduleCount",
                     "revision"
                   ],
                   "properties": {
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
                     "cwd": {
                       "type": "string",
                       "minLength": 1,
@@ -28708,23 +28554,10 @@
                 "result": {
                   "type": "object",
                   "required": [
-                    "mode",
                     "cwd",
                     "deletedSessionCount"
                   ],
                   "properties": {
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
                     "cwd": {
                       "type": "string",
                       "minLength": 1,
@@ -28769,7 +28602,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -28790,18 +28622,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -28953,7 +28773,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -28974,18 +28793,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -29137,7 +28944,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -29158,18 +28964,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -30983,7 +30777,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "contextTokens",
                     "contextWindow",
                     "contextBasis",
@@ -30996,18 +30789,6 @@
                       "type": "string",
                       "minLength": 1,
                       "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "contextTokens": {
                       "anyOf": [
@@ -31513,7 +31294,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -31534,18 +31314,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -31698,7 +31466,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -31719,18 +31486,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -31945,7 +31700,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -31966,18 +31720,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -32129,7 +31871,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -32150,18 +31891,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -32438,7 +32167,6 @@
                           "type": "object",
                           "required": [
                             "sessionId",
-                            "mode",
                             "cwdOrigin",
                             "cwd",
                             "createdAt",
@@ -32459,18 +32187,6 @@
                               "type": "string",
                               "maxLength": 256,
                               "x-metis-maxUtf16Units": 256
-                            },
-                            "mode": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "chat"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "code"
-                                }
-                              ]
                             },
                             "cwdOrigin": {
                               "anyOf": [
@@ -35399,18 +35115,6 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "model": {
                                 "type": "object",
@@ -40936,11 +40640,7 @@
                     "outputTokens",
                     "cacheReadTokens",
                     "cacheWriteTokens",
-                    "chatTokens",
-                    "codeTokens",
                     "sessionCount",
-                    "chatSessionCount",
-                    "codeSessionCount",
                     "daily",
                     "topModels"
                   ],
@@ -40991,27 +40691,7 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
-                    "chatTokens": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "codeTokens": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
                     "sessionCount": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "chatSessionCount": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "codeSessionCount": {
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
@@ -41022,8 +40702,6 @@
                         "type": "object",
                         "required": [
                           "date",
-                          "chatTokens",
-                          "codeTokens",
                           "inputTokens",
                           "outputTokens",
                           "cacheReadTokens",
@@ -41033,16 +40711,6 @@
                           "date": {
                             "type": "string",
                             "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                          },
-                          "chatTokens": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "codeTokens": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
                           },
                           "inputTokens": {
                             "type": "integer",
@@ -43301,18 +42969,6 @@
                             "type": "string",
                             "minLength": 1,
                             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "chat"
-                              },
-                              {
-                                "type": "string",
-                                "const": "code"
-                              }
-                            ]
                           },
                           "model": {
                             "type": "object",
@@ -45810,18 +45466,6 @@
                           "minLength": 1,
                           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
-                        },
                         "model": {
                           "type": "object",
                           "required": [
@@ -46480,18 +46124,6 @@
                           "minLength": 1,
                           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                         },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
-                        },
                         "model": {
                           "type": "object",
                           "required": [
@@ -47149,18 +46781,6 @@
                           "type": "string",
                           "minLength": 1,
                           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "model": {
                           "type": "object",
@@ -62558,22 +62178,9 @@
             "params": {
               "type": "object",
               "required": [
-                "mode",
                 "cwd"
               ],
               "properties": {
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
-                },
                 "cwd": {
                   "type": "string",
                   "minLength": 1,
@@ -62612,7 +62219,6 @@
               "type": "object",
               "required": [
                 "requestId",
-                "mode",
                 "cwd",
                 "expectedRevision"
               ],
@@ -62620,18 +62226,6 @@
                 "requestId": {
                   "type": "string",
                   "format": "uuid"
-                },
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
                 },
                 "cwd": {
                   "type": "string",
@@ -62680,18 +62274,6 @@
                 "requestId": {
                   "type": "string",
                   "format": "uuid"
-                },
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
                 },
                 "cwd": {
                   "type": "string",
@@ -72383,7 +71965,6 @@
                     "type": "object",
                     "required": [
                       "sessionId",
-                      "mode",
                       "cwdOrigin",
                       "cwd",
                       "createdAt",
@@ -72404,18 +71985,6 @@
                         "type": "string",
                         "maxLength": 256,
                         "x-metis-maxUtf16Units": 256
-                      },
-                      "mode": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "chat"
-                          },
-                          {
-                            "type": "string",
-                            "const": "code"
-                          }
-                        ]
                       },
                       "cwdOrigin": {
                         "anyOf": [
@@ -72597,7 +72166,6 @@
                             "type": "object",
                             "required": [
                               "sessionId",
-                              "mode",
                               "cwdOrigin",
                               "cwd",
                               "createdAt",
@@ -72618,18 +72186,6 @@
                                 "type": "string",
                                 "maxLength": 256,
                                 "x-metis-maxUtf16Units": 256
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "cwdOrigin": {
                                 "anyOf": [
@@ -72768,7 +72324,6 @@
                             "type": "object",
                             "required": [
                               "sessionId",
-                              "mode",
                               "cwdOrigin",
                               "cwd",
                               "createdAt",
@@ -72789,18 +72344,6 @@
                                 "type": "string",
                                 "maxLength": 256,
                                 "x-metis-maxUtf16Units": 256
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "cwdOrigin": {
                                 "anyOf": [
@@ -77035,8 +76578,6 @@
                 "currentStreakDays",
                 "longestStreakDays",
                 "sessionCount",
-                "mostUsedMode",
-                "mostUsedModePercent",
                 "mostUsedThinkingLevel",
                 "mostUsedThinkingLevelPercent",
                 "usedSkillCount",
@@ -77079,30 +76620,6 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
-                },
-                "mostUsedMode": {
-                  "anyOf": [
-                    {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "mostUsedModePercent": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 100
                 },
                 "mostUsedThinkingLevel": {
                   "anyOf": [
@@ -77301,25 +76818,12 @@
             "result": {
               "type": "object",
               "required": [
-                "mode",
                 "cwd",
                 "sessionCount",
                 "blockingScheduleCount",
                 "revision"
               ],
               "properties": {
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
-                },
                 "cwd": {
                   "type": "string",
                   "minLength": 1,
@@ -77366,23 +76870,10 @@
             "result": {
               "type": "object",
               "required": [
-                "mode",
                 "cwd",
                 "deletedSessionCount"
               ],
               "properties": {
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
-                },
                 "cwd": {
                   "type": "string",
                   "minLength": 1,
@@ -77427,7 +76918,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -77448,18 +76938,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -77611,7 +77089,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -77632,18 +77109,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -77795,7 +77260,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -77816,18 +77280,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -79641,7 +79093,6 @@
               "type": "object",
               "required": [
                 "sessionId",
-                "mode",
                 "contextTokens",
                 "contextWindow",
                 "contextBasis",
@@ -79654,18 +79105,6 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                },
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
                 },
                 "contextTokens": {
                   "anyOf": [
@@ -80171,7 +79610,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -80192,18 +79630,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -80356,7 +79782,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -80377,18 +79802,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -80603,7 +80016,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -80624,18 +80036,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -80787,7 +80187,6 @@
                   "type": "object",
                   "required": [
                     "sessionId",
-                    "mode",
                     "cwdOrigin",
                     "cwd",
                     "createdAt",
@@ -80808,18 +80207,6 @@
                       "type": "string",
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "cwdOrigin": {
                       "anyOf": [
@@ -81096,7 +80483,6 @@
                       "type": "object",
                       "required": [
                         "sessionId",
-                        "mode",
                         "cwdOrigin",
                         "cwd",
                         "createdAt",
@@ -81117,18 +80503,6 @@
                           "type": "string",
                           "maxLength": 256,
                           "x-metis-maxUtf16Units": 256
-                        },
-                        "mode": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "chat"
-                            },
-                            {
-                              "type": "string",
-                              "const": "code"
-                            }
-                          ]
                         },
                         "cwdOrigin": {
                           "anyOf": [
@@ -84057,18 +83431,6 @@
                             "type": "string",
                             "minLength": 1,
                             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "chat"
-                              },
-                              {
-                                "type": "string",
-                                "const": "code"
-                              }
-                            ]
                           },
                           "model": {
                             "type": "object",
@@ -89594,11 +88956,7 @@
                 "outputTokens",
                 "cacheReadTokens",
                 "cacheWriteTokens",
-                "chatTokens",
-                "codeTokens",
                 "sessionCount",
-                "chatSessionCount",
-                "codeSessionCount",
                 "daily",
                 "topModels"
               ],
@@ -89649,27 +89007,7 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 },
-                "chatTokens": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "codeTokens": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
                 "sessionCount": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "chatSessionCount": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "codeSessionCount": {
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
@@ -89680,8 +89018,6 @@
                     "type": "object",
                     "required": [
                       "date",
-                      "chatTokens",
-                      "codeTokens",
                       "inputTokens",
                       "outputTokens",
                       "cacheReadTokens",
@@ -89691,16 +89027,6 @@
                       "date": {
                         "type": "string",
                         "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                      },
-                      "chatTokens": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "codeTokens": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
                       },
                       "inputTokens": {
                         "type": "integer",
@@ -91959,18 +91285,6 @@
                         "type": "string",
                         "minLength": 1,
                         "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                      },
-                      "mode": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "chat"
-                          },
-                          {
-                            "type": "string",
-                            "const": "code"
-                          }
-                        ]
                       },
                       "model": {
                         "type": "object",
@@ -94468,18 +93782,6 @@
                       "minLength": 1,
                       "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
                     "model": {
                       "type": "object",
                       "required": [
@@ -95138,18 +94440,6 @@
                       "minLength": 1,
                       "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                     },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
-                    },
                     "model": {
                       "type": "object",
                       "required": [
@@ -95807,18 +95097,6 @@
                       "type": "string",
                       "minLength": 1,
                       "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                    },
-                    "mode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "chat"
-                        },
-                        {
-                          "type": "string",
-                          "const": "code"
-                        }
-                      ]
                     },
                     "model": {
                       "type": "object",
@@ -105767,7 +105045,6 @@
                     "type": "object",
                     "required": [
                       "sessionId",
-                      "mode",
                       "cwdOrigin",
                       "cwd",
                       "createdAt",
@@ -105788,18 +105065,6 @@
                         "type": "string",
                         "maxLength": 256,
                         "x-metis-maxUtf16Units": 256
-                      },
-                      "mode": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "chat"
-                          },
-                          {
-                            "type": "string",
-                            "const": "code"
-                          }
-                        ]
                       },
                       "cwdOrigin": {
                         "anyOf": [
@@ -105956,7 +105221,6 @@
                 "type": "object",
                 "required": [
                   "type",
-                  "mode",
                   "cwd",
                   "reason"
                 ],
@@ -105964,18 +105228,6 @@
                   "type": {
                     "type": "string",
                     "const": "project/invalidated"
-                  },
-                  "mode": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "const": "chat"
-                      },
-                      {
-                        "type": "string",
-                        "const": "code"
-                      }
-                    ]
                   },
                   "cwd": {
                     "type": "string",
@@ -110177,18 +109429,6 @@
                         "type": "string",
                         "minLength": 1,
                         "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                      },
-                      "mode": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "chat"
-                          },
-                          {
-                            "type": "string",
-                            "const": "code"
-                          }
-                        ]
                       },
                       "model": {
                         "type": "object",
@@ -115207,7 +114447,6 @@
               "type": "object",
               "required": [
                 "sessionId",
-                "mode",
                 "cwdOrigin",
                 "cwd",
                 "createdAt",
@@ -115228,18 +114467,6 @@
                   "type": "string",
                   "maxLength": 256,
                   "x-metis-maxUtf16Units": 256
-                },
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
                 },
                 "cwdOrigin": {
                   "anyOf": [
@@ -115396,7 +114623,6 @@
           "type": "object",
           "required": [
             "type",
-            "mode",
             "cwd",
             "reason"
           ],
@@ -115404,18 +114630,6 @@
             "type": {
               "type": "string",
               "const": "project/invalidated"
-            },
-            "mode": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "chat"
-                },
-                {
-                  "type": "string",
-                  "const": "code"
-                }
-              ]
             },
             "cwd": {
               "type": "string",
@@ -119617,18 +118831,6 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                },
-                "mode": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "chat"
-                    },
-                    {
-                      "type": "string",
-                      "const": "code"
-                    }
-                  ]
                 },
                 "model": {
                   "type": "object",
@@ -129661,7 +128863,6 @@
                             "type": "object",
                             "required": [
                               "sessionId",
-                              "mode",
                               "cwdOrigin",
                               "cwd",
                               "createdAt",
@@ -129682,18 +128883,6 @@
                                 "type": "string",
                                 "maxLength": 256,
                                 "x-metis-maxUtf16Units": 256
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "cwdOrigin": {
                                 "anyOf": [
@@ -129850,7 +129039,6 @@
                         "type": "object",
                         "required": [
                           "type",
-                          "mode",
                           "cwd",
                           "reason"
                         ],
@@ -129858,18 +129046,6 @@
                           "type": {
                             "type": "string",
                             "const": "project/invalidated"
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "chat"
-                              },
-                              {
-                                "type": "string",
-                                "const": "code"
-                              }
-                            ]
                           },
                           "cwd": {
                             "type": "string",
@@ -134071,18 +133247,6 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
-                              },
-                              "mode": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "chat"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "code"
-                                  }
-                                ]
                               },
                               "model": {
                                 "type": "object",
@@ -142444,7 +141608,6 @@
           "type": "object",
           "required": [
             "sessionId",
-            "mode",
             "cwdOrigin",
             "cwd",
             "createdAt",
@@ -142465,18 +141628,6 @@
               "type": "string",
               "maxLength": 256,
               "x-metis-maxUtf16Units": 256
-            },
-            "mode": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "chat"
-                },
-                {
-                  "type": "string",
-                  "const": "code"
-                }
-              ]
             },
             "cwdOrigin": {
               "anyOf": [
@@ -145406,18 +144557,6 @@
                 "minLength": 1,
                 "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
               },
-              "mode": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "const": "chat"
-                  },
-                  {
-                    "type": "string",
-                    "const": "code"
-                  }
-                ]
-              },
               "model": {
                 "type": "object",
                 "required": [
@@ -146028,7 +145167,6 @@
       "type": "object",
       "required": [
         "sessionId",
-        "mode",
         "cwdOrigin",
         "cwd",
         "createdAt",
@@ -146049,18 +145187,6 @@
           "type": "string",
           "maxLength": 256,
           "x-metis-maxUtf16Units": 256
-        },
-        "mode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "chat"
-            },
-            {
-              "type": "string",
-              "const": "code"
-            }
-          ]
         },
         "cwdOrigin": {
           "anyOf": [

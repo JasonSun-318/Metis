@@ -39,7 +39,6 @@ import {
 } from "./schema.ts";
 import {
 	ActualThinkingLevelSchema,
-	AgentModeSchema,
 	AgentSummaryViewSchema,
 	AgentTypeIdSchema,
 	ArchivedConversationViewSchema,
@@ -397,11 +396,9 @@ export const ProfileGetResultSchema = ProfileUsageSummaryViewSchema;
 
 export const ProjectRevisionSchema = Sha256Schema;
 export const ProjectDeletePreviewParamsSchema = StrictObject({
-	mode: AgentModeSchema,
 	cwd: PathSchema,
 });
 export const ProjectDeletePreviewResultSchema = StrictObject({
-	mode: AgentModeSchema,
 	cwd: PathSchema,
 	sessionCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
 	blockingScheduleCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
@@ -409,12 +406,10 @@ export const ProjectDeletePreviewResultSchema = StrictObject({
 });
 export const ProjectDeleteParamsSchema = StrictObject({
 	requestId: UuidSchema,
-	mode: AgentModeSchema,
 	cwd: PathSchema,
 	expectedRevision: ProjectRevisionSchema,
 });
 export const ProjectDeleteResultSchema = StrictObject({
-	mode: AgentModeSchema,
 	cwd: PathSchema,
 	deletedSessionCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
 });
@@ -422,7 +417,6 @@ export const ProjectDeleteResultSchema = StrictObject({
 export const SessionCreateParamsSchema = StrictObject({
 	// Create IDs are globally scoped because the ID also becomes the session ID.
 	requestId: UuidSchema,
-	mode: Type.Optional(AgentModeSchema),
 	cwd: Type.Optional(PathSchema),
 	name: Type.Optional(OptionalNameSchema),
 	permissionPreset: Type.Optional(PermissionPresetSchema),
