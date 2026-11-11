@@ -129,13 +129,45 @@ describe("Project sidebar motion", () => {
 		expect(scheduledHeading.fontWeight).toBe(taskHeading.fontWeight);
 	});
 
-	it("keeps controls free of focus rings while preserving their ordinary borders", () => {
-		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("none");
-		expect(rule("input:focus-visible, textarea:focus-visible, select:focus-visible").outline).toBe("none");
+	it("draws a keyboard focus ring without replacing ordinary borders", () => {
+		const button = rule("button:focus-visible, summary:focus-visible");
+		const field = rule("input:focus-visible, textarea:focus-visible, select:focus-visible");
+		const target = rule('a:focus-visible, [tabindex]:focus-visible, [contenteditable="true"]:focus-visible');
+		for (const focus of [button, field, target]) {
+			expect(focus.outline).toBe("2px solid var(--focus)");
+			expect(focus.outlineOffset).toBe("2px");
+		}
+		expect(
+			rule(
+				".session-button:focus-visible, .project-heading:focus-visible, .session-section-heading:focus-visible, .session-actions > button:focus-visible, .project-action-buttons > button:focus-visible",
+			).outlineOffset,
+		).toBe("-2px");
+		expect(
+			rule(".tool-tab-select:focus-visible, .tool-tab-close:focus-visible, .tool-tab-group-label:focus-visible")
+				.outlineOffset,
+		).toBe("-2px");
+		expect(rule(".file-tree-row-select:focus-visible, .file-tree-name-input:focus-visible").outlineOffset).toBe(
+			"-2px",
+		);
+		expect(rule(".file-search-field input:focus-visible").outlineOffset).toBe("2px");
+		expect(rule(".composer textarea:focus-visible, .composer .composer-editable-input:focus-visible").outline).toBe(
+			"2px solid var(--focus)",
+		);
+		expect(
+			rule(".composer textarea:focus-visible, .composer .composer-editable-input:focus-visible").outlineOffset,
+		).toBe("2px");
 		expect(rule(".file-search-field").border).toBe("1px solid var(--control-border)");
 		expect(rule(".browser-address-field").border).toBe("1px solid var(--control-border)");
 		expect(rule(".plugins-search").border).toBe("1px solid var(--control-border)");
 		expect(rule(".composer").border).toBe("1px solid var(--border-strong)");
+		expect(rule(".file-tree-empty").color).toBe("var(--text-muted)");
+		expect(rule(".profile-eyebrow").color).toBe("var(--text-muted)");
+		expect(rule(".profile-identity p").color).toBe("var(--text-muted)");
+		expect(rule(".profile-heatmap-week > small").color).toBe("var(--text-muted)");
+		expect(rule(".file-tree-menu button:disabled").color).toBe("var(--text-03)");
+		expect(rule(".file-breadcrumbs span + span::before").color).toBe("var(--text-03)");
+		expect(tokens).toContain("--text-03: #646464;");
+		expect(tokens).toContain("--text-03: #949494;");
 	});
 
 	it("anchors the unified account menu to the full footer width", () => {

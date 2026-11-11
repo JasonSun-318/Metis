@@ -110,7 +110,8 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home .composer").borderBottom).toBe("1px solid var(--home-border)");
 		expect(rule(".new-task-home-project-control").minHeight).toBe("38px");
 		expect(rule(".new-task-home .home-project-picker").height).toBe("38px");
-		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("none");
+		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("2px solid var(--focus)");
+		expect(rule("button:focus-visible, summary:focus-visible").outlineOffset).toBe("2px");
 	});
 
 	it("keeps a readable centered welcome and lightweight shortcuts in normal flow", () => {
