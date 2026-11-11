@@ -45,7 +45,7 @@ describe("Plugin Center visual contract", () => {
 		expect(css).toContain(
 			".mcp-dialog { position: relative; width: min(var(--dialog-width-large), calc(100vw - 48px));",
 		);
-		expect(rule(".mcp-dialog").borderRadius).toBe("16px");
+		expect(rule(".mcp-dialog").borderRadius).toBe("var(--radius-dialog)");
 		expect(rule(".mcp-dialog").background).toBe("var(--surface-04)");
 		expect(rule(".mcp-dialog h2").fontSize).toBe("19px");
 		expect(rule(".mcp-dialog label").fontSize).toBe("12px");

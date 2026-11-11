@@ -59,6 +59,8 @@ export class SessionRegistry {
 	private readonly maxQueuedOperationsPerSession: number;
 	private accepting = true;
 	private modelServiceRefreshActive = false;
+	/** Project-rule edits that arrived while a model-service refresh held the gate. */
+	private pendingOpenPermissionRulesNotification = false;
 	private modelServiceRefreshTail: Promise<void> = Promise.resolve();
 	private shutdownPromise?: Promise<void>;
 	private readonly options: SessionRegistryOptions;
@@ -361,8 +363,20 @@ export class SessionRegistry {
 		return await this.refreshOpenRuntimeSettings("refreshMemorySettings");
 	}
 
+	/**
+	 * Invalidate project-rule authority on every open runtime.
+	 * Edits during a model-service refresh are coalesced into one invalidation,
+	 * queued when that refresh releases and before the gate admits new work.
+	 */
 	async notifyOpenPermissionRulesChanged(): Promise<void> {
-		if (this.modelServiceRefreshActive) return;
+		if (this.modelServiceRefreshActive) {
+			this.pendingOpenPermissionRulesNotification = true;
+			return;
+		}
+		await this.invalidateOpenPermissionRules();
+	}
+
+	private async invalidateOpenPermissionRules(): Promise<void> {
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
 		await Promise.allSettled(
 			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.notifyPermissionRulesChanged?.())),
@@ -403,7 +417,7 @@ export class SessionRegistry {
 		});
 	}
 
-	async beginModelServiceSettingsRefresh(): Promise<() => void> {
+	async beginModelServiceSettingsRefresh(): Promise<() => Promise<void>> {
 		if (this.retentionTask) await this.retentionTask;
 		if (!this.accepting) throw new AppServerError("BUSY");
 		let unlock!: () => void;
@@ -419,11 +433,19 @@ export class SessionRegistry {
 		}
 		this.modelServiceRefreshActive = true;
 		let released = false;
+		let finished = Promise.resolve();
 		return () => {
-			if (released) return;
+			if (released) return finished;
 			released = true;
+			const pending = this.pendingOpenPermissionRulesNotification;
+			this.pendingOpenPermissionRulesNotification = false;
+			if (pending) {
+				// Queue before opening the gate so newly admitted work stays behind the invalidation.
+				finished = this.invalidateOpenPermissionRules();
+			}
 			this.modelServiceRefreshActive = false;
 			unlock();
+			return finished;
 		};
 	}
 

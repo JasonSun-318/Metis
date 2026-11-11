@@ -185,7 +185,15 @@ describe("managed session workspaces", () => {
 		session.close();
 
 		const previousPath = process.env.PATH;
-		process.env.PATH = "";
+		const previousDataHome = process.env.XDG_DATA_HOME;
+		// Linux renames into the XDG trash and ignores PATH. macOS and Windows resolve
+		// osascript or powershell through PATH. Both have to be unavailable.
+		const blockedBin = join(root, "no-trash-bin");
+		mkdirSync(blockedBin);
+		const blockedDataHome = join(root, "xdg-data-home");
+		writeFileSync(blockedDataHome, "not a directory");
+		process.env.PATH = blockedBin;
+		process.env.XDG_DATA_HOME = blockedDataHome;
 		try {
 			expect(await SessionManager.deleteSession(sessionFile, { agentDir })).toMatchObject({
 				ok: false,
@@ -195,6 +203,8 @@ describe("managed session workspaces", () => {
 		} finally {
 			if (previousPath === undefined) delete process.env.PATH;
 			else process.env.PATH = previousPath;
+			if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+			else process.env.XDG_DATA_HOME = previousDataHome;
 		}
 		expect(existsSync(sessionFile)).toBe(true);
 		expect(existsSync(workspace.cwd)).toBe(true);

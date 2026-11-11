@@ -802,6 +802,32 @@ describe("SessionRegistry", () => {
 		expect(second.calls).toEqual(["permission-rules:changed"]);
 	});
 
+	it("delivers one project-rule invalidation after model-service refresh unlocks", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+		const release = await registry.beginModelServiceSettingsRefresh();
+
+		await registry.notifyOpenPermissionRulesChanged();
+		await registry.notifyOpenPermissionRulesChanged();
+
+		expect(first.calls).toEqual([]);
+		expect(second.calls).toEqual([]);
+		await expect(registry.run(ref("session-a"), () => undefined)).rejects.toMatchObject({ code: "BUSY" });
+
+		const released = release();
+		const admitted = registry.run(ref("session-a"), () => {
+			first.calls.push("admitted");
+			return "ready";
+		});
+
+		await released;
+		await expect(admitted).resolves.toBe("ready");
+		expect(first.calls).toEqual(["permission-rules:changed", "admitted"]);
+		expect(second.calls).toEqual(["permission-rules:changed"]);
+	});
+
 	it("gates public session work across two-phase model-service refresh", async () => {
 		const host = new FakeHost();
 		const registry = new SessionRegistry(host);
