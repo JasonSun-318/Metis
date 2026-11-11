@@ -19,7 +19,7 @@
 .generated-image-error { margin: var(--space-8) 0 0; font-size: var(--font-size-xs); line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; white-space: pre-wrap; }
 .generated-image-dialog { position: fixed; inset: 0; margin: auto; padding: var(--space-12); width: 100vw; height: 100dvh; max-width: none; max-height: none; box-sizing: border-box; border: 0; background: transparent; color: var(--text); overflow: hidden; }
 .generated-image-dialog::backdrop { background: var(--overlay-dim); backdrop-filter: blur(12px); }
-.generated-image-dialog-shell { width: min(1200px, 100%); height: min(900px, 100%); margin: auto; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-dialog); background: var(--app-bg); box-shadow: 0 24px 80px #0006; }
+.generated-image-dialog-shell { width: min(1200px, 100%); height: min(900px, 100%); margin: auto; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-dialog); background: var(--app-bg); box-shadow: var(--shadow-float); }
 .generated-image-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); padding: var(--space-12) var(--space-16); border-bottom: 1px solid var(--border-weak); }
 .generated-image-filename { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); }
 .generated-image-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); font-size: var(--font-size-xs); }

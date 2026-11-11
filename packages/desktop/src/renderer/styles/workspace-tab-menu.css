@@ -26,7 +26,7 @@
 	padding: 0 var(--space-8);
 	text-align: left;
 	font-size: var(--menu-item-font-size);
-	transition: background-color 140ms ease, color 140ms ease;
+	transition: background-color var(--motion-duration-fast) ease, color var(--motion-duration-fast) ease;
 }
 .workspace-tab-menu[data-open] button:hover:not(:disabled),
 .workspace-tab-menu[data-open] button:focus-visible {
