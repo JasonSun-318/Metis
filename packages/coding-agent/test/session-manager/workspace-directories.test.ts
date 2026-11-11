@@ -94,7 +94,7 @@ describe("SessionManager workspace directories", () => {
 		imported.close();
 
 		const reopened = SessionManager.open(sourcePath, sessions);
-		reopened.newSession({ mode: "code" });
+		reopened.newSession({});
 		expect(reopened.getAdditionalDirectories()).toEqual([]);
 		reopened.close();
 	});

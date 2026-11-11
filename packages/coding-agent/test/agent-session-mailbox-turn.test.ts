@@ -21,7 +21,7 @@ afterEach(async () => {
 async function mailboxHarness(tools?: AgentTool[], retry = false) {
 	const root = mkdtempSync(join(tmpdir(), "metis-mailbox-turn-"));
 	roots.push(root);
-	const manager = SessionManager.create(root, join(root, "sessions"), { mode: "code", permissionPreset: "full" });
+	const manager = SessionManager.create(root, join(root, "sessions"), { permissionPreset: "full" });
 	managers.push(manager);
 	const harness = await createHarness({
 		tools,

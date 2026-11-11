@@ -16,12 +16,12 @@ afterEach(async () => {
 	await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function fixture(mode: "code" | "chat") {
+async function fixture() {
 	const cwd = await realpath(await mkdtemp(join(tmpdir(), "metis-session-diffs-")));
 	roots.push(cwd);
 	await writeFile(join(cwd, "app.ts"), "old\n");
 	const agentDir = join(cwd, "agent");
-	const sessionManager = SessionManager.inMemory(cwd, { mode });
+	const sessionManager = SessionManager.inMemory(cwd);
 	sessionManager.setPermissionPreset("full");
 	const { session } = await createAgentSession({
 		cwd,
@@ -55,9 +55,9 @@ async function execute(session: AgentSession, name: string, id: string, args: Re
 	return { details: hooked?.details ?? result.details, isError: hooked?.isError ?? isError };
 }
 
-describe("AgentSession Code diffs", () => {
-	it.each(["chat", "code"] as const)("attaches actual authorized edit/write changes in %s", async (mode) => {
-		const session = await fixture(mode);
+describe("AgentSession code diffs", () => {
+	it("attaches actual authorized edit/write changes", async () => {
+		const session = await fixture();
 		const written = await execute(session, "write", "write-1", { path: "app.ts", content: "new\n" });
 		expect(written.details).toMatchObject({
 			codeChanges: { files: [{ additions: 1, deletions: 1 }], turn: { additions: 1, deletions: 1 } },
@@ -73,7 +73,7 @@ describe("AgentSession Code diffs", () => {
 	});
 
 	it("keeps a failed command's error and the diff for changes made before failure", async () => {
-		const session = await fixture("code");
+		const session = await fixture();
 		const failed = await execute(session, "bash", "bash-1", { command: "printf 'changed\\n' > app.ts; exit 1" });
 		expect(failed.isError).toBe(true);
 		expect(failed.details).toMatchObject({
@@ -81,8 +81,8 @@ describe("AgentSession Code diffs", () => {
 		});
 	});
 
-	it("records Chat changes for later development presentation", async () => {
-		const session = await fixture("chat");
+	it("records changes for later development presentation", async () => {
+		const session = await fixture();
 		const result = await execute(session, "write", "chat-write", { path: "app.ts", content: "new\n" });
 		expect(result.isError).toBe(false);
 		expect(result.details?.codeChanges).toMatchObject({

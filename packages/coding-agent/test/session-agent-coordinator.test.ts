@@ -123,7 +123,6 @@ describe("SessionAgentCoordinator", () => {
 	it("preserves child and host instructions while composing coordination", async () => {
 		const { harness } = await persistedHarness({
 			id: "child",
-			mode: "chat",
 			agent: (cwd) =>
 				agentHeader(cwd, { agentId: "child", parentSessionId: "root", rootSessionId: "root", mayDelegate: true }),
 		});
@@ -149,7 +148,7 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("owns a persisted Code root and disposes it once", async () => {
-		const { harness, sessionManager } = await persistedHarness({ id: "root", mode: "code" });
+		const { harness, sessionManager } = await persistedHarness({ id: "root" });
 		const adapter = managerAdapter();
 		const createManager = vi.fn(() => adapter.manager);
 		const guardSpy = vi.spyOn(harness.session, "setCollaborationModeGuard");
@@ -173,7 +172,6 @@ describe("SessionAgentCoordinator", () => {
 	it("borrows a child manager without unloading it", async () => {
 		const { harness } = await persistedHarness({
 			id: "child",
-			mode: "code",
 			agent: (cwd) =>
 				agentHeader(cwd, {
 					agentId: "child",
@@ -203,7 +201,6 @@ describe("SessionAgentCoordinator", () => {
 		harnesses.push(memoryHarness);
 		const scheduled = await persistedHarness({
 			id: "scheduled",
-			mode: "chat",
 			scheduled: { taskId: "task", runId: "run" },
 		});
 
@@ -218,7 +215,7 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("rebinds after owned cleanup without retaining the previous manager", async () => {
-		const root = await persistedHarness({ id: "root", mode: "code" });
+		const root = await persistedHarness({ id: "root" });
 		const replacement = await createHarness({ withAgentDir: true });
 		harnesses.push(replacement);
 		const adapter = managerAdapter();
@@ -235,7 +232,7 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("ignores a continuation that becomes stale during disposal", async () => {
-		const { harness } = await persistedHarness({ id: "root", mode: "code" });
+		const { harness } = await persistedHarness({ id: "root" });
 		const adapter = managerAdapter();
 		const coordinator = new SessionAgentCoordinator(
 			coordinatorOptions(harness.tempDir, { createManager: () => adapter.manager }),
@@ -263,7 +260,7 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("does not wake a model for notifications recovered from history", async () => {
-		const { harness } = await persistedHarness({ id: "root", mode: "code" });
+		const { harness } = await persistedHarness({ id: "root" });
 		const adapter = managerAdapter();
 		const coordinator = new SessionAgentCoordinator(
 			coordinatorOptions(harness.tempDir, { createManager: () => adapter.manager }),
@@ -278,7 +275,7 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("reports manager notification failures through the diagnostic callback", async () => {
-		const { harness } = await persistedHarness({ id: "root", mode: "code" });
+		const { harness } = await persistedHarness({ id: "root" });
 		const adapter = managerAdapter();
 		const onDiagnostic = vi.fn();
 		const coordinator = new SessionAgentCoordinator(

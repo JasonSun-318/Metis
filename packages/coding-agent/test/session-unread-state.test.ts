@@ -24,7 +24,6 @@ describe("session unread state", () => {
 		mkdirSync(cwd, { recursive: true });
 		const manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), {
 			id: "11111111-1111-4111-8111-111111111111",
-			mode: "chat",
 		});
 		expect(manager.getSessionUnread()).toBe(false);
 		manager.setSessionUnread(true);

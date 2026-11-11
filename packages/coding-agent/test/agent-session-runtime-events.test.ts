@@ -272,7 +272,7 @@ describe("AgentSessionRuntime plan execution", () => {
 		}
 	});
 
-	async function createPlanRuntime(initialMode: AgentMode = "code", noTools?: "all" | "builtin") {
+	async function createPlanRuntime(noTools?: "all" | "builtin") {
 		const tempDir = join(tmpdir(), `metis-plan-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -329,7 +329,7 @@ describe("AgentSessionRuntime plan execution", () => {
 				diagnostics: services.diagnostics,
 			};
 		};
-		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), { mode: initialMode });
+		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"));
 		sessionManager.setPermissionPreset("full");
 		const sessionCwd = sessionManager.getCwd();
 		const runtime = await createAgentSessionRuntime(createRuntime, {
@@ -528,7 +528,7 @@ describe("AgentSessionRuntime plan execution", () => {
 	});
 
 	it.each(["all", "builtin"] as const)("does not inject submit_plan through noTools=%s", async (noTools) => {
-		const { session } = await createPlanRuntime("code", noTools);
+		const { session } = await createPlanRuntime(noTools);
 		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("submit_plan");
 		const configured = session.getActiveToolNames();
 		await session.setCollaborationMode("plan");

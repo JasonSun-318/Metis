@@ -202,10 +202,7 @@ describe("project Trash", () => {
 		const legacyCode = createSession(layout, "legacy-code");
 		const legacyLines = readFileSync(legacyCode.path, "utf8").split("\n");
 		const legacyHeader = JSON.parse(legacyLines[0]!);
-		writeFileSync(
-			legacyCode.path,
-			`${[JSON.stringify({ ...legacyHeader, mode: "code" }), ...legacyLines.slice(1)].join("\n")}`,
-		);
+		writeFileSync(legacyCode.path, `${[JSON.stringify({ ...legacyHeader }), ...legacyLines.slice(1)].join("\n")}`);
 		const childCwd = join(layout.cwd, "child");
 		mkdirSync(childCwd);
 		const child = createSession(layout, "chat-child", { cwd: childCwd });

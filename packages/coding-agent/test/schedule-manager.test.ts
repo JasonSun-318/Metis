@@ -586,7 +586,6 @@ describe("schedule manager", () => {
 		if (!run.sessionId) throw new Error("running schedule did not reserve a session id");
 		const session = SessionManager.create(task.target.cwd, getDefaultSessionDir(task.target.cwd, agentDir), {
 			id: run.sessionId,
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			scheduled: { taskId: task.id, runId },
 		});

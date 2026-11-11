@@ -25,7 +25,7 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("preserves remembered manual approval scope across reopening without granting new authority", () => {
-		const session = SessionManager.create(directory, directory, { mode: "code", permissionPreset: "ask" });
+		const session = SessionManager.create(directory, directory, { permissionPreset: "ask" });
 		const file = session.getSessionFile()!;
 		session.appendPermissionAuditRecord({
 			actionId: "manual-call",
@@ -49,8 +49,8 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("defaults both Chat and Code to Auto", () => {
-		const chat = SessionManager.inMemory(directory, { mode: "chat" });
-		const code = SessionManager.inMemory(directory, { mode: "code" });
+		const chat = SessionManager.inMemory(directory, {});
+		const code = SessionManager.inMemory(directory, {});
 
 		expect(chat.getPermissionPreset()).toBe("auto");
 		expect(code.getPermissionPreset()).toBe("auto");
@@ -71,7 +71,7 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("writes only the preset contract and preserves Auto creation input", () => {
-		const session = SessionManager.create(directory, directory, { mode: "code", permissionPreset: "auto" });
+		const session = SessionManager.create(directory, directory, { permissionPreset: "auto" });
 		session.setPermissionPreset("full");
 		const records = session.getDurableJournalSnapshot();
 
@@ -84,7 +84,7 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("reduces permission controls without advancing or exposing the transcript tree", () => {
-		const session = SessionManager.inMemory(directory, { mode: "code" });
+		const session = SessionManager.inMemory(directory, {});
 		const leafId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		const controlId = session.setPermissionPreset("full");
 		const decisionId = session.appendPermissionAuditRecord({
@@ -111,7 +111,7 @@ describe("SessionManager permission settings", () => {
 	it.each(["rule", "model", "user", "full"] as const)(
 		"persists the final %s source without transcript content",
 		(source) => {
-			const session = SessionManager.create(directory, directory, { mode: "code" });
+			const session = SessionManager.create(directory, directory, {});
 			session.appendMessage({ role: "user", content: "source fixture", timestamp: 1 });
 			const file = session.getSessionFile()!;
 			session.appendPermissionAuditRecord({
@@ -137,7 +137,7 @@ describe("SessionManager permission settings", () => {
 	);
 
 	it("persists exact rule scope and manual reason across restart without guessing old records", () => {
-		const session = SessionManager.create(directory, directory, { mode: "code" });
+		const session = SessionManager.create(directory, directory, {});
 		session.appendMessage({ role: "user", content: "decision fixture", timestamp: 1 });
 		const file = session.getSessionFile()!;
 		session.appendPermissionAuditRecord({
@@ -233,7 +233,6 @@ describe("SessionManager permission settings", () => {
 				id: "legacy-permissions",
 				timestamp,
 				cwd: directory,
-				mode: "code",
 				permissionMode: "ask",
 				reviewerEnabled: true,
 			},
@@ -282,7 +281,6 @@ describe("SessionManager permission settings", () => {
 				id: "legacy-readonly",
 				timestamp,
 				cwd: directory,
-				mode: "code",
 				permissionMode: "ask",
 				reviewerEnabled: false,
 			},
@@ -323,7 +321,6 @@ describe("SessionManager permission settings", () => {
 				id: "legacy-invalid",
 				timestamp,
 				cwd: directory,
-				mode: "code",
 				...header,
 			},
 		]);
@@ -357,7 +354,6 @@ describe("SessionManager permission settings", () => {
 				id: "source-boundary",
 				timestamp,
 				cwd: directory,
-				mode: "code",
 				...header,
 			},
 		]);
@@ -414,7 +410,7 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("inherits only the effective preset when branching and forking", () => {
-		const source = SessionManager.create(directory, directory, { mode: "chat", cwdOrigin: "user-selected" });
+		const source = SessionManager.create(directory, directory, { cwdOrigin: "user-selected" });
 		const leafId = source.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		source.setPermissionPreset("full");
 		const sourcePath = source.getSessionFile()!;

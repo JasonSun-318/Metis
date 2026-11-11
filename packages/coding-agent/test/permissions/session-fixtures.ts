@@ -42,7 +42,7 @@ export async function createPermissionSession(preset: PermissionPreset = "auto")
 	readonly file: string;
 }> {
 	const { project, sessions } = createPermissionDirs();
-	const sessionManager = SessionManager.create(project, sessions, { mode: "code", permissionPreset: preset });
+	const sessionManager = SessionManager.create(project, sessions, { permissionPreset: preset });
 	managers.push(sessionManager);
 	const harness = await createHarness({ sessionManager, permissionPreset: preset, withAgentDir: true });
 	harnesses.push(harness);

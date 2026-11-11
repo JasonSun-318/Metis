@@ -191,7 +191,6 @@ describe("subagent runtime prompt and mailbox", () => {
 		const childConfig = agentConfig({ agentId: "isolated-child", agentPath: ["isolated-child"], cwd });
 		const sessionManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: childConfig.agentId,
-			mode: "code",
 			agent: {
 				...childConfig,
 			},
@@ -282,7 +281,6 @@ describe("subagent runtime prompt and mailbox", () => {
 		roots.push(root);
 		const manager = SessionManager.create(root, join(root, "sessions"), {
 			id: "parent-mailbox",
-			mode: "code",
 		});
 		persistentManagers.push(manager);
 		const first = await createHarness({ sessionManager: manager });
@@ -341,7 +339,6 @@ describe("shared agent coordinator", () => {
 		mkdirSync(agentDir);
 		const rootManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-session-1",
-			mode: "code",
 		});
 		persistentManagers.push(rootManager);
 		const store = new AgentStore(rootManager, agentDir);
@@ -398,7 +395,6 @@ describe("shared agent coordinator", () => {
 		mkdirSync(agentDir);
 		const rootManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-session-1",
-			mode: "code",
 		});
 		const store = new AgentStore(rootManager, agentDir);
 		const config = agentConfig({
@@ -465,7 +461,6 @@ describe("shared agent coordinator", () => {
 		const authStorage = AuthStorage.inMemory();
 		const sessionManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-session-1",
-			mode: "code",
 		});
 		persistentManagers.push(sessionManager);
 		const servicesOptions = {
@@ -510,7 +505,6 @@ describe("shared agent coordinator", () => {
 		mkdirSync(cwd);
 		const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-session-1",
-			mode: "code",
 		});
 		persistentManagers.push(parentManager);
 		const coordinator = new SubagentManager({
@@ -524,7 +518,6 @@ describe("shared agent coordinator", () => {
 		});
 		const childManager = SessionManager.create(cwd, join(root, "child-sessions"), {
 			id: "child-1",
-			mode: "code",
 			agent: {
 				agentId: "child-1",
 				name: "reviewer",
@@ -588,7 +581,6 @@ describe("shared agent coordinator", () => {
 		mkdirSync(cwd);
 		const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: "parent-session-1",
-			mode: "code",
 		});
 		persistentManagers.push(parentManager);
 		const coordinator = new SubagentManager({
@@ -601,7 +593,6 @@ describe("shared agent coordinator", () => {
 		});
 		const childManager = SessionManager.create(cwd, join(root, "child-sessions"), {
 			id: "child-1",
-			mode: "code",
 			agent: {
 				agentId: "child-1",
 				name: "worker",

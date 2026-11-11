@@ -43,7 +43,6 @@ describe("dream gate", () => {
 		const header = {
 			type: "session",
 			version: 14,
-			mode: "code",
 			permissionPreset: "auto",
 			id: options.id,
 			timestamp: new Date(Date.now() - 86_400_000).toISOString(),

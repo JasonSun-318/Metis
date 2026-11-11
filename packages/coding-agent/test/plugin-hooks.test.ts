@@ -162,7 +162,7 @@ describe("Plugin Hooks Runtime Integration", () => {
 			},
 		};
 
-		const sessionManager = SessionManager.create(cwd, join(agentDir, "sessions"), { mode: "code" });
+		const sessionManager = SessionManager.create(cwd, join(agentDir, "sessions"), {});
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 			const services = await createAgentSessionServices({
 				...runtimeOptions,

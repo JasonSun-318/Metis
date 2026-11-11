@@ -25,7 +25,6 @@ describe("dream transcript", () => {
 		const header = {
 			type: "session",
 			version: 14,
-			mode: "code",
 			permissionPreset: "auto",
 			id,
 			timestamp: "2026-01-01T00:00:00.000Z",

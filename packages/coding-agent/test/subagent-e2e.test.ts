@@ -104,7 +104,6 @@ function setupHarness() {
 	mkdirSync(cwd);
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -113,7 +112,6 @@ function setupHarness() {
 	const parent = {
 		sessionManager: parentManager,
 		messages: [],
-		mode: "code",
 		thinkingLevel: "high",
 		model,
 		modelRegistry: {
@@ -253,7 +251,6 @@ describe("agent system e2e", () => {
 		};
 		const rootManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: ROOT_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager: rootManager });

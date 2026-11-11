@@ -86,7 +86,7 @@ describe("hook context, blocking, and lifecycle integration", () => {
 			},
 		};
 
-		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), { mode: "code" });
+		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), {});
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 			const services = await createAgentSessionServices({
 				...runtimeOptions,
@@ -436,7 +436,7 @@ describe("hook context, blocking, and lifecycle integration", () => {
 					noThemes: true,
 				},
 			});
-			const sessionManager = SessionManager.create(dir, join(dir, "sessions"), { mode: "code" });
+			const sessionManager = SessionManager.create(dir, join(dir, "sessions"), {});
 			const runtimeHost = await createAgentSessionRuntime(
 				async () => ({
 					...(await createAgentSessionFromServices({

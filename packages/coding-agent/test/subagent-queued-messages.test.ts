@@ -122,7 +122,6 @@ function setup(scheduler = new SubagentScheduler(4, 4)): Harness {
 	mkdirSync(cwd);
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -131,7 +130,6 @@ function setup(scheduler = new SubagentScheduler(4, 4)): Harness {
 	const parent = {
 		sessionManager: parentManager,
 		messages: [],
-		mode: "code",
 		thinkingLevel: "high" as ThinkingLevel,
 		model,
 		getActiveToolNames: () => ["read"],
@@ -566,7 +564,6 @@ describe("SubagentManager durable queued messages", () => {
 		};
 		const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: ROOT_ID,
-			mode: "code",
 			permissionPreset: "full",
 		});
 		const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager: parentManager });
@@ -761,7 +758,6 @@ describe("SubagentManager durable queued messages", () => {
 			}
 			recoveredParent = SessionManager.create(harness.parentManager.getCwd(), join(recoveryRoot, "sessions"), {
 				id: ROOT_ID,
-				mode: "code",
 				permissionPreset: "full",
 			});
 			const createChildRuntime = vi.fn(async (): Promise<AgentSessionRuntime> => {

@@ -12,7 +12,6 @@ function makeSession(
 		path: `/tmp/${overrides.id}.jsonl`,
 		id: overrides.id,
 		cwd: overrides.cwd ?? "",
-		mode: overrides.mode ?? "code",
 		name: overrides.name,
 		created: overrides.created ?? new Date(0),
 		modified: overrides.modified,

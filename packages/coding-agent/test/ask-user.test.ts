@@ -208,7 +208,7 @@ describe("ask_user", () => {
 		});
 		const result = await createAgentSessionFromServices({
 			services,
-			sessionManager: SessionManager.inMemory(process.cwd(), { mode: "code" }),
+			sessionManager: SessionManager.inMemory(process.cwd(), {}),
 			model: getModel("anthropic", "claude-sonnet-4-5")!,
 		});
 

@@ -40,7 +40,6 @@ describe("declarative hooks end-to-end", () => {
 		const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		});
@@ -62,7 +61,6 @@ describe("declarative hooks end-to-end", () => {
 		const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-2",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		});
@@ -89,7 +87,6 @@ describe("declarative hooks end-to-end", () => {
 		const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-3",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		});
@@ -171,7 +168,6 @@ describe("declarative hooks end-to-end", () => {
 
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-full-turn",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});
@@ -275,7 +271,6 @@ describe("declarative hooks end-to-end", () => {
 
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-blocked",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});
@@ -379,7 +374,6 @@ describe("declarative hooks end-to-end", () => {
 
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-tools",
-			mode: "code",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});
@@ -501,7 +495,6 @@ describe("declarative hooks end-to-end", () => {
 
 		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
 			id: "e2e-session-stop",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			permissionPreset: "full",
 		});

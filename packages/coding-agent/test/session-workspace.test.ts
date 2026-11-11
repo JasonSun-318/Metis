@@ -141,7 +141,6 @@ describe("managed session workspaces", () => {
 		writeFileSync(join(workspace.cwd, "state.txt"), "copied");
 		const source = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, agentDir), {
 			id: "source",
-			mode: "chat",
 			cwdOrigin: "managed",
 		});
 		const leafId = source.appendMessage({ role: "user", content: "hello", timestamp: 1 });
@@ -157,11 +156,10 @@ describe("managed session workspaces", () => {
 	});
 
 	it("keeps a proven managed workspace retryable when Trash is unavailable", async () => {
-		const workspace = resolveNewSessionWorkspace({ id: "owned", mode: "chat", hostCwd, agentDir });
+		const workspace = resolveNewSessionWorkspace({ id: "owned", hostCwd, agentDir });
 		writeFileSync(join(workspace.cwd, "owned.txt"), "owned");
 		const session = SessionManager.create(workspace.cwd, getDefaultSessionDir(workspace.cwd, agentDir), {
 			id: "owned",
-			mode: "chat",
 			cwdOrigin: "managed",
 		});
 		const sessionFile = session.getSessionFile()!;
@@ -200,7 +198,6 @@ describe("managed session workspaces", () => {
 		writeFileSync(sentinel, "keep");
 		const session = SessionManager.create(external, join(root, "sessions"), {
 			id: "external",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 		});
 		const sessionFile = session.getSessionFile()!;
@@ -231,7 +228,6 @@ describe("managed session workspaces", () => {
 		writeFileSync(sentinel, "keep");
 		const session = SessionManager.create(forgedWorkspace, join(root, "sessions"), {
 			id: "forged",
-			mode: "chat",
 			cwdOrigin: "managed",
 		});
 		const sessionFile = session.getSessionFile()!;

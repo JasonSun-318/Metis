@@ -47,7 +47,6 @@ describe("dream run", () => {
 				id,
 				timestamp: "2026-01-01T00:00:00.000Z",
 				cwd,
-				mode: "code",
 				permissionPreset: "auto",
 			},
 			{

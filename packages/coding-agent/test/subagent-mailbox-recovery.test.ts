@@ -79,7 +79,6 @@ async function createFixture(options: { readonly prefillMailbox?: number } = {})
 	mkdirSync(agentDir);
 	const rootSessionManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: "full",
 	});
 	for (let index = 0; index < (options.prefillMailbox ?? 0); index += 1) {

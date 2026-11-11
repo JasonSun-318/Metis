@@ -110,7 +110,6 @@ describe("v13 agent control records", () => {
 			id: "parent-v10",
 			timestamp: new Date(0).toISOString(),
 			cwd: root,
-			mode: "code",
 		};
 		writeFileSync(ordinaryPath, `${JSON.stringify(header)}\n`);
 		const migrated = SessionManager.open(ordinaryPath);
@@ -224,7 +223,6 @@ describe("v13 agent control records", () => {
 			id: "code-session-1",
 			timestamp: new Date(0).toISOString(),
 			cwd: root,
-			mode: "code",
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		};
@@ -240,10 +238,7 @@ describe("v13 agent control records", () => {
 		expect(() => SessionManager.open(badPath)).toThrow("Directory control entries require a v8 session header");
 
 		const legacyModePath = join(root, "legacy-mode-directory.jsonl");
-		writeFileSync(
-			legacyModePath,
-			`${JSON.stringify({ ...header, version: 8, mode: "chat" })}\n${JSON.stringify(control)}\n`,
-		);
+		writeFileSync(legacyModePath, `${JSON.stringify({ ...header, version: 8 })}\n${JSON.stringify(control)}\n`);
 		const legacyModeManager = SessionManager.open(legacyModePath);
 		expect(legacyModeManager.getHeader()?.version).toBeGreaterThanOrEqual(12);
 		legacyModeManager.close();
@@ -320,7 +315,6 @@ describe("v15 agent conversations", () => {
 			version: 14,
 			timestamp: new Date(0).toISOString(),
 			cwd: root,
-			mode: "chat",
 			permissionPreset: "ask",
 		};
 		const bytes = `${JSON.stringify(header)}\n`;

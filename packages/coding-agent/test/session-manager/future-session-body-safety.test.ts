@@ -30,7 +30,6 @@ describe("future session body safety", () => {
 				id: "11111111-1111-4111-8111-111111111111",
 				timestamp: "2026-10-28T12:00:00.000Z",
 				cwd: directory,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				permissionPreset: "ask",
 			})}\n${body}`,
@@ -70,7 +69,6 @@ describe("future session body safety", () => {
 				id: "11111111-1111-4111-8111-111111111111",
 				timestamp: "2026-10-28T12:00:00.000Z",
 				cwd: directory,
-				mode: "code",
 				cwdOrigin: "user-selected",
 				permissionPreset: "ask",
 			};

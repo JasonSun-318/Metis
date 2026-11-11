@@ -25,7 +25,6 @@ describe("scheduled session metadata", () => {
 		const { cwd, sessionDir } = fixture();
 		const manager = SessionManager.create(cwd, sessionDir, {
 			id: "session-scheduled",
-			mode: "chat",
 			cwdOrigin: "user-selected",
 			scheduled: { taskId: "task-1", runId: "run-1" },
 		});
@@ -54,7 +53,6 @@ describe("scheduled session metadata", () => {
 			id: "session-invalid",
 			timestamp: "2026-07-26T00:00:00Z",
 			cwd,
-			mode: "code",
 			cwdOrigin: "user-selected",
 			permissionPreset: "ask",
 		};

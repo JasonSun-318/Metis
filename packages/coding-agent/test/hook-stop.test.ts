@@ -97,7 +97,7 @@ describe("command-v1 Stop hook continuation", () => {
 			},
 		};
 
-		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), { mode: "code" });
+		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), {});
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 			const services = await createAgentSessionServices({
 				...runtimeOptions,

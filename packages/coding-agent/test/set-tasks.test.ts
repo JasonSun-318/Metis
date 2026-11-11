@@ -155,7 +155,6 @@ describe("set_tasks", () => {
 				},
 			});
 			const sessionManager = SessionManager.inMemory(process.cwd(), {
-				mode: "code",
 				...(agent
 					? {
 							id: "child-agent",

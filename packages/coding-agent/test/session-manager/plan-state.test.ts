@@ -102,7 +102,7 @@ describe("SessionManager plan state", () => {
 	});
 
 	it("persists collaboration mode and proposals outside the transcript", () => {
-		const session = SessionManager.inMemory(directory, { mode: "chat" });
+		const session = SessionManager.inMemory(directory, {});
 		const userId = session.appendMessage({ role: "user", content: "explore", timestamp: 1 });
 		expect(userId).toBeTruthy();
 		session.setCollaborationMode("plan");
@@ -118,7 +118,7 @@ describe("SessionManager plan state", () => {
 	});
 
 	it("rejects oversized markdown and stale plan actions", () => {
-		const session = SessionManager.inMemory(directory, { mode: "chat" });
+		const session = SessionManager.inMemory(directory, {});
 		session.appendMessage({ role: "user", content: "explore", timestamp: 1 });
 		session.setCollaborationMode("plan");
 		expect(() => session.submitPlan({ title: "x", markdown: "a".repeat(65_537) })).toThrow(/too large/iu);
@@ -128,7 +128,7 @@ describe("SessionManager plan state", () => {
 	});
 
 	it("blocks leaving Plan mode while a proposal is current", () => {
-		const session = SessionManager.inMemory(directory, { mode: "chat" });
+		const session = SessionManager.inMemory(directory, {});
 		session.appendMessage({ role: "user", content: "explore", timestamp: 1 });
 		session.setCollaborationMode("plan");
 		session.submitPlan({ title: "Plan", markdown: "# Plan" });
@@ -136,7 +136,7 @@ describe("SessionManager plan state", () => {
 		session.close();
 	});
 	it("requires Plan mode and a non-empty proposal, and restores the exact current revision from disk", async () => {
-		const session = SessionManager.create(directory, join(directory, "sessions"), { mode: "chat" });
+		const session = SessionManager.create(directory, join(directory, "sessions"), {});
 		const tool = createSubmitPlanToolDefinition((input) => session.submitPlan(input));
 		session.appendMessage({ role: "user", content: "Plan this change", timestamp: 1 });
 		await expect(
@@ -165,7 +165,7 @@ describe("SessionManager plan state", () => {
 	});
 
 	it("accepts and cancels the current proposal", () => {
-		const session = SessionManager.inMemory(directory, { mode: "chat" });
+		const session = SessionManager.inMemory(directory, {});
 		session.appendMessage({ role: "user", content: "explore", timestamp: 1 });
 		session.setCollaborationMode("plan");
 		const plan = session.submitPlan({ title: "Plan", markdown: "# Plan" });

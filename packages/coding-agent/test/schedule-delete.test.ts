@@ -36,7 +36,6 @@ function fixture() {
 	writeFileSync(join(additionalWorkspaceCwd, "user-file.txt"), "keep");
 	const session = SessionManager.create(workspace, getDefaultSessionDir(workspace, agentDir), {
 		id: sessionId,
-		mode: "chat",
 		cwdOrigin: "managed",
 		scheduled: { taskId, runId },
 	});
@@ -162,7 +161,6 @@ describe("scheduled task aggregate Trash", () => {
 			getDefaultSessionDir(value.workspace, value.agentDir),
 			{
 				id: forgedSessionId,
-				mode: "chat",
 				cwdOrigin: "managed",
 				scheduled: { taskId: value.task.id, runId: "10000000-0000-4000-8000-000000000006" },
 			},

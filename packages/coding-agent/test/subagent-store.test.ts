@@ -200,7 +200,6 @@ describe("AgentStore", () => {
 				id: agentConfig.agentId,
 				timestamp: "2026-08-20T00:00:00.000Z",
 				cwd: agentConfig.cwd,
-				mode: "code",
 				permissionMode: "ask",
 				agent: { ...legacyAgent, permissionMode: "ask" },
 			})}\n`,

@@ -105,7 +105,6 @@ function fixture() {
 	writeFileSync(join(additionalWorkspaceCwd, "user-file.txt"), "keep");
 	const session = SessionManager.create(workspace, getDefaultSessionDir(workspace, agentDir), {
 		id: sessionId,
-		mode: "chat",
 		cwdOrigin: "managed",
 		scheduled: { taskId, runId },
 	});

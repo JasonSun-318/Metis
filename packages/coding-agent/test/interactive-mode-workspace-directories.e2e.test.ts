@@ -86,7 +86,7 @@ describe("Code additional directories E2E", () => {
 
 		try {
 			const approvals: PermissionApprovalRequest[] = [];
-			manager = SessionManager.create(primary, sessions, { mode: "code", permissionPreset: "ask" });
+			manager = SessionManager.create(primary, sessions, { permissionPreset: "ask" });
 			const sessionFile = manager.getSessionFile()!;
 			harness = await createHarness({
 				sessionManager: manager,

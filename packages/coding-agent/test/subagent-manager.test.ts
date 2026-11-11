@@ -231,7 +231,6 @@ function setup(options: SetupOptions = {}): Harness {
 	mkdirSync(cwd);
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
-		mode: "code",
 		permissionPreset: options.parentPermissionPreset ?? "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -240,7 +239,6 @@ function setup(options: SetupOptions = {}): Harness {
 	const parent = {
 		sessionManager: parentManager,
 		messages: [],
-		mode: "code",
 		thinkingLevel: options.parentThinkingLevel ?? "high",
 		model,
 		modelRegistry: {
