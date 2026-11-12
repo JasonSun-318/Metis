@@ -35,8 +35,6 @@ export function validateSessionHeader(record: Record<string, unknown>, filePath:
 		"id",
 		"timestamp",
 		"cwd",
-		// Retired chat/code classification; accepted until journals are migrated.
-		"mode",
 		"cwdOrigin",
 		"permissionPreset",
 		"parentSession",

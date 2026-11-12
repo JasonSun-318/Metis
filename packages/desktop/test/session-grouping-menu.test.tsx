@@ -193,7 +193,7 @@ function sidebarProps(store: AppStore): ComponentProps<typeof SessionSidebar> {
 describe("sidebar status grouping", () => {
 	it.each(["full", "reduced"])("preserves focus and scroll through status changes with %s motion", async (motion) => {
 		document.documentElement.dataset.motion = motion;
-		localStorage.setItem("metis.session-grouping.v1", '{"chat":"status","code":"date"}');
+		localStorage.setItem("metis.session-grouping.v2", "status");
 		const store = new AppStore();
 		const update = (value: SessionSummary) =>
 			store.setSessions({ sessions: [value, session("idle")], nextAfterSessionId: null });
@@ -219,11 +219,11 @@ describe("sidebar status grouping", () => {
 		await view.render(<SessionSidebar {...props} state={store.getSnapshot()} />);
 		expect(view.container.querySelector('[aria-label="moving"]')).toBe(moved);
 		expect(document.activeElement).toBe(moved);
-		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"status","code":"date"}');
+		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("status");
 	});
 
 	it("keeps pinned and scheduled sessions outside state sections and retains whole projects in project mode", async () => {
-		localStorage.setItem("metis.session-grouping.v1", '{"chat":"status","code":"project"}');
+		localStorage.setItem("metis.session-grouping.v2", "status");
 		const store = new AppStore();
 		store.setSessions({
 			sessions: [

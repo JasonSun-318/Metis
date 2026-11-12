@@ -45,7 +45,7 @@ beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	localStorage.clear();
 	localStorage.setItem("metis.work-mode.v1", "code");
-	localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "status" }));
+	localStorage.setItem("metis.session-grouping.v2", "status");
 	await setLocale("en");
 });
 afterEach(async () => {

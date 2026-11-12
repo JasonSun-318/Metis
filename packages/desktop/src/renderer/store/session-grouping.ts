@@ -1,10 +1,9 @@
 import type { SessionSummary } from "@metis/app-protocol";
 import type { AgentActivity } from "../agent-activity.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
-import { loadWorkMode, type WorkMode } from "../work-mode.ts";
+import type { WorkMode } from "../work-mode.ts";
 import type { AppStoreSnapshot } from "./app-store.ts";
 
-const SESSION_GROUPING_KEY = "metis.session-grouping.v1";
 const DAY_MS = 86_400_000;
 
 export type SessionGroupBy = "date" | "project" | "status" | "unread" | "none";
@@ -24,12 +23,8 @@ function isSessionGroupBy(value: unknown): value is SessionGroupBy {
 
 export function loadSessionGroupingPreferences(storage: Pick<Storage, "getItem">): SessionGroupingPreferences {
 	try {
-		const unified = storage.getItem("metis.session-grouping.v2");
-		if (isSessionGroupBy(unified)) return { chat: unified, code: unified };
-		const value = JSON.parse(storage.getItem(SESSION_GROUPING_KEY) ?? "null") as Record<string, unknown> | null;
-		const grouping = value?.[loadWorkMode(storage)];
-		const selected = isSessionGroupBy(grouping) ? grouping : "date";
-		return { chat: selected, code: selected };
+		const stored = storage.getItem("metis.session-grouping.v2");
+		return isSessionGroupBy(stored) ? { chat: stored, code: stored } : DEFAULT_SESSION_GROUPING;
 	} catch {
 		return DEFAULT_SESSION_GROUPING;
 	}

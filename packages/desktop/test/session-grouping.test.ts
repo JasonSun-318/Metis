@@ -83,10 +83,9 @@ describe("session grouping", () => {
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "unread", code: "unread" });
 		saveSessionGroupingPreferences(storage, { chat: "status", code: "project" });
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "status", code: "status" });
-		values.delete("metis.session-grouping.v2");
-		values.set("metis.session-grouping.v1", '{"chat":"broken","code":"project"}');
-		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "date", code: "date" });
-		values.set("metis.session-grouping.v1", "{");
+		values.set("metis.session-grouping.v2", "broken");
+		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
+		values.set("metis.session-grouping.v2", "{");
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
 	});
 

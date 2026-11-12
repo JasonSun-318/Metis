@@ -155,30 +155,17 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(workflow.getSnapshot().mode).toBe("chat");
 	});
 
-	it("persists the upgraded work mode before opening a conversation from the other legacy list", async () => {
-		const old = summary("11111111-1111-4111-8111-111111111111", true);
-		localStorage.setItem("metis.activeSessionId.code", old.sessionId);
-		localStorage.setItem(
-			"metis.workspace-layout.v1",
-			JSON.stringify({
-				version: 1,
-				activePaneId: "pane",
-				nextNumber: 2,
-				panes: [{ id: "pane", row: 0, activeIndex: 0, chats: [{ sessionId: old.sessionId }] }],
-			}),
-		);
-		localStorage.setItem("metis.session-grouping.v1", JSON.stringify({ chat: "date", code: "project" }));
-		const { api, workflow } = harness([old, summary("other")]);
+	it("opens the remembered active conversation for the current UI work mode", async () => {
+		const remembered = summary("11111111-1111-4111-8111-111111111111", true);
+		localStorage.setItem("metis.work-mode.v1", "code");
+		localStorage.setItem("metis.active-conversation.v1", remembered.sessionId);
+		const { api, workflow } = harness([remembered, summary("other")]);
 		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) =>
-			snapshot(sessionId, sessionId === old.sessionId),
+			snapshot(sessionId, sessionId === remembered.sessionId),
 		);
 		await workflow.start();
 		expect(workflow.getSnapshot().mode).toBe("code");
-		await workflow.openVisibleSession("other");
-		// Workspace persistence now points at the Chat-backed conversation.
-		localStorage.removeItem("metis.workspace-layout.v1");
-		expect(harness().workflow.getSnapshot().mode).toBe("code");
-		expect(localStorage.getItem("metis.session-grouping.v2")).toBe("project");
+		expect(api.openSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: remembered.sessionId }));
 		workflow.dispose();
 	});
 

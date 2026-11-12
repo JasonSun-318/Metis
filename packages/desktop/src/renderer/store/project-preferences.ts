@@ -1,7 +1,4 @@
-import { loadWorkMode } from "../work-mode.ts";
-
 const STORAGE_KEY = "metis.projectPreferences.v3";
-const LEGACY_STORAGE_KEYS = ["metis.projectPreferences.v2", "metis.projectPreferences.v1"] as const;
 const MAX_ALIAS_CODE_POINTS = 80;
 
 export interface ProjectPreference {
@@ -22,11 +19,10 @@ function normalizeAlias(alias: string): string | undefined {
 	return normalized || undefined;
 }
 
-function parsePreference(value: unknown, allowMode: boolean): ProjectPreference | undefined {
+function parsePreference(value: unknown): ProjectPreference | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const entry = value as Record<string, unknown>;
-	const allowedKeys = allowMode ? ["mode", "cwd", "alias", "pinned"] : ["cwd", "alias", "pinned"];
-	if (Object.keys(entry).some((key) => !allowedKeys.includes(key))) return undefined;
+	if (Object.keys(entry).some((key) => !["cwd", "alias", "pinned"].includes(key))) return undefined;
 	if (typeof entry.cwd !== "string" || !entry.cwd.trim()) return undefined;
 	if (typeof entry.pinned !== "boolean" || (entry.alias !== undefined && typeof entry.alias !== "string")) {
 		return undefined;
@@ -44,32 +40,6 @@ function parseDocument(raw: string): readonly unknown[] | undefined {
 	return record.entries;
 }
 
-/**
- * Legacy v2 entries may carry a mode. They are merged by cwd, preferring the
- * entry of the current UI work mode so a user's existing alias/pin survives the
- * schema change.
- */
-function loadLegacyPreferences(storage: Pick<Storage, "getItem">): ProjectPreferenceMap {
-	const preferredMode = loadWorkMode(storage);
-	for (const key of LEGACY_STORAGE_KEYS) {
-		const raw = storage.getItem(key);
-		if (raw === null) continue;
-		const entries = parseDocument(raw);
-		if (!entries) continue;
-		const preferences = new Map<string, ProjectPreference>();
-		const ranked = entries
-			.map((value) => ({
-				preference: parsePreference(value, true),
-				mode: (value as Record<string, unknown> | null)?.mode,
-			}))
-			.filter((entry): entry is { preference: ProjectPreference; mode: unknown } => entry.preference !== undefined)
-			.sort((left, right) => Number(left.mode === preferredMode) - Number(right.mode === preferredMode));
-		for (const { preference } of ranked) preferences.set(preference.cwd, preference);
-		return preferences;
-	}
-	return new Map();
-}
-
 export function loadProjectPreferences(storage: Pick<Storage, "getItem">): ProjectPreferenceMap {
 	try {
 		const raw = storage.getItem(STORAGE_KEY);
@@ -77,12 +47,12 @@ export function loadProjectPreferences(storage: Pick<Storage, "getItem">): Proje
 		if (entries) {
 			const preferences = new Map<string, ProjectPreference>();
 			for (const value of entries) {
-				const preference = parsePreference(value, false);
+				const preference = parsePreference(value);
 				if (preference) preferences.set(preference.cwd, preference);
 			}
 			return preferences;
 		}
-		return loadLegacyPreferences(storage);
+		return new Map();
 	} catch {
 		return new Map();
 	}

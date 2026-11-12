@@ -324,10 +324,7 @@ function createHarness(
 		updateState?: DesktopUpdateState;
 	} = {},
 ) {
-	localStorage.setItem(
-		"metis.session-grouping.v1",
-		localStorage.getItem("metis.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
-	);
+	localStorage.setItem("metis.session-grouping.v2", localStorage.getItem("metis.session-grouping.v2") ?? "project");
 	const chat = session("chat-existing", "/work/chat-project", "Chat project task");
 	const code = session("code-existing", "/work/code-project", "Code project task");
 	let sessions = options.sessions ? [...options.sessions] : [chat, code];
@@ -1280,7 +1277,7 @@ describe("Chat desktop shell", () => {
 			{ ...session("code-today", "/work/shared", "Code today"), updatedAt: now.toISOString() },
 		];
 		const { api } = createHarness({ sessions });
-		localStorage.removeItem("metis.session-grouping.v1");
+		localStorage.removeItem("metis.session-grouping.v2");
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -1329,7 +1326,7 @@ describe("Chat desktop shell", () => {
 
 	it("keeps session and project action menus outside clipping sidebar containers", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("metis.session-grouping.v1", '{"chat":"date","code":"date"}');
+		localStorage.setItem("metis.session-grouping.v2", "date");
 		const bottom = {
 			bottom: 754,
 			height: 24,
@@ -1795,21 +1792,15 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
-	it("reads legacy mode-keyed entries by cwd while ignoring the mode", () => {
-		localStorage.setItem("metis.work-mode.v1", "code");
+	it("ignores retired mode-keyed project preference documents", () => {
 		localStorage.setItem(
 			"metis.projectPreferences.v2",
 			JSON.stringify({
 				version: 1,
-				entries: [
-					{ mode: "chat", cwd: "/work/a", alias: "Chat alias", pinned: false },
-					{ mode: "code", cwd: "/work/a", alias: "Code alias", pinned: true },
-				],
+				entries: [{ mode: "code", cwd: "/work/a", alias: "Code alias", pinned: true }],
 			}),
 		);
-		expect([...loadProjectPreferences(localStorage).values()]).toEqual([
-			{ cwd: "/work/a", alias: "Code alias", pinned: true },
-		]);
+		expect(loadProjectPreferences(localStorage).size).toBe(0);
 	});
 
 	it("shares aliases, clears blank aliases, and stably partitions pinned projects", () => {

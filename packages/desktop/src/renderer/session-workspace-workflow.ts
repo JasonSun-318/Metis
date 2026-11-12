@@ -17,14 +17,7 @@ import {
 import { loadSessionGroupingPreferences, saveSessionGroupingPreferences } from "./store/session-grouping.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "./store/session-pins.ts";
 
-import {
-	ACTIVE_CONVERSATION_KEY,
-	legacyActiveConversation,
-	loadWorkMode,
-	WORK_MODE_KEY,
-	WORK_MODES,
-	type WorkMode,
-} from "./work-mode.ts";
+import { ACTIVE_CONVERSATION_KEY, loadWorkMode, WORK_MODE_KEY, WORK_MODES, type WorkMode } from "./work-mode.ts";
 
 type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinkingSelection">> &
 	Pick<
@@ -1345,9 +1338,7 @@ export class SessionWorkspaceWorkflow {
 	private readRememberedSession(): string | null {
 		try {
 			return (
-				this.storage.getItem(ACTIVE_CONVERSATION_KEY) ??
-				legacyActiveConversation(this.storage) ??
-				this.storage.getItem(activeSessionKey(this.state.mode))
+				this.storage.getItem(ACTIVE_CONVERSATION_KEY) ?? this.storage.getItem(activeSessionKey(this.state.mode))
 			);
 		} catch (cause) {
 			this.commit({ failure: failure("read-session-preference", cause) });

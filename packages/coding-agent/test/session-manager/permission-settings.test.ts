@@ -202,26 +202,21 @@ describe("SessionManager permission settings", () => {
 	});
 
 	it("derives Auto when older session formats have no permission field", () => {
-		for (const [id, mode] of [
-			["older-chat", "chat"],
-			["older-code", undefined],
-		] as const) {
-			const path = join(directory, `${id}.jsonl`);
-			writeRecords(path, [
-				{
-					type: "session",
-					version: 5,
-					id,
-					timestamp,
-					cwd: directory,
-					...(mode ? { mode } : {}),
-				},
-			]);
-			const session = SessionManager.open(path, directory);
-			expect(session.getPermissionPreset()).toBe("auto");
-			expect(session.getHeader()).toMatchObject({ permissionPreset: "auto" });
-			session.close();
-		}
+		const id = "older-session";
+		const path = join(directory, `${id}.jsonl`);
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 5,
+				id,
+				timestamp,
+				cwd: directory,
+			},
+		]);
+		const session = SessionManager.open(path, directory);
+		expect(session.getPermissionPreset()).toBe("auto");
+		expect(session.getHeader()).toMatchObject({ permissionPreset: "auto" });
+		session.close();
 	});
 
 	it("opens and atomically rewrites a v13 permission journal as v14", () => {
