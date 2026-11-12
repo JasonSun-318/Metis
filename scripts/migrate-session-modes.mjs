@@ -13,8 +13,9 @@
  *   node scripts/migrate-session-modes.mjs --clean-leases     # drop stale mode locks
  *
  * Session journals live under `<agent-dir>/sessions/`; archived journals use
- * `<agent-dir>/sessions/.archive/`. Subagent journals under `subagents/` and
- * `agents/` are left untouched.
+ * `<agent-dir>/sessions/.archive/`. Agent-conversation journals under
+ * `<agent-dir>/agents/` are migrated too; quarantined and backup journals are
+ * outside these roots and are left untouched.
  */
 import { createHash } from "node:crypto";
 import {
@@ -63,12 +64,14 @@ function walkDirectories(directory, visit) {
 	}
 }
 
-/** Every session journal below the sessions root, including the archive. */
+/** Session and agent-conversation journals that may still carry the retired mode field. */
 export function findSessionJournals(agentDir) {
 	const files = [];
-	walkFiles(join(agentDir, "sessions"), (path, name) => {
-		if (name.endsWith(".jsonl")) files.push(path);
-	});
+	for (const root of ["sessions", "agents"]) {
+		walkFiles(join(agentDir, root), (path, name) => {
+			if (name.endsWith(".jsonl")) files.push(path);
+		});
+	}
 	return files.sort();
 }
 
