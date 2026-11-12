@@ -259,6 +259,7 @@ export {
 	memoryScopeKey,
 	memoryTargetId,
 	memoryUsageKey,
+	migrateLegacySessionModes,
 	migrateSessionDisplayMetadata,
 	moveSessionFileWithLease,
 	OFFICIAL_MARKET_ID,

@@ -13,6 +13,7 @@ import {
 	createScheduledRunExecutor,
 	ensureVaultLayout,
 	ModelRegistry,
+	migrateLegacySessionModes,
 	pruneStaleSessionWorkDirs,
 	ScheduleManager,
 	type ScheduleManagerOptions,
@@ -172,6 +173,7 @@ export class AppServer {
 	}
 
 	static async create(options: AppServerOptions): Promise<AppServer> {
+		migrateLegacySessionModes(options.agentDir);
 		SessionManager.recoverInterruptedProjectTrash(options.agentDir);
 		ensureVaultLayout(options.agentDir);
 		pruneStaleSessionWorkDirs(options.agentDir);

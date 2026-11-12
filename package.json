@@ -10,8 +10,6 @@
 	"scripts": {
 		"clean": "npm run clean --workspaces",
 		"clean:artifacts": "node scripts/clean-artifacts.mjs",
-		"migrate:session-modes": "node scripts/migrate-session-modes.mjs",
-		"migrate:metis-data": "node scripts/migrate-metis-data.mjs",
 		"build": "node scripts/build-packages.mjs",
 		"check": "node scripts/run-checks.mjs",
 		"check:biome": "biome check --error-on-warnings .",

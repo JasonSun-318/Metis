@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./components/App.tsx";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.tsx";
 import "./i18n.ts";
+import { migrateLegacyDesktopPreferences } from "./preferences-migration.ts";
 import { AppStore } from "./store/app-store.ts";
 import { applyThemeToDocument, loadTheme } from "./theme.ts";
 import { installFocusModality } from "./ui/focus-modality.ts";
@@ -14,6 +15,7 @@ import "./styles/markdown.css";
 import "./styles/markdown-embeds.css";
 import "katex/dist/katex.min.css";
 
+migrateLegacyDesktopPreferences();
 installFocusModality();
 
 // Apply the persisted theme before the first paint to avoid a flash.

@@ -31,8 +31,6 @@
 			"scripts/run-checks.mjs",
 			"scripts/build-packages.mjs",
 			"scripts/clean-artifacts.mjs",
-			"scripts/migrate-session-modes.mjs",
-			"scripts/migrate-metis-data.mjs",
 			"scripts/verify-windows.mjs",
 			"packages/desktop/scripts/app-server-runtime-stamp.mjs",
 			"packages/desktop/scripts/check-types.mjs",

@@ -718,6 +718,8 @@ export {
 	type ThinkingLevelChangeEntry,
 	type WorkspaceDirectoryChange,
 } from "./core/session-manager.ts";
+export type { SessionModeMigrationResult } from "./core/session-mode-migration.ts";
+export { migrateLegacySessionModes } from "./core/session-mode-migration.ts";
 export {
 	getManagedWorkspaceDir,
 	getOwnedManagedWorkspace,
