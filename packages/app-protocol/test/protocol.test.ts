@@ -309,6 +309,7 @@ const scheduleCases = [
 			sessionCount: 2,
 			daily: Array.from({ length: 7 }, (_, index) => ({
 				date: `2026-08-0${index + 2}`,
+				totalTokens: index === 6 ? 12 : 0,
 				inputTokens: index === 6 ? 7 : 0,
 				outputTokens: index === 6 ? 5 : 0,
 				cacheReadTokens: 0,

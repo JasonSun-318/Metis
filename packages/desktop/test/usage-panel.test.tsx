@@ -11,6 +11,7 @@ import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date(Date.UTC(2026, 7, 8 - rangeDays + index + 1)).toISOString().slice(0, 10),
+		totalTokens: index === rangeDays - 1 ? 100 : 0,
 		inputTokens: index === rangeDays - 1 ? 60 : 0,
 		outputTokens: index === rangeDays - 1 ? 40 : 0,
 		cacheReadTokens: 0,

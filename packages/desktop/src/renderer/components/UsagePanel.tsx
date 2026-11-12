@@ -16,7 +16,7 @@ function usageCacheKey(rangeDays: UsageRangeDays): string {
 }
 
 function dayTotal(day: UsageDailyView): number {
-	return day.inputTokens + day.outputTokens + day.cacheReadTokens + day.cacheWriteTokens;
+	return day.totalTokens;
 }
 
 export function UsagePanel({

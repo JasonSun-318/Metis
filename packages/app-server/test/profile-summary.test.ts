@@ -192,6 +192,7 @@ describe("profile summary", () => {
 		expect(summary.daily.slice(-2)).toEqual([
 			{
 				date: "2026-08-07",
+				totalTokens: 20,
 				inputTokens: 20,
 				outputTokens: 0,
 				cacheReadTokens: 0,
@@ -199,6 +200,7 @@ describe("profile summary", () => {
 			},
 			{
 				date: "2026-08-08",
+				totalTokens: 30,
 				inputTokens: 30,
 				outputTokens: 0,
 				cacheReadTokens: 0,

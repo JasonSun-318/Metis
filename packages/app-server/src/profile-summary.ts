@@ -169,6 +169,7 @@ export function buildUsageSummary(
 	const firstDay = todayDay - rangeDays + 1;
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date((firstDay + index) * DAY_MS).toISOString().slice(0, 10),
+		totalTokens: 0,
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheReadTokens: 0,
@@ -194,6 +195,7 @@ export function buildUsageSummary(
 			outputTokens = safeAdd(outputTokens, usage.output);
 			cacheReadTokens = safeAdd(cacheReadTokens, usage.cacheRead);
 			cacheWriteTokens = safeAdd(cacheWriteTokens, usage.cacheWrite);
+			day.totalTokens = safeAdd(day.totalTokens, usage.total);
 			day.inputTokens = safeAdd(day.inputTokens, usage.input);
 			day.outputTokens = safeAdd(day.outputTokens, usage.output);
 			day.cacheReadTokens = safeAdd(day.cacheReadTokens, usage.cacheRead);
